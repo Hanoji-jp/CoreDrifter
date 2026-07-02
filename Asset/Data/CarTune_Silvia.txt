@@ -54,3 +54,6 @@ outlineWidth 0.04
 outlineColR 0
 outlineColG 0
 outlineColB 0
+smokeColR 1
+smokeColG 1
+smokeColB 1

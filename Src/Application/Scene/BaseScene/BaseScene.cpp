@@ -91,6 +91,11 @@ void BaseScene::Draw()
 	KdShaderManager::Instance().m_StandardShader.EndLit();
 
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
+	// 不透明シーンへ画面エッジ検出アウトラインを適用(トゥーン輪郭)
+	// この後に描くエフェクト・光源オブジェクトには線が乗らない
+	KdShaderManager::Instance().m_postProcessShader.ApplySceneOutline();
+
+	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
 	// 陰影のないオブジェクト(エフェクトなど)はBeginとEndの間にまとめてDrawする
 	KdShaderManager::Instance().m_StandardShader.BeginUnLit();
 	{

@@ -30,9 +30,14 @@ static const float PI = 3.14159265358979f;
 // リムライト（縁光）：シルエットを光で縁取り、宇宙の浮遊感を出す
 static const float k_RimPower    = 3.0f;   // 縁の鋭さ（大きいほど縁だけ光る）
 static const float k_RimStrength = 0.7f;   // 縁光の強さ
+// トゥーンリム：縁光をくっきりした1本の帯にする（NFS Unbound風の輪郭発光）
+static const float k_RimThreshold = 0.35f; // この値を超えた縁だけ光る
+static const float k_RimSoftness  = 0.05f; // 帯の境界の柔らかさ
 // 擬似環境反射（スペキュラIBL近似）：滑らかな面に宇宙が映り込む
 static const float k_EnvReflectUpMul   = 4.0f;  // 上方向（星空側）の反射の明るさ倍率
 static const float k_EnvReflectDownMul = 0.8f;  // 下方向（暗い宇宙）の反射の明るさ倍率
+// トゥーン反射：映り込みの明るさを数段に量子化してアニメ調のバンドにする
+static const float k_EnvToonSteps = 3.0f;   // 反射の段数
 
 //=============================================================
 // トーンマッピング / 色変換
@@ -500,13 +505,22 @@ float4 main(VSOutput In) : SV_Target0
 		// 粗い面は反射をぼかす＝弱める　金属ほど強く反射
 		float  glossy   = (1.0f - roughness) * (0.4f + 0.6f * metallic);
 		// 影の中では反射も弱める（影が反射光で洗い流されるのを防ぐ）
-		outColor += envColor * fresnel * glossy * lerp(0.4f, 1.0f, shadow);
+		float3 envRefl = envColor * fresnel * glossy * lerp(0.4f, 1.0f, shadow);
+
+		// トゥーン化：反射の明るさを数段に量子化（滑らかなグラデ→アニメ調のバンド）
+		float  envLum  = dot(envRefl, float3(0.299f, 0.587f, 0.114f));
+		float  toonLum = floor(saturate(envLum) * k_EnvToonSteps + 0.5f) / k_EnvToonSteps;
+		envRefl *= toonLum / max(envLum, 1e-4f);
+
+		outColor += envRefl;
 	}
 
 	// ---- リムライト（縁光）：宇宙空間の浮遊感・立体感を強調 ----
 	{
 		float  NdotV = saturate(dot(wN, vCam));
 		float  rim   = pow(1.0f - NdotV, k_RimPower);
+		// トゥーン化：なだらかなグラデではなく、しきい値でくっきりした1本の帯にする
+		rim = smoothstep(k_RimThreshold - k_RimSoftness, k_RimThreshold + k_RimSoftness, rim);
 		// 平行光の当たっている側ほど縁が強く光る（逆光リムの自然さ）
 		float  backLit = saturate(dot(wN, normalize(-g_DL_Dir))) * 0.5f + 0.5f;
 		// 太陽光由来の縁光なので、影の中では消す（影を洗い流さない）

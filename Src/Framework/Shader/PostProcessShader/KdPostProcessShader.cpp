@@ -279,6 +279,8 @@ void KdPostProcessShader::PostEffectProcess()
 // 不透明シーンにだけアウトラインを適用（この後にエフェクトが上描きされる）
 void KdPostProcessShader::ApplySceneOutline()
 {
+	if (!m_sceneOutlineEnabled) { return; }
+
 	// 不透明シーン色＋深度からエッジ検出 → m_outlineRTPack へ
 	OutlineProcess(m_postEffectRTPack.m_RTTexture);
 	// 結果を現在のRT（=シーンRT m_postEffectRTPack）へ書き戻す

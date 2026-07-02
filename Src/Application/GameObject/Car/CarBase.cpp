@@ -16,6 +16,9 @@ void CarBase::Init()
 	// 保存済みの調整値があれば読み込む（コンストラクタの既定値を上書き）
 	LoadTuning();
 
+	// ドリフトスモーク初期化
+	m_smoke.Init();
+
 	// 見た目のライブ調整パネル
 	KdDebugGUI::Instance().SetPersistentGuiCallback([this]() { DrawTuningImGui(); });
 }
@@ -26,13 +29,42 @@ void CarBase::Update()
 	if (dt <= 0.0f) { return; }
 
 	//===== 入力 =====
+	// キーボード(デジタル)
 	float throttle = 0.0f;
 	if (GetAsyncKeyState('W') & 0x8000) { throttle += 1.0f; }
 	if (GetAsyncKeyState('S') & 0x8000) { throttle -= 1.0f; }
 	float steerInput = 0.0f;
 	if (GetAsyncKeyState('A') & 0x8000) { steerInput -= 1.0f; }
 	if (GetAsyncKeyState('D') & 0x8000) { steerInput += 1.0f; }
-	const bool handbrake = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+	bool handbrake = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+
+	// マニュアル操作(キーボード)：左Shift=クラッチ / E=シフトアップ / Q=シフトダウン
+	bool clutchPressed = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0;
+	const bool keyShiftUp   = (GetAsyncKeyState('E') & 0x8000) != 0;
+	const bool keyShiftDown = (GetAsyncKeyState('Q') & 0x8000) != 0;
+	bool shiftUp   = keyShiftUp   && !m_prevKeyShiftUp;    // 押した瞬間だけ
+	bool shiftDown = keyShiftDown && !m_prevKeyShiftDown;
+	m_prevKeyShiftUp   = keyShiftUp;
+	m_prevKeyShiftDown = keyShiftDown;
+
+	// コントローラー(接続時のみアナログ操作を加算)
+	//   左スティックX=ステア / RT=アクセル / LT=ブレーキ・後退
+	//   A=サイド / LB=クラッチ / RB=シフトアップ / X=シフトダウン
+	m_pad.Update();
+	if (m_pad.IsConnected())
+	{
+		const float padThrottle = m_pad.RightTrigger() - m_pad.LeftTrigger();
+		const float padSteer     = m_pad.LeftStickX();
+		if (fabsf(padThrottle) > 0.0f) { throttle += padThrottle; }
+		steerInput += padSteer;
+		if (m_pad.IsButtonDown(PadConst::HandbrakeButtons)) { handbrake = true; }
+		if (m_pad.IsButtonDown(PadConst::ClutchButton))     { clutchPressed = true; }
+		if (m_pad.IsButtonPressed(PadConst::ShiftUpButton))   { shiftUp   = true; }
+		if (m_pad.IsButtonPressed(PadConst::ShiftDownButton)) { shiftDown = true; }
+
+		throttle   = std::clamp(throttle,   -1.0f, 1.0f);
+		steerInput = std::clamp(steerInput, -1.0f, 1.0f);
+	}
 
 	//===== オートカウンター(CarX風)：横滑り方向へ前輪を自動で当て続ける =====
 	// 車体の横滑り角(sideslip)＝進行方向と車体前方の角度。ドリフト中は前輪が
@@ -87,28 +119,28 @@ void CarBase::Update()
 		}
 	}
 
-	//===== エンジン / ギア / クラッチ =====
-	// CarX挙動：サイドブレーキを引くとクラッチも切れる。エンジンは駆動系から切り離され、
-	// 回転を維持(アクセルで空ぶかし)したままリアタイヤをロックできる。
+	//===== エンジン / ギア / クラッチ（マニュアルトランスミッション）=====
+	// プレイヤーがギアとクラッチを手動操作する。サイドブレーキでもクラッチは切れる(CarX挙動)。
+	// クラッチが切れている間はエンジンが駆動系から切り離され、アクセルで空ぶかしできる。
 	{
 		const float radius = std::max(m_wheelH, 0.01f);
-		const float clutchTarget = handbrake ? 0.0f : 1.0f;   // サイド＝クラッチ切
+
+		// 手動シフト(押した瞬間のみ1段。クラッチの有無に関係なく入る＝簡易化)
+		if (shiftUp   && m_gear < CarConst::GearCount) { m_gear++; }
+		if (shiftDown && m_gear > 1)                   { m_gear--; }
+
+		// クラッチ切断＝サイドブレーキ or クラッチボタン
+		const bool clutchOut = handbrake || clutchPressed;
+		const float clutchTarget = clutchOut ? 0.0f : 1.0f;
 		m_clutch += (clutchTarget - m_clutch) * std::min(CarConst::ClutchSpeed * dt, 1.0f);
 
-		if (!handbrake)
+		if (!clutchOut)
 		{
-			// シフト判定は「車速由来のRPM」で行う(空転に釣られて誤シフトしない)
-			const float trNow  = CarConst::GearRatios[m_gear] * CarConst::FinalDrive;
-			const float rpmCar = fabsf(vLong0 / radius) * trNow * CarConst::RpmPerRadSec;
-			if (rpmCar > CarConst::ShiftUpRPM && m_gear < CarConst::GearCount)      { m_gear++; }
-			else if (rpmCar < CarConst::ShiftDownRPM && m_gear > 1)                 { m_gear--; }
-
-			// 接続中は駆動輪が地面と一緒に転がる＝車速より遅くはならない。
-			// (サイドで0にロックされていた駆動輪速を、解除直後に車速へ即戻す＝900に落ちない)
+			// クラッチ接続：駆動輪は地面と一緒に転がる＝車速より遅くならない
 			if (vLong0 > 0.0f && m_driveSpeed < vLong0) { m_driveSpeed = vLong0; }
 
-			// 表示RPMは駆動輪速由来(空転で吹け上がる)。クラッチ接続へ滑らかに追従＝
-			// サイド解除時に維持していた回転から急落しない。
+			// 表示RPMは駆動輪速×今のギア比由来。接続へ滑らかに追従。
+			// マニュアルなので、高いギアで低速だとRPMが落ち、低いギアで高速だと吹け上がる。
 			const float tr = CarConst::GearRatios[m_gear] * CarConst::FinalDrive;
 			const float wheelRPM = std::clamp(fabsf(m_driveSpeed / radius) * tr * CarConst::RpmPerRadSec,
 			                                  CarConst::IdleRPM, CarConst::MaxRPM);
@@ -119,17 +151,20 @@ void CarBase::Update()
 		}
 		else
 		{
-			// サイド中＝クラッチ切。ギア固定。クラッチが切れているので回転は下がらない。
-			// アクセルで上昇、離してもそのまま維持(空ぶかしで回転をキープできる)。
-			if (throttle > 0.0f) { m_engineRPM += CarConst::RevUp * throttle * dt; }
+			// クラッチ切断：ギア固定。アクセルで回転上昇。
+			// サイド中は回転維持(空ぶかしキープ)、クラッチだけ切ったときはアイドルへ緩やかに戻る。
+			if (throttle > 0.0f)   { m_engineRPM += CarConst::RevUp * throttle * dt; }
+			else if (!handbrake)   { m_engineRPM -= CarConst::RevDown * dt; }
 			m_engineRPM = std::clamp(m_engineRPM, CarConst::IdleRPM, CarConst::MaxRPM);
 		}
 
-		// トルクカーブ(中回転ピーク) × クラッチ × 出力 = 駆動加速
+		// トルクカーブ(中回転ピーク) × クラッチ × 出力 × ギア比 = 駆動加速
+		// ギア比で駆動力が変わる＝1速は加速が強く低速向き、5速は弱く最高速向き。
 		const float rpmN   = m_engineRPM / CarConst::MaxRPM;
 		const float dd     = rpmN - CarConst::TorquePeakN;
 		const float torque = std::clamp(1.0f - CarConst::TorqueFall * dd * dd, CarConst::TorqueMin, 1.0f);
-		m_driveAccel = m_enginePower * torque * m_clutch;
+		const float gearFactor = CarConst::GearRatios[m_gear] / CarConst::DriveRefRatio;
+		m_driveAccel = m_enginePower * torque * m_clutch * gearFactor;
 	}
 
 	//===== 4輪シミュレーション(各輪の荷重・スリップ・摩擦円)をサブステップ積分 =====
@@ -240,8 +275,12 @@ void CarBase::Update()
 			if (!w.front) { rearReaction += FcarLong; }
 		}
 
-		// 空気/転がり抵抗
+		// 空気/転がり抵抗(前後)
 		sumLong += -m_drag * vLong;
+		// タイヤスクラブ抵抗(横滑り)：ドリフト中の横方向の滑りはタイヤが摩擦で
+		// 削り取ってエネルギーを失う。これが無いと横滑り速度が総速度|v|に乗って
+		// 「ドリフトの方が直線グリップより速い」不具合になる。横滑りぶんを減衰させる。
+		sumLat += -m_scrubDrag * vLat;
 
 		const float aLong = sumLong;
 		const float aLat  = sumLat;
@@ -338,6 +377,58 @@ void CarBase::Update()
 	// 後輪は駆動輪の接地面速度で回る＝アクセル空転で速く回り、サイド中は0でロック
 	m_wheelSpinRear += (m_driveSpeed / radius) * dt;
 	wrap(m_wheelSpinRear);
+
+	//===== ドリフトスモーク放出(後輪のスリップ量に応じて) =====
+	{
+		const Math::Vector3 rightV(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+		const float vLatEnd = rightV.Dot(m_vel);                 // 横滑り速度
+		const float spinSlip = std::max(m_driveSpeed - vLongEnd, 0.0f); // 空転ぶん
+		float rearSlip = fabsf(vLatEnd) + spinSlip * 0.5f;
+		// サイド中の常時煙は「動いているとき」だけ(停止中に引いても出さない)
+		const float carSpeed = m_vel.Length();
+		if (handbrake && carSpeed > SmokeConst::MinSpeed) { rearSlip += SmokeConst::HandbrakeBoost; }
+
+		// スリップ量を 0〜1 に正規化して放出レートを決定
+		const float slip01 = std::clamp(
+			(rearSlip - SmokeConst::SlipThreshold) /
+			(SmokeConst::SlipFull - SmokeConst::SlipThreshold), 0.0f, 1.0f);
+
+		// 車速ガード：ほぼ停止しているときは一切煙を出さない
+		if (slip01 > 0.0f && carSpeed > SmokeConst::MinSpeed)
+		{
+			// 端数を蓄積して整数枚に(1輪あたりの枚数)
+			m_smokeCarry += SmokeConst::SpawnPerSec * slip01 * dt;
+			const int n = static_cast<int>(m_smokeCarry);
+			m_smokeCarry -= static_cast<float>(n);
+
+			if (n > 0)
+			{
+				const Math::Vector3 fwdV(sinf(m_yaw), 0.0f, cosf(m_yaw));
+				const Math::Vector3 trail = -m_vel * SmokeConst::TrailFactor; // 進行の逆へ引きずる
+				// 後輪(左右)の接地位置から放出
+				for (int side = -1; side <= 1; side += 2)
+				{
+					Math::Vector3 wp = m_pos
+					                 + rightV * (static_cast<float>(side) * m_track)
+					                 - fwdV   * m_base;
+					wp.y = SmokeConst::WheelGroundY;
+					m_smoke.Emit(wp, trail, n);
+				}
+			}
+		}
+	}
+
+	// スモーク粒の更新(寿命・移動)
+	m_smoke.Update(dt);
+}
+
+//----------------------------------------------------------
+// ドリフトスモーク描画（UnLitパス内でシーンから呼ばれる）
+//----------------------------------------------------------
+void CarBase::DrawEffect()
+{
+	m_smoke.SetTint(m_smokeColor);
+	m_smoke.DrawEffect();
 }
 
 void CarBase::DrawLit()
@@ -527,11 +618,28 @@ void CarBase::DrawTuningImGui()
 	ImGui::DragFloat(U8("太さ"), &m_outlineWidth, 0.002f, 0.0f, 1.0f);
 	ImGui::ColorEdit3(U8("色"), &m_outlineColor.x);
 
+	ImGui::SeparatorText(U8("ドリフトスモーク"));
+	ImGui::ColorEdit3(U8("煙の色"), &m_smokeColor.x);
+
+	// 画面全体のエッジ検出アウトライン(トゥーン輪郭・ポストプロセス)
+	ImGui::SeparatorText(U8("画面アウトライン(トゥーン)"));
+	{
+		auto& pp = KdShaderManager::Instance().m_postProcessShader;
+		bool sceneOutline = pp.IsSceneOutlineEnabled();
+		if (ImGui::Checkbox(U8("有効##sceneOutline"), &sceneOutline)) { pp.SetSceneOutlineEnabled(sceneOutline); }
+		ImGui::DragFloat(U8("太さ(px)##sceneOutline"), &pp.WorkOutlineThickness(), 0.05f, 0.5f, 8.0f);
+		ImGui::DragFloat(U8("深度しきい値(シルエット)"), &pp.WorkOutlineDepthThreshold(), 0.01f, 0.01f, 2.0f);
+		ImGui::DragFloat(U8("法線しきい値(角)"), &pp.WorkOutlineNormalThreshold(), 0.01f, 0.01f, 1.0f);
+		ImGui::DragFloat(U8("濃さ##sceneOutline"), &pp.WorkOutlineEdgeStrength(), 0.02f, 0.0f, 1.0f);
+		ImGui::ColorEdit3(U8("色##sceneOutline"), &pp.WorkOutlineColor().x);
+	}
+
 	ImGui::SeparatorText(U8("動力"));
 	ImGui::DragFloat(U8("エンジン出力(加速)"), &m_enginePower, 0.5f, 0.0f, 200.0f);
 	ImGui::DragFloat(U8("ブレーキ/後退力"), &m_brakePower, 0.5f, 0.0f, 200.0f);
 	ImGui::DragFloat(U8("最高速"), &m_maxSpeed, 0.5f, 1.0f, 200.0f);
 	ImGui::DragFloat(U8("抵抗(転がり/空気)"), &m_drag, 0.01f, 0.0f, 10.0f);
+	ImGui::DragFloat(U8("横滑りスクラブ抵抗(ドリフト速度抑制)"), &m_scrubDrag, 0.05f, 0.0f, 5.0f);
 	ImGui::DragFloat(U8("最大切れ角(rad)"), &m_maxSteerAngle, 0.01f, 0.0f, 1.5f);
 	ImGui::DragFloat(U8("ステア追従速度"), &m_steerSpeed, 0.1f, 0.1f, 50.0f);
 
@@ -599,7 +707,7 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 		{ "frontOffX", &m_frontOffX }, { "frontOffZ", &m_frontOffZ },
 		{ "rearOffX", &m_rearOffX }, { "rearOffZ", &m_rearOffZ },
 		{ "enginePower", &m_enginePower }, { "brakePower", &m_brakePower },
-		{ "maxSpeed", &m_maxSpeed }, { "drag", &m_drag },
+		{ "maxSpeed", &m_maxSpeed }, { "drag", &m_drag }, { "scrubDrag", &m_scrubDrag },
 		{ "maxSteerAngle", &m_maxSteerAngle }, { "steerSpeed", &m_steerSpeed },
 		// CarX風タイヤモデル
 		{ "muFront", &m_muFront }, { "muRear", &m_muRear },
@@ -625,6 +733,8 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 		// アウトライン
 		{ "outlineWidth", &m_outlineWidth },
 		{ "outlineColR", &m_outlineColor.x }, { "outlineColG", &m_outlineColor.y }, { "outlineColB", &m_outlineColor.z },
+		// ドリフトスモーク色
+		{ "smokeColR", &m_smokeColor.x }, { "smokeColG", &m_smokeColor.y }, { "smokeColB", &m_smokeColor.z },
 	};
 }
 

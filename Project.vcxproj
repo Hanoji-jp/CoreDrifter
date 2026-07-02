@@ -283,6 +283,10 @@
     <ClInclude Include="Src\Application\GameObject\Stage\Ground.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\SkySphere.h" />
     <ClInclude Include="Src\Application\Const\SkyConst.h" />
+    <ClInclude Include="Src\Application\Const\SmokeConst.h" />
+    <ClInclude Include="Src\Application\Const\PadConst.h" />
+    <ClInclude Include="Src\Application\Input\HjGamePad.h" />
+    <ClInclude Include="Src\Application\GameObject\Effect\DriftSmoke.h" />
     <ClInclude Include="Src\Application\GameObject\Camera\ChaseCamera.h" />
     <ClInclude Include="Src\Application\Util\AssetVault.h" />
     <ClInclude Include="Src\Application\Util\AssetCrypt.h" />
@@ -349,6 +353,8 @@
     <ClCompile Include="..\Library\imgui\imgui_widgets.cpp" />
     <ClCompile Include="Src\Application\GameObject\Camera\CameraBase.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\CarBase.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Effect\DriftSmoke.cpp" />
+    <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\Ground.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\SkySphere.cpp" />

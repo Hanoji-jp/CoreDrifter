@@ -8,6 +8,7 @@ namespace CarConst
 	constexpr float BrakePower    = 30.0f;   // ブレーキ / 後退の力
 	constexpr float MaxSpeed      = 45.0f;   // 最高速度
 	constexpr float Drag          = 0.12f;   // 転がり/空気抵抗(速度比例の減速係数 1/s)
+	constexpr float ScrubDrag     = 0.9f;    // 横滑りスクラブ抵抗(ドリフトが速すぎるのを抑える 1/s)
 
 	//===== ステアリング =====
 	constexpr float MaxSteerAngle = 0.55f;   // 前輪の最大切れ角(rad)
@@ -135,6 +136,9 @@ namespace CarConst
 	constexpr int   GearCount    = 5;         // 前進ギア段数
 	// ギア比(index0は未使用。1速が一番大きい=トルク大/低速)
 	constexpr float GearRatios[GearCount + 1] = { 0.0f, 3.20f, 2.00f, 1.40f, 1.05f, 0.82f };
+	// 駆動力に掛けるギア比の基準(この比のとき enginePower がそのまま効く)。
+	// 低いギア(比が大)ほど加速が強く、高いギアほど弱く=最高速寄りになる。2速基準。
+	constexpr float DriveRefRatio = 2.00f;
 	// トルクカーブ(中回転でピーク)：torque = 1 - k*(rpmN - peak)^2
 	constexpr float TorquePeakN  = 0.55f;     // ピーク回転(0-1正規化)
 	constexpr float TorqueFall   = 2.2f;      // ピークから外れたときの落ち具合

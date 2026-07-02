@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "../../Const/CarConst.h"   // 既定値(規約上constヘッダはinclude可)
+#include "../Effect/DriftSmoke.h"   // ドリフトスモーク(後輪の煙)
+#include "../../Input/HjGamePad.h"  // コントローラー入力(XInput)
 
 //==========================================================
 // CarBase
@@ -17,6 +19,7 @@ public:
 	void Init()    override;
 	void Update()  override;
 	void DrawLit() override;
+	void DrawEffect() override;   // ドリフトスモーク(UnLitパス)
 	void DrawSprite() override;   // HUD(スピード/RPM/ステア)
 
 	// 追従カメラ等から参照
@@ -46,6 +49,7 @@ protected:
 	float m_brakePower      = CarConst::BrakePower;
 	float m_maxSpeed        = CarConst::MaxSpeed;
 	float m_drag            = CarConst::Drag;
+	float m_scrubDrag       = CarConst::ScrubDrag;   // 横滑りスクラブ抵抗(ドリフト速度の抑制)
 	float m_maxSteerAngle   = CarConst::MaxSteerAngle;
 	float m_steerSpeed      = CarConst::SteerSpeed;
 	float m_turnRate        = CarConst::TurnRate;
@@ -126,6 +130,9 @@ protected:
 	float         m_outlineWidth   = 0.04f;
 	Math::Vector3 m_outlineColor    = Math::Vector3(0.0f, 0.0f, 0.0f); // 黒
 
+	// ドリフトスモークの色味(白=通常。NFS Unbound風のカラー煙にもできる)
+	Math::Vector3 m_smokeColor = Math::Vector3(1.0f, 1.0f, 1.0f);
+
 
 private:
 	// モデル
@@ -158,4 +165,15 @@ private:
 	float         m_accelLong  = 0.0f, m_accelLat = 0.0f;   // 直近の車体座標加速度
 	float         m_accelLongF = 0.0f, m_accelLatF = 0.0f;  // 平滑化した加速度(サス入力)
 	float         m_dLongF = 0.0f, m_dLatF = 0.0f;          // 平滑化した荷重移動(急なリフトオフ防止)
+
+	// ドリフトスモーク(後輪の煙)
+	DriftSmoke    m_smoke;
+	float         m_smokeCarry = 0.0f;   // 放出数の端数を蓄積(毎秒レート→整数枚)
+
+	// コントローラー入力(接続時のみアナログ操作を反映)
+	HjGamePad     m_pad;
+
+	// マニュアルシフトのキーボード用エッジ検出(押した瞬間だけ1段送る)
+	bool          m_prevKeyShiftUp   = false;
+	bool          m_prevKeyShiftDown = false;
 };

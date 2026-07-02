@@ -40,6 +40,15 @@ public:
 	// 不透明シーンにだけ適用する（この後に描くエフェクトには線が乗らない）。
 	void ApplySceneOutline();
 
+	// 画面エッジ検出アウトライン(トゥーン輪郭)の ON/OFF と調整用アクセサ
+	void SetSceneOutlineEnabled(bool enable) { m_sceneOutlineEnabled = enable; }
+	bool IsSceneOutlineEnabled() const { return m_sceneOutlineEnabled; }
+	float& WorkOutlineThickness()       { return m_cb0_OutlineInfo.Work().Thickness; }
+	float& WorkOutlineDepthThreshold()  { return m_cb0_OutlineInfo.Work().DepthThreshold; }
+	float& WorkOutlineNormalThreshold() { return m_cb0_OutlineInfo.Work().NormalThreshold; }
+	float& WorkOutlineEdgeStrength()    { return m_cb0_OutlineInfo.Work().EdgeStrength; }
+	Math::Vector4& WorkOutlineColor()   { return m_cb0_OutlineInfo.Work().Color; }
+
 	// モーションブラー用：毎フレームカメラ位置を渡す
 	void SetCameraPositionForMotionBlur(const Math::Vector3& pos) { m_currentCamPos = pos; m_camPosSet = true; }
 
@@ -143,6 +152,7 @@ private:
 	bool          m_prevCamPosValid = false;
 	bool          m_motionBlurEnabled = true;   // モーションブラーON/OFF
 	bool          m_camPosSet       = false;
+	bool          m_sceneOutlineEnabled = true; // 画面エッジ検出アウトライン(トゥーン輪郭)ON/OFF
 
 	// 被ダメ赤フラッシュ（0=消灯 〜 1=最大）
 	float         m_damageFlashTimer = 0.0f;
