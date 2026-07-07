@@ -19,8 +19,10 @@ void CarBase::Init()
 	// ドリフトスモーク初期化
 	m_smoke.Init();
 
-	// 見た目のライブ調整パネル
-	KdDebugGUI::Instance().SetPersistentGuiCallback([this]() { DrawTuningImGui(); });
+	// 当たり判定の可視化用ワイヤフレーム(F1でトグル)
+	m_pDebugWire = std::make_unique<KdDebugWireFrame>();
+
+	// 調整パネル(DrawImGui)はシーン側でステージ用パネルと合成して登録する
 }
 
 void CarBase::Update()
@@ -37,6 +39,11 @@ void CarBase::Update()
 	if (GetAsyncKeyState('A') & 0x8000) { steerInput -= 1.0f; }
 	if (GetAsyncKeyState('D') & 0x8000) { steerInput += 1.0f; }
 	bool handbrake = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+
+	// F1：当たり判定の可視化トグル(押した瞬間だけ切り替え)
+	const bool debugKey = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
+	if (debugKey && !m_prevDebugKey) { m_debugDraw = !m_debugDraw; }
+	m_prevDebugKey = debugKey;
 
 	// マニュアル操作(キーボード)：左Shift=クラッチ / E=シフトアップ / Q=シフトダウン
 	bool clutchPressed = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0;
@@ -162,7 +169,15 @@ void CarBase::Update()
 		// ギア比で駆動力が変わる＝1速は加速が強く低速向き、5速は弱く最高速向き。
 		const float rpmN   = m_engineRPM / CarConst::MaxRPM;
 		const float dd     = rpmN - CarConst::TorquePeakN;
-		const float torque = std::clamp(1.0f - CarConst::TorqueFall * dd * dd, CarConst::TorqueMin, 1.0f);
+		float torque = std::clamp(1.0f - CarConst::TorqueFall * dd * dd, CarConst::TorqueMin, 1.0f);
+		// レブ手前でトルクを絞る(頭打ち)。RevCutStart→RevCutEndで1→0へ。
+		// これでギアが上限に張り付き、伸ばすにはシフトアップが必要＝ギア差が体感できる。
+		if (rpmN > CarConst::RevCutStart)
+		{
+			const float t = std::clamp((rpmN - CarConst::RevCutStart) /
+			                           std::max(CarConst::RevCutEnd - CarConst::RevCutStart, 1e-4f), 0.0f, 1.0f);
+			torque *= (1.0f - t);   // レッドでトルク0
+		}
 		const float gearFactor = CarConst::GearRatios[m_gear] / CarConst::DriveRefRatio;
 		m_driveAccel = m_enginePower * torque * m_clutch * gearFactor;
 	}
@@ -241,7 +256,10 @@ void CarBase::Update()
 			load = std::clamp(load, 0.02f, 0.6f);
 
 			const float mu   = w.front ? m_muFront : m_muRear;
-			const float Dmax = mu * load * g;   // この輪の摩擦上限(縦横で共有=摩擦円)
+			float Dmax = mu * load * g;   // この輪の摩擦上限(縦横で共有=摩擦円)
+			// サイドブレーキ：後輪をロックすると横グリップが激減してリアが外へ流れる。
+			// これがハンドブレーキドリフトの核心。倍率0.5=グリップ半減(ImGuiで調整可)。
+			if (handbrake && !w.front) { Dmax *= m_handbrakeGripMul; }
 
 			// 横力：スリップ角から
 			const float denom = fabsf(wLong) + m_slipEps;
@@ -308,8 +326,10 @@ void CarBase::Update()
 			const bool spinningOut = (m_yawRate * vLat > 0.0f);
 			if (ssAbs > CarConst::SpinAssistThreshold && spinningOut)
 			{
+				// サイド中はアシストを弱めてリアを自由に回り込ませる(広がり感)
+				const float assist = m_spinAssist * (handbrake ? CarConst::HandbrakeSpinAssistMul : 1.0f);
 				const float over = ssAbs - CarConst::SpinAssistThreshold;
-				m_yawRate -= m_yawRate * std::min(over * m_spinAssist * h, 1.0f);
+				m_yawRate -= m_yawRate * std::min(over * assist * h, 1.0f);
 			}
 		}
 		m_yaw     += m_yawRate * h;
@@ -360,9 +380,166 @@ void CarBase::Update()
 		m_pitchVel += acc * dt; m_pitchAngle += m_pitchVel * dt;
 	}
 
-	//===== 位置更新(平地：XZ平面) =====
+	//===== 位置更新(XZ平面を移動 → 地形へ接地) =====
+	// 水平方向は物理どおり進める。上下(Y)は地形コリジョンへ下方レイを飛ばして決める。
 	m_pos += m_vel * dt;
-	m_pos.y = 0.0f;
+
+	//----- 壁(TypeBump)：車体を複数の球で近似して押し戻す＋壁に沿って滑る(物理応答) -----
+	// 実車ゲームはボディを凸包/カプセルで壁に当てる。ここは箱vsメッシュが未対応なので、
+	// 車体を6個の球(四隅＋前後端)で近似＝カプセル/凸包相当にして車の形・向き・角を拾う。
+	// 「面法線がほぼ垂直＝壁」のヒットだけ採用し(水平な床は無視)、壁向きの速度成分だけ殺す
+	// →垂直な崖・ガードレールで止まり、接線方向へは滑る(擦りドリフト可)。
+	{
+		const Math::Vector3 fwdW(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		const Math::Vector3 rightW(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+
+		// 車体近似プローブ(車体ローカル：px=右, pz=前)。四隅＋前後端の6点。
+		struct Probe { float px; float pz; };
+		const float tip = m_base * CarConst::WallProbeTip;
+		const Probe probes[6] =
+		{
+			{ -m_track,  m_base }, {  m_track,  m_base },  // 前左・前右
+			{ -m_track, -m_base }, {  m_track, -m_base },  // 後左・後右
+			{  0.0f,     tip    }, {  0.0f,    -tip    },  // 前端・後端(中央)
+		};
+
+		// 1個の球で壁を押し戻すヘルパ(法線フィルタ＋接線滑り)
+		auto resolveSphere = [&](const Math::Vector3& center)
+		{
+			KdCollider::SphereInfo sph;
+			sph.m_sphere.Center = center;
+			sph.m_sphere.Radius = CarConst::WallProbeRadius;
+			sph.m_type = KdCollider::TypeBump;
+
+			for (auto& wp : m_wpHitList)
+			{
+				std::shared_ptr<KdGameObject> obj = wp.lock();
+				if (!obj) { continue; }
+				std::list<KdCollider::CollisionResult> results;
+				if (!obj->Intersects(sph, &results)) { continue; }
+				for (const auto& r : results)
+				{
+					// 面法線が水平に近い(=垂直な壁)ものだけ採用。床(法線が上向き)は無視。
+					if (fabsf(r.m_hitNDir.y) > CarConst::WallNormalMaxY) { continue; }
+
+					Math::Vector3 n = r.m_hitDir; n.y = 0.0f;   // 水平の押し戻し方向
+					if (n.LengthSquared() < 1e-6f) { continue; }
+					n.Normalize();
+
+					m_pos += n * r.m_overlapDistance;           // めり込みぶん押し出す
+
+					const float into = m_vel.Dot(n);            // 壁へ食い込む速度を除去
+					if (into < 0.0f) { m_vel -= n * into * (1.0f + CarConst::WallSlideBounce); }
+				}
+			}
+		};
+
+		for (const Probe& p : probes)
+		{
+			const Math::Vector3 center = m_pos
+			                           + Math::Vector3(0.0f, CarConst::WallSphereHeight, 0.0f)
+			                           + rightW * p.px + fwdW * p.pz;
+			resolveSphere(center);
+		}
+	}
+
+	//----- 接地(TypeGround)：4輪それぞれ真下へレイ → 高さ＋地形の傾き(CarX風の床判定) -----
+	// 各タイヤ位置から真下へレイを飛ばし、接地高さを4点求める。
+	// 4点の平均で車体の高さ、前後差でピッチ(坂)、左右差でロール(バンク)を出す。
+	{
+		// 4輪の車体ローカル配置(px=右, pz=前)。DrawLitのタイヤ配置と揃える。
+		struct WheelPos { float px; float pz; };
+		const WheelPos wheelPos4[4] =
+		{
+			{ -m_track,  m_base }, // 0 前左
+			{  m_track,  m_base }, // 1 前右
+			{ -m_track, -m_base }, // 2 後左
+			{  m_track, -m_base }, // 3 後右
+		};
+		const Math::Vector3 fwdW(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		const Math::Vector3 rightW(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+
+		float contactY[4] = { 0,0,0,0 };
+		bool  contactHit[4] = { false,false,false,false };
+		int   hitCount = 0;
+
+		for (int i = 0; i < 4; ++i)
+		{
+			const Math::Vector3 wpos = m_pos + rightW * wheelPos4[i].px + fwdW * wheelPos4[i].pz;
+
+			KdCollider::RayInfo ray;
+			ray.m_pos   = wpos + Math::Vector3(0.0f, CarConst::GroundRayUp, 0.0f);
+			ray.m_dir   = Math::Vector3::Down;
+			ray.m_range = CarConst::GroundRayLen;
+			ray.m_type  = KdCollider::TypeGround;
+
+			float bestY = -FLT_MAX; bool hit = false;
+			for (auto& wp : m_wpHitList)
+			{
+				std::shared_ptr<KdGameObject> obj = wp.lock();
+				if (!obj) { continue; }
+				std::list<KdCollider::CollisionResult> results;
+				if (!obj->Intersects(ray, &results)) { continue; }
+				for (const auto& r : results)
+				{
+					if (r.m_hitPos.y > bestY) { bestY = r.m_hitPos.y; hit = true; }  // 一番高い面=路面上側
+				}
+			}
+			contactHit[i] = hit;
+			contactY[i]   = hit ? bestY : 0.0f;
+			if (hit) { ++hitCount; }
+		}
+
+		// 接地したタイヤ2つの平均高さを返す(片方だけ接地ならそれを使う)
+		auto pairAvg = [&](int a, int b) -> float
+		{
+			if (contactHit[a] && contactHit[b]) { return (contactY[a] + contactY[b]) * 0.5f; }
+			return contactHit[a] ? contactY[a] : contactY[b];
+		};
+
+		const float k = std::min(CarConst::GroundFollowSmooth * dt, 1.0f);
+
+		if (hitCount > 0)
+		{
+			m_onGround = true;
+
+			// 車体高さ＝接地タイヤの平均
+			float sum = 0.0f;
+			for (int i = 0; i < 4; ++i) { if (contactHit[i]) { sum += contactY[i]; } }
+			const float avgY = sum / static_cast<float>(hitCount);
+
+			// 前後差→ピッチ(坂)、左右差→ロール(バンク)。両ペアが接地しているときだけ更新。
+			float terrainPitchTarget = m_terrainPitch;
+			float terrainRollTarget  = m_terrainRoll;
+			if ((contactHit[0] || contactHit[1]) && (contactHit[2] || contactHit[3]))
+			{
+				const float frontY = pairAvg(0, 1);
+				const float rearY  = pairAvg(2, 3);
+				terrainPitchTarget = atan2f(frontY - rearY, 2.0f * std::max(m_base, 0.05f));  // 前が高い=登り
+			}
+			if ((contactHit[0] || contactHit[2]) && (contactHit[1] || contactHit[3]))
+			{
+				const float leftY  = pairAvg(0, 2);
+				const float rightY = pairAvg(1, 3);
+				terrainRollTarget = atan2f(leftY - rightY, 2.0f * std::max(m_track, 0.05f));   // 左が高い=右下がり
+			}
+			terrainPitchTarget = std::clamp(terrainPitchTarget, -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+			terrainRollTarget  = std::clamp(terrainRollTarget,  -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+
+			// メッシュのガタつきで跳ねないよう、高さ・傾きをなめらかに追従
+			m_pos.y        += (avgY + CarConst::RideHeight - m_pos.y) * k;
+			m_terrainPitch += (terrainPitchTarget - m_terrainPitch) * k;
+			m_terrainRoll  += (terrainRollTarget  - m_terrainRoll ) * k;
+		}
+		else
+		{
+			// 4輪とも地形が無い＝平地扱いへ戻す
+			m_onGround = false;
+			m_pos.y        += (CarConst::FallbackY - m_pos.y) * k;
+			m_terrainPitch += (0.0f - m_terrainPitch) * k;
+			m_terrainRoll  += (0.0f - m_terrainRoll ) * k;
+		}
+	}
 
 	//===== タイヤの転がり回転(視覚) =====
 	const Math::Vector3 fwd(sinf(m_yaw), 0.0f, cosf(m_yaw));
@@ -431,12 +608,61 @@ void CarBase::DrawEffect()
 	m_smoke.DrawEffect();
 }
 
+//----------------------------------------------------------
+// 当たり判定の可視化（F1トグル）：壁プローブ球（緑）＋接地レイ（橙）
+//   シーンの DrawDebug パス（UnLit）内から呼ばれる
+//----------------------------------------------------------
+void CarBase::DrawDebug()
+{
+	if (m_debugDraw && m_pDebugWire)
+	{
+		const Math::Color wallCol(0.1f, 1.0f, 0.2f, 1.0f);   // 壁プローブ=緑
+		const Math::Color rayCol (1.0f, 0.55f, 0.1f, 1.0f);  // 接地レイ=橙
+
+		const Math::Vector3 fwdW(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		const Math::Vector3 rightW(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+
+		// 壁プローブ球(四隅＋前後端の6個)＝壁の当たり判定に使っている球そのもの
+		const float tip = m_base * CarConst::WallProbeTip;
+		const float ppx[6] = { -m_track, m_track, -m_track, m_track, 0.0f, 0.0f };
+		const float ppz[6] = {  m_base,  m_base, -m_base, -m_base, tip, -tip };
+		for (int i = 0; i < 6; ++i)
+		{
+			const Math::Vector3 c = m_pos
+			                      + Math::Vector3(0.0f, CarConst::WallSphereHeight, 0.0f)
+			                      + rightW * ppx[i] + fwdW * ppz[i];
+			m_pDebugWire->AddDebugSphere(c, CarConst::WallProbeRadius, wallCol);
+		}
+
+		// 接地レイ(4輪ぶん)＝床判定に飛ばしている下方向レイ
+		const float wpx[4] = { -m_track, m_track, -m_track, m_track };
+		const float wpz[4] = {  m_base,  m_base, -m_base, -m_base };
+		for (int i = 0; i < 4; ++i)
+		{
+			const Math::Vector3 wp = m_pos + rightW * wpx[i] + fwdW * wpz[i];
+			const Math::Vector3 s  = wp + Math::Vector3(0.0f, CarConst::GroundRayUp, 0.0f);
+			const Math::Vector3 e  = s  + Math::Vector3(0.0f, -CarConst::GroundRayLen, 0.0f);
+			m_pDebugWire->AddDebugLine(s, e, rayCol);
+		}
+	}
+
+	// 基底が m_pDebugWire を描画＆クリア
+	KdGameObject::DrawDebug();
+}
+
 void CarBase::DrawLit()
 {
 	auto& shader = KdShaderManager::Instance().m_StandardShader;
 
+	// 車体全体(本体＋4輪)を地形の傾きへ合わせる＝坂・バンクで車ごと傾く(CarX風の床判定)
+	// 傾きは"車のローカル軸"で掛ける＝ヨー(向き)より先に適用する。後に掛けると
+	// ワールド軸基準になり、車が向きを変えるとピッチとロールが入れ替わってしまう。
+	// 符号：登りでノーズ上げ／左が高い路面で右下がりになるよう反転。
 	const Math::Matrix carWorld =
-		Math::Matrix::CreateRotationY(m_yaw) * Math::Matrix::CreateTranslation(m_pos);
+		Math::Matrix::CreateRotationX(-m_terrainPitch) *   // 前後(坂)：ローカルX(右)軸まわり
+		Math::Matrix::CreateRotationZ(-m_terrainRoll)  *   // 左右(バンク)：ローカルZ(前)軸まわり
+		Math::Matrix::CreateRotationY(m_yaw) *             // 向き(ヨー)
+		Math::Matrix::CreateTranslation(m_pos);
 
 	//===== 車体の行列(サスのロール/ピッチを反映。タイヤは接地したまま) =====
 	const Math::Matrix bodyW =

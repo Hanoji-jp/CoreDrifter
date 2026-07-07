@@ -30,6 +30,17 @@ cbuffer cbObject : register(b0)
 	float g_GrassEdgeWidth;		// エッジ帯域の幅（0.1〜0.5推奨。upDot のどの範囲をエッジとするか）
 	float g_GrassEdgeTexScale;	// エッジテクスチャのトリプレーナースケール
 	float g_FullEdgeStrength;	// 全面エッジテクスチャブレンド強度（0=無効 1=フル上書き）
+
+	// スモーク専用ライティング＋ディゾルブ（板ポリを球ドーム法線でトゥーン陰影＋溶けて消す）
+	int   g_SmokeLit;			// 有効フラグ
+	float g_SmokeSplitX;		// アトラス分割数X（タイル内ローカルUV復元用）
+	float g_SmokeSplitY;		// アトラス分割数Y
+	float g_SmokePeak;			// 最大不透明度
+
+	float g_SmokeErode;			// エロージョン(ディゾルブ)強さ。消え際に縁からちぎれる
+	float g_SmokeEdge;			// 溶けの縁の柔らかさ
+	float g__smokepad2;			// パディング
+	float g__smokepad3;			// パディング
 };
 
 // 定数バッファ(メッシュ単位)

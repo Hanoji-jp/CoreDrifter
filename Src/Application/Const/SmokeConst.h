@@ -4,16 +4,18 @@
 namespace SmokeConst
 {
 	// パーティクルプールの上限(リングバッファで古いものから上書き)
-	// クラスタ放出で数が増えるので多めに確保
-	constexpr int MaxParticles = 640;
+	// 生存中の粒を上書きすると"ぱっと消える"ので、放出数×最大寿命より十分多く確保する。
+	//   50枚/秒 × 4クラスタ × 2輪 × 1.4秒 ≒ 560 が最大生存数 → 余裕を持って確保
+	// 描画コストは生存数依存なのでプールを大きくしても重くならない。
+	constexpr int MaxParticles = 1500;
 
 	// 寿命(秒)：生成時に Min〜Max のランダム
 	constexpr float LifeMin = 0.70f;
 	constexpr float LifeMax = 1.40f;
 
-	// 板ポリのサイズ(m)：生成時→消滅時にかけて膨らむ
+	// 板ポリのサイズ(m)：生成時→消滅時にかけて膨らむ(③膨張)
 	constexpr float SizeStart = 0.55f;
-	constexpr float SizeEnd   = 2.60f;
+	constexpr float SizeEnd   = 2.30f;   // 消え際に巨大な円にならないよう控えめ
 	// 粒ごとのサイズばらつき(倍率の範囲)。均一だと卵の列に見える
 	constexpr float SizeVarMin = 0.65f;
 	constexpr float SizeVarMax = 1.45f;
@@ -24,14 +26,22 @@ namespace SmokeConst
 	constexpr float TrailFactor = 0.15f;  // 車速の逆向きに引きずる割合
 	constexpr float Drag        = 2.60f;  // 速度減衰(1/s) 大きいほど早く漂って溜まる
 
-	// 1回の放出で近接して撒く粒数(小さな瘤を重ねて1つの塊に見せる)
-	constexpr int   ClusterCount    = 3;
-	constexpr float ClusterRadius   = 0.22f; // クラスタ内のばらけ半径(m)
+	// 1回の放出で近接して撒く粒数(⑥小粒を重ねて密度を稼ぐ＝薄い粒でも繋がる)
+	constexpr int   ClusterCount    = 4;
+	constexpr float ClusterRadius   = 0.24f; // クラスタ内のばらけ半径(m)
+
+	// ④乱流：ゆっくり渦を巻くように揺らして規則性を壊す(消え際を散らす)
+	constexpr float TurbStrength = 0.9f;   // 揺らしの強さ
+	constexpr float TurbFreq     = 3.0f;   // 揺らしの周波数
+
+	// ①エロージョン(ディゾルブ)：消え際に雲アルファの薄い所からちぎれて消す
+	constexpr float ErodeStrength = 1.0f;  // 大きいほど縁から強く溶ける
+	constexpr float ErodeEdge     = 0.28f; // 溶けの縁の柔らかさ
 
 	// 放出制御(密な塊をたくさん重ねる)
 	constexpr float SlipThreshold = 2.0f;  // これ以上の後輪スリップ量で煙が出始める
 	constexpr float SlipFull      = 8.0f;  // この横滑りで放出レート最大
-	constexpr float SpawnPerSec   = 38.0f; // 全開スリップ時の毎秒放出数(1輪あたり)
+	constexpr float SpawnPerSec   = 50.0f; // 全開スリップ時の毎秒放出数(1輪あたり。⑥密度増)
 	constexpr float HandbrakeBoost = 4.0f; // サイド中はスリップ量に加算(常時煙)
 	// これ未満の車速では煙を出さない(停止中にサイドを引いても出さない)
 	constexpr float MinSpeed = 2.5f;
@@ -47,11 +57,14 @@ namespace SmokeConst
 	constexpr int SplitY = 2;
 	constexpr int VariantCount = 4;
 
-	// 不透明度(NFS Unbound風のべったり不透明な塊。フェードは最小限)
-	constexpr float AlphaPeak    = 0.92f;  // 最大不透明度
-	constexpr float FadeInRatio  = 0.08f;  // 寿命比これまでで立ち上がる
-	constexpr float FadeOutRatio = 0.30f;  // 寿命比これぶん残して消えていく
+	// 不透明度(柔らかい煙アルファを半透明で重ねて"繋がった塊"にする。
+	// 1粒は薄く、重なりで密度を積み上げる＝つなぎ目が消える)
+	constexpr float AlphaPeak    = 0.50f;  // 最大不透明度(薄め＝重なりで繋がる)
+	constexpr float FadeInRatio  = 0.12f;  // 寿命比これまでで立ち上がる
+	constexpr float FadeOutRatio = 0.35f;  // 寿命比これぶん残して消えていく
 
 	// スモークテクスチャ
-	constexpr const char* TexturePath = "Asset/Textures/System/ToonSmoke.png";
+	//   ToonSmoke.png … 輪郭焼き込みの硬いトゥーン(重ねると輪郭線が汚い)
+	//   SoftSmoke.png … 縁フェードの柔らかい煙アルファ(重なりが繋がる。本家寄り)
+	constexpr const char* TexturePath = "Asset/Textures/System/SoftSmoke.png";
 }

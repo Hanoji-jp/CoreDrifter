@@ -281,6 +281,8 @@
     <ClInclude Include="Src\Application\GameObject\Car\CarBase.h" />
     <ClInclude Include="Src\Application\GameObject\Car\Silvia.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\Ground.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\Stage.h" />
+    <ClInclude Include="Src\Application\Const\StageConst.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\SkySphere.h" />
     <ClInclude Include="Src\Application\Const\SkyConst.h" />
     <ClInclude Include="Src\Application\Const\SmokeConst.h" />
@@ -357,6 +359,7 @@
     <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\Ground.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\Stage.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\SkySphere.cpp" />
     <ClCompile Include="Src\Application\GameObject\Camera\ChaseCamera.cpp" />
     <ClCompile Include="Src\Application\GameObject\Camera\FPSCamera\FPSCamera.cpp" />

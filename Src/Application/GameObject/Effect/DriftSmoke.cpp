@@ -91,6 +91,11 @@ void DriftSmoke::Update(float dt)
 		if (p.age >= p.life) { p.alive = false; continue; }
 
 		p.vel -= p.vel * dragK;   // 速度減衰(だんだん漂う)
+
+		// ④乱流：粒ごとに位相をずらしてゆっくり渦を巻くように揺らす(規則性を壊して散らす)
+		p.vel.x += sinf(p.age * SmokeConst::TurbFreq + p.rot) * SmokeConst::TurbStrength * dt;
+		p.vel.z += cosf(p.age * SmokeConst::TurbFreq * 0.85f + p.rot * 1.3f) * SmokeConst::TurbStrength * dt;
+
 		p.pos += p.vel * dt;
 		p.rot += p.rotVel * dt;
 	}
@@ -118,6 +123,13 @@ void DriftSmoke::DrawEffect()
 
 	shaderMgr.ChangeDepthStencilState(KdDepthStencilState::ZWriteDisable);
 
+	// スモーク専用ライティング＋ディゾルブON：球ドーム法線でトゥーン陰影＋消え際は縁からちぎれて溶ける
+	shader.SetSmokeLit(true, static_cast<float>(SmokeConst::SplitX),
+	                         static_cast<float>(SmokeConst::SplitY),
+	                         SmokeConst::AlphaPeak,
+	                         SmokeConst::ErodeStrength,
+	                         SmokeConst::ErodeEdge);
+
 	for (const auto& p : m_particles)
 	{
 		if (!p.alive) { continue; }
@@ -140,16 +152,24 @@ void DriftSmoke::DrawEffect()
 		world.Backward(camF);
 		world.Translation(p.pos);
 
-		// アルファ：立ち上がり(FadeIn)と消え際(FadeOut)以外はほぼ不透明
-		const float fadeIn  = std::min(f / SmokeConst::FadeInRatio, 1.0f);
-		const float fadeOut = std::min((1.0f - f) / SmokeConst::FadeOutRatio, 1.0f);
-		const float alpha   = SmokeConst::AlphaPeak * std::min(fadeIn, fadeOut);
+		// 生存率(presence 0〜1)：立ち上がり(FadeIn)と消え際(FadeOut)。
+		// これを頂点色αで渡し、シェーダ側がエロージョン(ディゾルブ)の閾値に使う。
+		// ＝均一に薄くせず、縁からちぎれて溶ける。最大不透明度はシェーダ側で掛ける。
+		const float fadeIn   = std::min(f / SmokeConst::FadeInRatio, 1.0f);
+		const float fadeOut  = std::min((1.0f - f) / SmokeConst::FadeOutRatio, 1.0f);
+		const float presence = std::min(fadeIn, fadeOut);
+
+		// ⑤消え際は色を暗く落とす(明るいグロー円が残らないように)
+		const float darken = 0.55f + 0.45f * fadeOut;
 
 		// ブロブ種類を選んで描画
 		m_poly->SetUVRect(static_cast<UINT>(p.variant));
-		const Math::Color col(m_tint.x, m_tint.y, m_tint.z, alpha);
+		const Math::Color col(m_tint.x * darken, m_tint.y * darken, m_tint.z * darken, presence);
 		shader.DrawPolygon(*m_poly, world, col);
 	}
+
+	// スモーク専用ライティングOFF（他のUnLit描画に波及させない）
+	shader.SetSmokeLit(false);
 
 	shaderMgr.UndoDepthStencilState();
 }

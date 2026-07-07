@@ -55,6 +55,17 @@ public:
 		float			GrassEdgeWidth    = 0.3f; // エッジ帯域の幅（upDot 空間）
 		float			GrassEdgeTexScale = 0.15f;// エッジテクスチャのスケール
 		float			FullEdgeStrength  = 0.0f; // 全面エッジブレンド強度（0=無効 1=フル）
+
+		// スモーク専用ライティング＋ディゾルブ（板ポリを球ドーム法線でトゥーン陰影＋溶けて消す）
+		int				SmokeLit    = 0;          // 有効フラグ
+		float			SmokeSplitX = 1.0f;       // アトラス分割数X（タイル内ローカルUV復元用）
+		float			SmokeSplitY = 1.0f;       // アトラス分割数Y
+		float			SmokePeak   = 1.0f;       // 最大不透明度
+
+		float			SmokeErode  = 1.0f;       // エロージョン(ディゾルブ)強さ
+		float			SmokeEdge   = 0.25f;      // 溶けの縁の柔らかさ
+		float			_smokepad2  = 0.0f;       // パディング
+		float			_smokepad3  = 0.0f;       // パディング
 	};
 
 	// 定数バッファ(メッシュ単位更新)
@@ -169,6 +180,25 @@ public:
 	void SetSphereNormal(bool enable)
 	{
 		m_cb0_Obj.Work().SphereNormal = enable ? 1 : 0;
+		m_dirtyCBObj = true;
+	}
+
+	// スモーク専用ライティング＋ディゾルブ 設定（板ポリの煙を球ドーム法線でトゥーン陰影＋溶けて消す）。
+	// UnLitパスでの描画時のみ効く。enable中の描画が終わったら必ず false で戻すこと。
+	// splitX,Y … アトラス分割数（タイル内ローカルUV復元用）
+	// peak     … 最大不透明度
+	// erode    … エロージョン強さ（消え際に縁からちぎれる）
+	// edge     … 溶けの縁の柔らかさ
+	void SetSmokeLit(bool enable, float splitX = 1.0f, float splitY = 1.0f,
+	                 float peak = 1.0f, float erode = 1.0f, float edge = 0.25f)
+	{
+		auto& cb = m_cb0_Obj.Work();
+		cb.SmokeLit    = enable ? 1 : 0;
+		cb.SmokeSplitX = splitX;
+		cb.SmokeSplitY = splitY;
+		cb.SmokePeak   = peak;
+		cb.SmokeErode  = erode;
+		cb.SmokeEdge   = edge;
 		m_dirtyCBObj = true;
 	}
 

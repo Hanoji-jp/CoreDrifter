@@ -8,7 +8,7 @@ namespace CarConst
 	constexpr float BrakePower    = 30.0f;   // ブレーキ / 後退の力
 	constexpr float MaxSpeed      = 45.0f;   // 最高速度
 	constexpr float Drag          = 0.12f;   // 転がり/空気抵抗(速度比例の減速係数 1/s)
-	constexpr float ScrubDrag     = 0.9f;    // 横滑りスクラブ抵抗(ドリフトが速すぎるのを抑える 1/s)
+	constexpr float ScrubDrag     = 0.5f;    // 横滑りスクラブ抵抗(小=ツルツル滑る/ダート感。大=路面を削る/アスファルト感)
 
 	//===== ステアリング =====
 	constexpr float MaxSteerAngle = 0.55f;   // 前輪の最大切れ角(rad)
@@ -143,6 +143,10 @@ namespace CarConst
 	constexpr float TorquePeakN  = 0.55f;     // ピーク回転(0-1正規化)
 	constexpr float TorqueFall   = 2.2f;      // ピークから外れたときの落ち具合
 	constexpr float TorqueMin    = 0.35f;     // トルク下限
+	// レブ手前でトルクを絞る＝ギアが「頭打ち」になり、上へ伸ばすにはシフトアップが要る。
+	// これでギアごとの速度域がハッキリ分かれて体感できる。
+	constexpr float RevCutStart  = 0.88f;     // この回転(0-1)からトルクが落ち始める
+	constexpr float RevCutEnd    = 1.00f;     // レッド(ここでトルクほぼ0)
 
 	//===== HUD(スピード/RPM/ステア表示) =====
 	constexpr float HudRpmIdle     = 800.0f;    // アイドルRPM
@@ -162,4 +166,27 @@ namespace CarConst
 	//===== 地面(仮) =====
 	constexpr float GroundScaleXZ = 100.0f;   // 地面の広さ
 	constexpr float GroundScaleY  = 1.0f;     // 地面の厚み
+
+	//===== 接地・当たり判定(地形マップに乗せる) =====
+	constexpr float GroundRayUp   = 3.0f;    // 接地レイの発射を車体からどれだけ上げるか(m)
+	constexpr float GroundRayLen  = 60.0f;   // 接地レイの長さ(m, これより下に地形が無ければ未接地)
+	constexpr float RideHeight    = 0.0f;    // 接地面から車体原点を浮かせる高さ(m)
+	constexpr float BodyRadius    = 1.0f;    // 壁(TypeBump)判定に使う車体球の半径(m)
+	constexpr float FallbackY     = 0.0f;    // 地形が見つからない時の仮のY(平地扱い)
+
+	// 壁の当たり判定(物理応答)：法線フィルタで路面を除外し、垂直な面だけ壁として押し戻す。
+	// 車体を複数の球で近似(カプセル/凸包相当)＝実車ゲームのボディ衝突に近い形。
+	constexpr float WallSphereHeight = 0.9f;  // 壁判定球の中心高さ(m, 路面に触れない高さに上げる)
+	constexpr float WallProbeRadius  = 0.55f; // 車体近似の各プローブ球の半径(m)
+	constexpr float WallProbeTip     = 1.15f; // 前後端プローブの位置(m_base比。車体の張り出しをカバー)
+	constexpr float WallNormalMaxY   = 0.6f;  // 面法線のYがこれを超えたら床とみなし壁押し戻ししない
+	constexpr float WallSlideBounce  = 0.0f;  // 壁の反発(0=跳ねず擦る/CarX的, 上げると跳ね返る)
+
+	// サイドブレーキ中はスピン防止アシストを弱める＝リアが自由に回り込んで
+	// "ブワッと広がる"サイドドリフトが出せる(引いてるときは意図的に出してるため)。
+	constexpr float HandbrakeSpinAssistMul = 0.15f;  // サイド中のスピン防止の効き(0=完全解除, 1=通常)
+
+	// CarX風の床判定：4輪レイで路面の高さ＋傾き(坂・バンク)に車を合わせる
+	constexpr float GroundFollowSmooth = 12.0f;  // 接地Y・傾きの追従速度(1/s, 大=キビキビ・小=ふわっと)
+	constexpr float MaxTerrainTilt     = 0.6f;   // 地形追従の最大傾き(rad, 急斜面での見た目暴れを抑える)
 }

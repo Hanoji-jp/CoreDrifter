@@ -21,12 +21,19 @@ public:
 	void DrawLit() override;
 	void DrawEffect() override;   // ドリフトスモーク(UnLitパス)
 	void DrawSprite() override;   // HUD(スピード/RPM/ステア)
+	void DrawDebug()  override;   // 当たり判定の可視化(F1でトグル)
 
 	// 追従カメラ等から参照
 	Math::Vector3 GetPos()     const override { return m_pos; }
 	float         GetYaw()     const          { return m_yaw; }
 	Math::Vector3 GetForward() const          { return Math::Vector3(sinf(m_yaw), 0.0f, cosf(m_yaw)); }
 	Math::Vector3 GetVel()     const          { return m_vel; }   // ドリフトカメラ用(進行方向)
+
+	// 当たり判定対象(地形など)を登録する。車はこれらへレイ/球判定を飛ばす。
+	void AddCollisionTarget(const std::weak_ptr<KdGameObject>& obj) { m_wpHitList.push_back(obj); }
+
+	// 調整パネルを外部(シーン)から描画するための公開窓口
+	void DrawImGui() { DrawTuningImGui(); }
 
 protected:
 	void DrawTuningImGui();
@@ -176,4 +183,15 @@ private:
 	// マニュアルシフトのキーボード用エッジ検出(押した瞬間だけ1段送る)
 	bool          m_prevKeyShiftUp   = false;
 	bool          m_prevKeyShiftDown = false;
+
+	// 当たり判定：地形などの対象(接地レイ・壁球を飛ばす相手)
+	std::vector<std::weak_ptr<KdGameObject>> m_wpHitList;
+	Math::Vector3 m_groundNormal = Math::Vector3::Up;   // 接地面の法線(後で重力相対に使う)
+	bool          m_onGround      = false;              // 今フレーム接地したか
+	float         m_terrainPitch  = 0.0f;              // 地形の前後傾き(rad, 4輪レイから推定)
+	float         m_terrainRoll   = 0.0f;              // 地形の左右傾き(rad, 4輪レイから推定)
+
+	// 当たり判定の可視化(F1トグル)：壁プローブ球＋接地レイをワイヤ表示
+	bool          m_debugDraw    = false;
+	bool          m_prevDebugKey = false;              // F1のエッジ検出
 };

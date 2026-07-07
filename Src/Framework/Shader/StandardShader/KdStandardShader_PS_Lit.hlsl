@@ -29,7 +29,7 @@ static const float PI = 3.14159265358979f;
 //-------------------------------------------------------------
 // リムライト（縁光）：シルエットを光で縁取り、宇宙の浮遊感を出す
 static const float k_RimPower    = 3.0f;   // 縁の鋭さ（大きいほど縁だけ光る）
-static const float k_RimStrength = 0.7f;   // 縁光の強さ
+static const float k_RimStrength = 0.12f;  // 縁光の強さ（地上マップ向けに弱め。0で完全OFF）
 // トゥーンリム：縁光をくっきりした1本の帯にする（NFS Unbound風の輪郭発光）
 static const float k_RimThreshold = 0.35f; // この値を超えた縁だけ光る
 static const float k_RimSoftness  = 0.05f; // 帯の境界の柔らかさ
