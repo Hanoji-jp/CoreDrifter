@@ -9,22 +9,22 @@ static bool isSJIS(char a)
 }
 
 // フォント作成
-static HFONT MakeFont(const std::string& fontName, int h, int angle)
+static HFONT MakeFont(const std::string& fontName, int h, int angle, int weight = FW_REGULAR, int charset = SHIFTJIS_CHARSET)
 {
 	HFONT hFont;
 	hFont = CreateFont(h,		//フォント高さ
 		0,						//文字幅
 		angle,					//テキストの角度
 		0,						//ベースラインとｘ軸との角度
-		FW_REGULAR,				//フォントの重さ（太さ）
+		weight,					//フォントの重さ（太さ。Archivo等の可変ウェイト選択に使う）
 		FALSE,					//イタリック体
 		FALSE,					//アンダーライン
 		FALSE,					//打ち消し線
-		SHIFTJIS_CHARSET,		//文字セット
+		charset,				//文字セット(欧文フォントはDEFAULT_CHARSETで別書体への置換を防ぐ)
 		OUT_DEFAULT_PRECIS,		//出力精度
 		CLIP_DEFAULT_PRECIS,	//クリッピング精度
 		PROOF_QUALITY,			//出力品質
-		FIXED_PITCH | FF_MODERN,//ピッチとファミリー
+		DEFAULT_PITCH | FF_DONTCARE,//ピッチ(プロポーショナル書体を潰さないようDEFAULTに)
 		fontName.c_str());		//書体名
 
 	return hFont;
@@ -293,9 +293,9 @@ void KdFontManager::Release()
 
 }
 
-void KdFontManager::AddFont(int fontNo, const std::string& fontName, int h)
+void KdFontManager::AddFont(int fontNo, const std::string& fontName, int h, int weight, int charset)
 {
-	HFONT hFont = MakeFont(fontName.c_str(), h, 0);
+	HFONT hFont = MakeFont(fontName.c_str(), h, 0, weight, charset);
 	m_FontTbl[fontNo].hFont = hFont;
 	m_FontTbl[fontNo].CreatedFontDataTbl.fill(nullptr);
 }

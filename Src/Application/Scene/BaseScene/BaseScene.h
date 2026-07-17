@@ -34,6 +34,12 @@ protected :
 	virtual void Event();
 	virtual void Init();
 
+public:
+	// ドリフトのスコア文字演出(DrawFluidText)を使うシーンか。既定は使わない。
+	// ゲーム中シーンだけ true を返してタイトル等へ演出が漏れないようにする。
+	virtual bool UsesFluidText() const { return false; }
+
+protected:
 	// 全オブジェクトのアドレスをリストで管理
 	std::list<std::shared_ptr<KdGameObject>> m_objList;
 };

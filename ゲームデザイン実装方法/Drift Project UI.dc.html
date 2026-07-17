@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-279ad003-ce08-4c7b-9559-31a62b9ae49f/styles.css">
+<script src="./image-slot.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap');
+body{margin:0;background:#4a4a48;font-family:"Archivo",system-ui,sans-serif}
+.mono{font-variant-numeric:tabular-nums}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinRev{to{transform:rotate(-360deg)}}
+@keyframes twinkle{0%,100%{opacity:.55}50%{opacity:.1}}
+@keyframes blink{0%,100%{opacity:.6}50%{opacity:.12}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.16)}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes growbar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+</style>
+</helmet>
+<div style="width:1536px;background:#3f3f3d;padding:0;display:flex;flex-direction:column;gap:2px">
+
+  <!-- ══ SCREEN 1 — MAIN MENU (full-width hero) ══ -->
+  <section data-screen-label="Main Menu" style="position:relative;background:#f1f0ec;padding:40px 54px 30px;overflow:hidden;height:864px">
+    <!-- deco layer -->
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:5;color:#141414">
+      <defs><pattern id="d1" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <!-- scattered + crosses top -->
+      <g stroke="currentColor" stroke-width="2.5">
+        <line x1="640" y1="80" x2="656" y2="80"/><line x1="648" y1="72" x2="648" y2="88"/>
+        <line x1="676" y1="92" x2="692" y2="92"/><line x1="684" y1="84" x2="684" y2="100"/>
+        <line x1="960" y1="44" x2="976" y2="44"/><line x1="968" y1="36" x2="968" y2="52"/>
+      </g>
+      <rect x="700" y="150" width="70" height="42" fill="url(#d1)" opacity=".45"/>
+      <!-- more dot fields -->
+      <rect x="1170" y="120" width="150" height="110" fill="url(#d1)" opacity=".5" style="animation:twinkle 4s ease-in-out infinite"/>
+      <rect x="1330" y="120" width="90" height="110" fill="url(#d1)" opacity=".28"/>
+      <rect x="70" y="470" width="90" height="70" fill="url(#d1)" opacity=".35"/>
+      <rect x="840" y="720" width="180" height="46" fill="url(#d1)" opacity=".4"/>
+      <g fill="currentColor" opacity=".5"><circle cx="470" cy="600" r="2.2"/><circle cx="486" cy="600" r="2.2"/><circle cx="502" cy="600" r="2.2"/><circle cx="470" cy="616" r="2.2"/><circle cx="486" cy="616" r="2.2"/><circle cx="470" cy="632" r="2.2"/></g>
+      <!-- dashed crop marks -->
+      <g stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 5" opacity=".5"><line x1="720" y1="200" x2="790" y2="200"/><line x1="720" y1="200" x2="720" y2="250"/></g>
+      <!-- big X left of image -->
+      <g stroke="currentColor" stroke-width="6" style="animation:pulse 3.2s ease-in-out infinite;transform-origin:728px 464px"><line x1="712" y1="448" x2="744" y2="480"/><line x1="744" y1="448" x2="712" y2="480"/></g>
+      <!-- boxed x lower -->
+      <rect x="700" y="636" width="54" height="54" fill="none" stroke="#cfe021" stroke-width="5"/>
+      <g stroke="currentColor" stroke-width="4" style="animation:pulse 3.2s ease-in-out infinite .8s;transform-origin:727px 663px"><line x1="713" y1="649" x2="741" y2="677"/><line x1="741" y1="649" x2="713" y2="677"/></g>
+      <!-- undulating drift circles: offset centers so nesting wobbles -->
+      <g fill="none" stroke="currentColor" opacity=".38" stroke-width="1" style="animation:spinRev 150s linear infinite;transform-origin:664px 590px">
+        <circle cx="700" cy="620" r="120"/><circle cx="688" cy="608" r="120"/>
+        <circle cx="676" cy="596" r="120"/><circle cx="664" cy="584" r="120"/>
+        <circle cx="652" cy="572" r="120"/><circle cx="640" cy="560" r="120"/>
+      </g>
+      <!-- dot triples -->
+      <g fill="currentColor" opacity=".55"><circle cx="720" cy="712" r="2.4"/><circle cx="734" cy="712" r="2.4"/><circle cx="748" cy="712" r="2.4"/></g>
+      <rect x="1150" y="712" width="150" height="14" fill="url(#d1)" opacity=".45"/>
+      <!-- baseline black bar bottom-right -->
+      <path d="M1000 838 L1536 838 L1536 864 L960 864 Z" fill="#141414"/>
+    </svg>
+
+    <!-- top strip -->
+    <div style="position:relative;z-index:3;display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <span style="font-size:22px;line-height:1">◍</span>
+        <div style="font-size:13px;font-weight:800;letter-spacing:.05em;line-height:1.4;border-bottom:2px solid #141414;padding-bottom:6px;color:#141414">BUILT TO SLIDE.<br>EST. 2024</div>
+      </div>
+      <div style="display:flex;align-items:center">
+        <span style="border:2px solid #141414;padding:8px 15px;font-weight:800;font-size:14px;letter-spacing:.04em">DRIVER01</span>
+        <span style="background:#cfe021;border:2px solid #141414;border-left:0;padding:8px 15px;font-weight:800;font-size:14px">LV.23</span>
+        <span style="margin-left:14px;font-size:20px;font-weight:900;letter-spacing:-3px;transform:skewX(-14deg);opacity:.85">///</span>
+      </div>
+    </div>
+
+    <!-- title -->
+    <div style="position:relative;z-index:3;margin-top:14px">
+      <h1 style="font-size:150px;font-weight:900;line-height:.72;letter-spacing:-.045em;margin:0;color:#141414">DRIFT</h1>
+      <h1 style="font-size:106px;font-weight:900;line-height:.8;letter-spacing:-.02em;margin:6px 0 0;color:#cfe021">PROJECT</h1>
+      <div style="display:inline-block;margin-top:20px;background:#141414;color:#fff;font-size:14px;font-weight:800;letter-spacing:.05em;padding:9px 15px">CHASE CONTROL, NOT GLORY.&nbsp;&nbsp;<span style="color:#cfe021">+</span></div>
+    </div>
+
+    <!-- menu list -->
+    <div style="position:relative;z-index:3;display:flex;flex-direction:column;margin-top:32px;width:400px" data-role="menu">
+      <sc-for list="{{ menu }}" as="m" hint-placeholder-count="5">
+        <div onClick="{{ m.select }}" style="{{ m.rowStyle }}">
+          <span style="width:30px;display:inline-flex;justify-content:center;font-size:18px">{{ m.icon }}</span>
+          <span style="font-weight:800;font-size:21px;letter-spacing:.01em">{{ m.label }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="position:relative;z-index:3;display:flex;gap:56px;font-size:12px;font-weight:700;letter-spacing:.04em;color:#141414;margin-top:38px">
+      <span style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;background:#cfe021;display:inline-block"></span>Ver. 0.1.0</span>
+      <span>// WELCOME BACK, DRIVER.</span>
+    </div>
+
+    <!-- IMAGE treatment: overlapping masked frames + acid duotone slice -->
+    <div style="position:absolute;right:150px;top:104px;width:660px;height:580px;z-index:2">
+      <!-- back offset frame -->
+      <div class="grayscale" style="position:absolute;left:0;top:-38px;width:430px;height:450px;overflow:hidden">
+        <image-slot id="hero-photo-b" shape="rect" style="position:absolute;inset:0" placeholder="PHOTO (back frame)"></image-slot>
+      </div>
+      <!-- main frame -->
+      <div style="position:absolute;left:70px;top:24px;width:590px;height:540px;overflow:hidden">
+        <div class="grayscale" style="position:absolute;inset:0">
+          <image-slot id="hero-photo" shape="rect" style="position:absolute;inset:0" placeholder="DROP DRIFT SCENE (B/W)"></image-slot>
+        </div>
+        <!-- acid duotone slice (multiply over the grayscale) -->
+        <div style="position:absolute;right:0;top:0;width:44%;height:100%;background:#cfe021;mix-blend-mode:multiply;pointer-events:none"></div>
+      </div>
+      <!-- acid accent block -->
+      <div style="position:absolute;left:70px;bottom:2px;width:160px;height:32px;background:#cfe021"></div>
+    </div>
+
+    <!-- vertical rail text -->
+    <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);writing-mode:vertical-rl;font-size:13px;font-weight:800;letter-spacing:.18em;color:#141414;z-index:3">FOCUS &nbsp;//&nbsp; ADAPT &nbsp;//&nbsp; OVERCOME</div>
+
+    <!-- now playing -->
+    <div style="position:absolute;right:66px;bottom:30px;width:346px;height:66px;background:#fbfbf9;border:2px solid #141414;display:flex;align-items:center;gap:14px;padding:0 14px;z-index:4">
+      <span style="letter-spacing:1px;font-size:15px">▁▃▅▂▆▃▁▄▂</span>
+      <div style="flex:1"><div style="font-weight:800;font-size:14px;letter-spacing:.02em">MIDNIGHT DRIVE</div><div style="font-size:11px;font-weight:600;color:#555">KORDHELL</div></div>
+      <div style="width:46px;height:46px;background:#141414;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px">▶</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 2 — SETTINGS ══ -->
+  <section data-screen-label="Settings" style="position:relative;background:#f1f0ec;padding:48px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:4;color:#141414">
+      <defs><pattern id="d2" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <rect x="1180" y="90" width="170" height="120" fill="url(#d2)" opacity=".5" style="animation:twinkle 5s ease-in-out infinite .6s"/>
+      <rect x="1360" y="90" width="90" height="120" fill="url(#d2)" opacity=".28"/>
+      <rect x="1210" y="560" width="120" height="90" fill="url(#d2)" opacity=".4"/>
+      <rect x="1210" y="740" width="200" height="46" fill="url(#d2)" opacity=".38"/> x2="1516" y2="110"/><line x1="1508" y1="102" x2="1508" y2="118"/><line x1="1500" y1="520" x2="1516" y2="520"/><line x1="1508" y1="512" x2="1508" y2="528"/><line x1="1500" y1="640" x2="1516" y2="640"/><line x1="1508" y1="632" x2="1508" y2="648"/><line x1="1500" y1="740" x2="1516" y2="740"/><line x1="1508" y1="732" x2="1508" y2="748"/></g>
+      <rect x="1496" y="230" width="24" height="72" fill="#cfe021"/>
+      <g stroke="currentColor" stroke-width="2" style="animation:blink 2.4s steps(2,end) infinite"><line x1="1496" y1="340" x2="1496" y2="440"/><line x1="1503" y1="340" x2="1503" y2="440"/><line x1="1510" y1="340" x2="1510" y2="440"/><line x1="1517" y1="340" x2="1517" y2="440"/><line x1="1522" y1="340" x2="1522" y2="440"/></g>
+    </svg>
+    <div style="position:absolute;right:52px;top:44px;font-size:30px;letter-spacing:16px;color:#141414;z-index:3;animation:floaty 5s ease-in-out infinite">＋＋</div>
+    <h2 style="font-size:64px;font-weight:900;letter-spacing:-.02em;margin:20px 0 0;color:#141414;border-bottom:4px solid #cfe021;display:inline-block;padding-bottom:4px;position:relative;z-index:3">SETTINGS</h2>
+
+    <div style="display:grid;grid-template-columns:280px minmax(0,880px);gap:64px;margin-top:56px;position:relative;z-index:3">
+      <div style="display:flex;flex-direction:column;gap:22px">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
+          <div onClick="{{ t.select }}" style="{{ t.style }}">{{ t.label }}</div>
+        </sc-for>
+      </div>
+      <div style="border:2px solid #141414">
+        <sc-for list="{{ settings }}" as="s" hint-placeholder-count="9">
+          <div style="{{ s.rowStyle }}">
+            <span style="font-weight:700;font-size:16px;letter-spacing:.02em">{{ s.label }}</span>
+            <span>{{ s.control }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:32px;margin-top:44px;font-size:14px;font-weight:700;position:relative;z-index:3">
+      <div style="display:flex;align-items:center;gap:10px"><span style="border:2px solid #141414;padding:3px 9px">R</span>RESET TO DEFAULT</div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="border:2px solid #141414;padding:3px 9px">ESC</span>BACK</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 3 — GARAGE ══ -->
+  <section data-screen-label="Garage" style="position:relative;background:#f1f0ec;padding:44px 64px;overflow:hidden;height:864px">
+    <!-- deco layer: drift-swirl loops -->
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs>
+        <pattern id="d3" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern>
+        <path id="wl1" d="M -210 -6 C -150 -84 -50 -96 44 -70 C 150 -40 236 -26 202 42 C 172 100 56 82 -54 80 C -158 78 -244 60 -210 -6 Z"/>
+        <path id="wl2" d="M -176 34 C -214 -38 -104 -90 -6 -80 C 124 -66 222 -30 172 30 C 134 82 30 60 -66 92 C -148 118 -150 92 -176 34 Z"/>
+        <path id="wl3" d="M -150 -34 C -74 -96 66 -78 152 -46 C 214 -22 196 34 146 58 C 74 92 -46 66 -126 58 C -196 50 -204 18 -150 -34 Z"/>
+      </defs>
+      <g fill="none" stroke="currentColor" opacity=".22" stroke-width="1" transform="translate(1050 430)"><g style="animation:spin 120s linear infinite;transform-origin:0px 0px">
+        <use href="#wl1" transform="rotate(0)"/><use href="#wl2" transform="rotate(28)"/>
+        <use href="#wl3" transform="rotate(54)"/><use href="#wl1" transform="rotate(80) scale(1.16)"/>
+        <use href="#wl2" transform="rotate(108) scale(.88)"/><use href="#wl3" transform="rotate(134) scale(1.1)"/>
+        <use href="#wl1" transform="rotate(162) scale(.94)"/><use href="#wl2" transform="rotate(196) scale(1.22)"/>
+        <use href="#wl3" transform="rotate(228) scale(.98)"/><use href="#wl1" transform="rotate(262) scale(1.08)"/>
+        <use href="#wl2" transform="rotate(300) scale(.92)"/><use href="#wl3" transform="rotate(332) scale(1.14)"/>
+      </g></g>
+      <rect x="70" y="560" width="150" height="110" fill="url(#d3)" opacity=".4" style="animation:twinkle 4.6s ease-in-out infinite .3s"/>
+      <rect x="250" y="560" width="80" height="110" fill="url(#d3)" opacity=".22"/>
+      <rect x="620" y="120" width="120" height="80" fill="url(#d3)" opacity=".35"/>
+      <rect x="1200" y="740" width="200" height="46" fill="url(#d3)" opacity=".38"/>
+      <g stroke="currentColor" stroke-width="1.4" opacity=".5"><line x1="1500" y1="200" x2="1516" y2="200"/><line x1="1508" y1="192" x2="1508" y2="208"/><line x1="1500" y1="440" x2="1516" y2="440"/><line x1="1508" y1="432" x2="1508" y2="448"/><line x1="1500" y1="600" x2="1516" y2="600"/><line x1="1508" y1="592" x2="1508" y2="608"/></g>
+    </svg>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:2">
+      <h2 style="font-size:56px;font-weight:900;letter-spacing:-.02em;margin:0;color:#141414">GARAGE <span style="font-weight:400;color:#9a9a98">/</span> <span style="color:#cfe021">CAR SELECT</span></h2>
+      <div style="text-align:right;font-weight:700"><div style="font-size:12px;letter-spacing:.1em;color:#555">CREDITS</div><div style="font-size:24px">¥ 125,000</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:56px;margin-top:44px;position:relative;z-index:2">
+      <!-- brand list -->
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <sc-for list="{{ brands }}" as="b" hint-placeholder-count="6">
+          <div onClick="{{ b.select }}" style="{{ b.style }}"><span style="width:24px">▦</span>{{ b.label }}</div>
+        </sc-for>
+      </div>
+      <!-- car stage -->
+      <div style="position:relative;min-height:470px">
+        <div style="font-weight:900;color:#141414"><span style="font-size:20px">▶ NEXUS</span><div style="font-size:96px;line-height:.9;letter-spacing:-.02em">NX7</div></div>
+        <div style="display:flex;gap:0;margin-top:10px">
+          <span style="border:2px solid #141414;padding:5px 12px;font-size:14px;font-weight:700">TIER</span>
+          <span style="border:2px solid #141414;border-left:0;padding:5px 16px;font-size:14px;font-weight:800">A</span>
+        </div>
+        <div style="position:absolute;left:230px;right:400px;top:90px;height:320px;background:#cfe021;clip-path:polygon(6% 0,100% 0,94% 100%,0 100%)"></div>
+        <image-slot id="car-garage" shape="rect" style="position:absolute;left:230px;right:360px;top:40px;height:380px" placeholder="CAR SIDE VIEW"></image-slot>
+        <!-- stat bars -->
+        <div style="position:absolute;right:0;top:60px;width:300px;display:flex;flex-direction:column;gap:20px">
+          <sc-for list="{{ stats }}" as="st" hint-placeholder-count="5">
+            <div>
+              <div style="font-size:14px;font-weight:700;letter-spacing:.05em;margin-bottom:5px">{{ st.label }}</div>
+              <div style="height:16px;background:#141414"><div style="{{ st.fillStyle }}"></div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- thumbnails -->
+    <div style="display:flex;align-items:center;gap:12px;margin-top:36px;position:relative;z-index:2">
+      <div style="width:36px;height:120px;border:2px solid #141414;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px">‹</div>
+      <div style="display:flex;gap:14px;flex:1">
+        <sc-for list="{{ cars }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.select }}" style="{{ c.style }}"><image-slot id="{{ c.slotId }}" shape="rect" style="position:absolute;inset:0;pointer-events:none" placeholder="CAR"></image-slot></div>
+        </sc-for>
+      </div>
+      <div style="width:36px;height:120px;border:2px solid #141414;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px">›</div>
+    </div>
+
+    <div style="display:flex;gap:30px;margin-top:28px;font-size:14px;font-weight:700;position:relative;z-index:2">
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">ENTER</span>SELECT</div>
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">F1</span>CAR INFO</div>
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">ESC</span>BACK</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 4 — MODALS ══ -->
+  <section data-screen-label="Modal Examples" style="position:relative;background:#f1f0ec;padding:48px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs><pattern id="d4" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".55"><line x1="1500" y1="120" x2="1516" y2="120"/><line x1="1508" y1="112" x2="1508" y2="128"/><line x1="1500" y1="260" x2="1516" y2="260"/><line x1="1508" y1="252" x2="1508" y2="268"/><line x1="1500" y1="560" x2="1516" y2="560"/><line x1="1508" y1="552" x2="1508" y2="568"/><line x1="1500" y1="700" x2="1516" y2="700"/><line x1="1508" y1="692" x2="1508" y2="708"/></g>
+      <g stroke="currentColor" stroke-width="2"><line x1="1496" y1="360" x2="1496" y2="470"/><line x1="1503" y1="360" x2="1503" y2="470"/><line x1="1510" y1="360" x2="1510" y2="470"/><line x1="1517" y1="360" x2="1517" y2="470"/><line x1="1522" y1="360" x2="1522" y2="470"/></g>
+      <rect x="60" y="720" width="130" height="60" fill="url(#d4)" opacity=".5"/>
+      <rect x="210" y="720" width="80" height="60" fill="url(#d4)" opacity=".28"/>
+      <rect x="1180" y="110" width="170" height="110" fill="url(#d4)" opacity=".48" style="animation:twinkle 5.4s ease-in-out infinite 1s"/>
+      <rect x="1360" y="110" width="90" height="110" fill="url(#d4)" opacity=".26"/>
+      <rect x="760" y="120" width="110" height="70" fill="url(#d4)" opacity=".34"/>
+      <g fill="none" stroke="currentColor" opacity=".12" stroke-width="1"><circle cx="1150" cy="320" r="72"/><circle cx="1150" cy="320" r="122"/></g>
+    </svg>
+    <h4 style="font-size:22px;font-weight:800;letter-spacing:.02em;margin:10px 0 40px;color:#141414;position:relative;z-index:1">SELECTION WINDOW EXAMPLES</h4>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:28px;position:relative;z-index:1">
+      <sc-for list="{{ modals }}" as="d" hint-placeholder-count="4">
+        <div style="{{ d.frameStyle }}">
+          <div style="{{ d.headStyle }}"><span>{{ d.title }}</span><span style="cursor:pointer">✕</span></div>
+          <div style="padding:32px 22px;text-align:center;min-height:210px;display:flex;flex-direction:column;justify-content:space-between">
+            <div style="{{ d.bodyStyle }}">{{ d.body }}</div>
+            <div style="display:flex;justify-content:center;gap:14px;margin-top:28px">
+              <sc-for list="{{ d.buttons }}" as="btn" hint-placeholder-count="2">
+                <div style="{{ btn.style }}">{{ btn.label }}</div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- legend -->
+    <div style="display:flex;gap:34px;margin-top:56px;font-size:14px;font-weight:700;align-items:center;position:relative;z-index:1">
+      <div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:16px;background:#cfe021;display:inline-block"></span>PRIMARY</div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:16px;background:#c6c6c6;display:inline-block"></span>SECONDARY</div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="width:32px;height:16px;background:#141414;display:inline-block"></span>ACCENT</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 5 — ELEMENTS / UI KIT ══ -->
+  <section data-screen-label="Elements" style="position:relative;background:#f1f0ec;padding:48px 64px;overflow:hidden;min-height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs><pattern id="d5" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <rect x="1200" y="70" width="150" height="100" fill="url(#d5)" opacity=".45" style="animation:twinkle 4.8s ease-in-out infinite .4s"/>
+      <rect x="1360" y="70" width="80" height="100" fill="url(#d5)" opacity=".24"/>
+      <g stroke="currentColor" stroke-width="2" opacity=".6"><line x1="1496" y1="360" x2="1496" y2="450"/><line x1="1503" y1="360" x2="1503" y2="450"/><line x1="1510" y1="360" x2="1510" y2="450"/><line x1="1517" y1="360" x2="1517" y2="450"/><line x1="1522" y1="360" x2="1522" y2="450"/></g>
+    </svg>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;position:relative;z-index:1">
+      <h2 style="font-size:56px;font-weight:900;letter-spacing:-.02em;margin:0;color:#141414">ELEMENTS <span style="font-weight:400;color:#9a9a98">/</span> <span style="color:#cfe021">UI KIT</span></h2>
+      <div style="font-size:12px;font-weight:700;letter-spacing:.06em;color:#555">FLUSH-LEFT · 0 RADIUS · 2PX RULES</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:38px 48px;margin-top:44px;position:relative;z-index:1">
+
+      <!-- 01 BUTTON -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">01 · BUTTON</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;background:#cfe021;color:#141414;font-weight:800;font-size:15px;padding:12px 16px;cursor:pointer" style-hover="background:#c1d419"><span>▶&nbsp;&nbsp;PRIMARY</span><span>↗</span></div>
+          <div style="display:flex;align-items:center;justify-content:flex-start;border:2px solid #141414;color:#141414;font-weight:800;font-size:15px;padding:12px 16px;cursor:pointer" style-hover="background:rgba(20,20,20,.07)">SECONDARY</div>
+          <div style="display:flex;gap:14px">
+            <div style="color:#141414;font-weight:800;font-size:15px;padding:12px 4px;cursor:pointer" style-hover="color:#8a9612">GHOST →</div>
+            <div style="opacity:.4;border:2px solid #141414;color:#141414;font-weight:800;font-size:15px;padding:12px 16px">DISABLED</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 02 ICON BUTTON -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">02 · ICON BUTTON</div>
+        <div style="display:flex;gap:14px;align-items:center">
+          <div style="width:52px;height:52px;background:#141414;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer">▶</div>
+          <div style="width:52px;height:52px;border:2px solid #141414;color:#141414;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer" style-hover="background:rgba(20,20,20,.07)">＋</div>
+          <div style="width:52px;height:52px;background:#cfe021;color:#141414;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer">✕</div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:700;color:#777;letter-spacing:.05em"><span>SOLID</span><span>OUTLINE</span><span>ACCENT</span></div>
+        </div>
+      </div>
+
+      <!-- 03 TOGGLE -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">03 · TOGGLE</div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;gap:14px"><span style="font-size:10px;font-weight:700;color:#777;width:56px">STATE ON</span><span style="display:inline-flex;border:2px solid #141414"><span style="padding:7px 18px;font-weight:800;font-size:13px;background:#cfe021;color:#141414;cursor:pointer">ON</span><span style="padding:7px 18px;font-weight:800;font-size:13px;color:#8a8a88;cursor:pointer">OFF</span></span></div>
+          <div style="display:flex;align-items:center;gap:14px"><span style="font-size:10px;font-weight:700;color:#777;width:56px">STATE OFF</span><span style="display:inline-flex;border:2px solid #141414"><span style="padding:7px 18px;font-weight:800;font-size:13px;color:#8a8a88;cursor:pointer">ON</span><span style="padding:7px 18px;font-weight:800;font-size:13px;background:#c6c6c6;color:#141414;cursor:pointer">OFF</span></span></div>
+          <div style="display:flex;align-items:center;gap:14px"><span style="font-size:10px;font-weight:700;color:#777;width:56px">ACCENT</span><span style="display:inline-flex;border:2px solid #141414"><span style="padding:7px 18px;font-weight:800;font-size:13px;background:#141414;color:#fff;cursor:pointer">ON</span><span style="padding:7px 18px;font-weight:800;font-size:13px;color:#8a8a88;cursor:pointer">OFF</span></span></div>
+        </div>
+      </div>
+
+      <!-- 04 TAB BUTTON -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">04 · TAB BUTTON</div>
+        <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+          <div style="background:#cfe021;color:#141414;font-weight:800;font-size:15px;padding:9px 16px;cursor:pointer">GAMEPLAY</div>
+          <div style="color:#141414;opacity:.6;font-weight:800;font-size:15px;padding:9px 16px;cursor:pointer" style-hover="opacity:1">CONTROLS</div>
+          <div style="color:#141414;opacity:.6;font-weight:800;font-size:15px;padding:9px 16px;cursor:pointer" style-hover="opacity:1">GRAPHICS</div>
+        </div>
+      </div>
+
+      <!-- 05 STEPPER -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">05 · STEPPER / SELECT</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:18px;border:2px solid #141414;padding:10px 16px;font-weight:700;font-size:15px;width:fit-content"><span style="cursor:pointer">◄</span><span style="min-width:110px;text-align:center">NORMAL</span><span style="cursor:pointer">►</span></div>
+          <div style="display:flex;align-items:center;gap:18px;border:2px solid #141414;padding:10px 16px;font-weight:700;font-size:15px;width:fit-content"><span style="cursor:pointer">◄</span><span style="min-width:110px;text-align:center">KM/H</span><span style="cursor:pointer">►</span></div>
+        </div>
+      </div>
+
+      <!-- 06 KEYCAP -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">06 · KEYCAP</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:14px;font-weight:700;color:#141414">
+          <span style="display:inline-flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:4px 10px">ENTER</span>SELECT</span>
+          <span style="display:inline-flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:4px 10px">ESC</span>BACK</span>
+          <span style="display:inline-flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:4px 10px">F1</span>INFO</span>
+        </div>
+      </div>
+
+      <!-- 07 TAG / BADGE -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">07 · TAG / BADGE</div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <span style="display:inline-flex"><span style="border:2px solid #141414;padding:6px 12px;font-weight:800;font-size:13px">DRIVER01</span><span style="background:#cfe021;border:2px solid #141414;border-left:0;padding:6px 12px;font-weight:800;font-size:13px">LV.23</span></span>
+          <span style="display:inline-flex"><span style="border:2px solid #141414;padding:5px 11px;font-size:12px;font-weight:700">TIER</span><span style="border:2px solid #141414;border-left:0;padding:5px 13px;font-size:12px;font-weight:800">A</span></span>
+          <span style="background:#141414;color:#fff;padding:6px 12px;font-weight:800;font-size:12px;letter-spacing:.04em">NEW</span>
+        </div>
+      </div>
+
+      <!-- 08 STAT BAR -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">08 · STAT BAR</div>
+        <div style="display:flex;flex-direction:column;gap:12px;max-width:240px">
+          <div><div style="font-size:11px;font-weight:700;letter-spacing:.05em;margin-bottom:4px">SPEED</div><div style="height:14px;background:#141414"><div style="height:100%;width:72%;background:#cfe021"></div></div></div>
+          <div><div style="font-size:11px;font-weight:700;letter-spacing:.05em;margin-bottom:4px">DRIFT</div><div style="height:14px;background:#141414"><div style="height:100%;width:92%;background:#cfe021"></div></div></div>
+        </div>
+      </div>
+
+      <!-- 09 MENU / LIST ROW -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">09 · MENU / LIST ROW</div>
+        <div style="display:flex;flex-direction:column;max-width:260px">
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;background:#cfe021;font-weight:800;font-size:15px;color:#141414;cursor:pointer"><span style="width:22px">▶</span>PLAY</div>
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;border-bottom:2px solid rgba(20,20,20,.3);font-weight:800;font-size:15px;color:#141414;cursor:pointer" style-hover="background:rgba(20,20,20,.05)"><span style="width:22px">⌂</span>GARAGE</div>
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;border-bottom:2px solid rgba(20,20,20,.3);font-weight:800;font-size:15px;color:#141414;cursor:pointer" style-hover="background:rgba(20,20,20,.05)"><span style="width:22px">⚙</span>SETTINGS</div>
+        </div>
+      </div>
+
+      <!-- 10 THUMBNAIL -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">10 · THUMBNAIL</div>
+        <div style="display:flex;gap:14px;align-items:flex-end">
+          <div style="width:110px;height:74px;background:#cfe021;border:3px solid #141414"></div>
+          <div style="width:110px;height:74px;background:#c6c6c6;border:2px solid #141414;opacity:.9"></div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:700;color:#777"><span>SELECTED</span><span>DEFAULT</span></div>
+        </div>
+      </div>
+
+      <!-- 11 WINDOW HEADERS -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">11 · WINDOW HEADER</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-width:260px">
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#cfe021;color:#141414;font-weight:800;font-size:12px;padding:8px 12px;border:2px solid #141414;border-bottom:0"><span>CONFIRM</span><span>✕</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#e79ec0;color:#141414;font-weight:800;font-size:12px;padding:8px 12px;border:2px solid #141414;border-bottom:0"><span>NOTICE</span><span>✕</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#4a97b8;color:#fff;font-weight:800;font-size:12px;padding:8px 12px;border:2px solid #141414;border-bottom:0"><span>DELETE</span><span>✕</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#c9c2b4;color:#141414;font-weight:800;font-size:12px;padding:8px 12px;border:2px solid #141414;border-bottom:0"><span>INFORMATION</span><span>✕</span></div>
+        </div>
+      </div>
+
+      <!-- 12 PALETTE -->
+      <div>
+        <div style="font-size:12px;font-weight:800;letter-spacing:.08em;color:#141414;border-bottom:2px solid #141414;padding-bottom:6px;margin-bottom:16px">12 · PALETTE</div>
+        <div style="display:flex;flex-direction:column;gap:12px;font-size:11px;font-weight:700;color:#141414">
+          <div style="display:flex;align-items:center;gap:10px"><span style="width:34px;height:18px;background:#cfe021;display:inline-block;border:1px solid #141414"></span>PRIMARY&nbsp;&nbsp;#CFE021</div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="width:34px;height:18px;background:#c6c6c6;display:inline-block;border:1px solid #141414"></span>SECONDARY&nbsp;&nbsp;#C6C6C6</div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="width:34px;height:18px;background:#141414;display:inline-block"></span>ACCENT&nbsp;&nbsp;#141414</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { menu: 'PLAY', tab: 'GAMEPLAY', brand: 'ALL', car: 0,
+    toggles: { TRACTION:true, STABILITY:true, ABS:true, STEERING:true, REWIND:true } };
+
+  renderVals() {
+    const S = this.state;
+    const ACID='#cfe021', INK='#141414';
+
+    // ── menuRow()
+    const menuIcons = { PLAY:'▶', GARAGE:'⌂', SETTINGS:'⚙', STATISTICS:'▥', QUIT:'⇥' };
+    const menu = ['PLAY','GARAGE','SETTINGS','STATISTICS','QUIT'].map(label => {
+      const active = S.menu === label;
+      return { label, icon: menuIcons[label],
+        select: () => this.setState({ menu: label }),
+        rowStyle: `display:flex;align-items:center;gap:16px;padding:15px 16px;cursor:pointer;color:${INK};`
+          + (active ? `background:${ACID};` : `background:transparent;border-bottom:2px solid rgba(20,20,20,.3);`) };
+    });
+
+    // ── settings tabs
+    const tabs = ['GAMEPLAY','CONTROLS','GRAPHICS','AUDIO','UI','OTHER'].map(label => {
+      const active = S.tab === label;
+      return { label, select: () => this.setState({ tab: label }),
+        style: `padding:9px 14px;cursor:pointer;font-weight:800;font-size:20px;color:${INK};`
+          + (active ? `background:${ACID};` : `background:transparent;opacity:.6;`) };
+    });
+
+    // ── setting rows (control = React element)
+    const arrows = (val) => React.createElement('span',{style:{display:'inline-flex',alignItems:'center',gap:'18px',fontWeight:700,fontSize:'16px'}},
+      React.createElement('span',{style:{cursor:'pointer'}},'◄'),
+      React.createElement('span',{style:{minWidth:'110px',textAlign:'center'}},val),
+      React.createElement('span',{style:{cursor:'pointer'}},'►'));
+    const toggle = (key) => {
+      const on = S.toggles[key];
+      const flip = () => this.setState(s => ({ toggles: { ...s.toggles, [key]: !s.toggles[key] } }));
+      const seg = (label, active, fill) => React.createElement('span',{ onClick: flip,
+        style:{ cursor:'pointer', padding:'7px 18px', fontWeight:800, fontSize:'14px',
+          background: active?fill:'transparent', color: active?(fill===INK?'#fff':INK):'#8a8a88' } }, label);
+      return React.createElement('span',{style:{display:'inline-flex',border:`1.5px solid ${INK}`}},
+        seg('ON', on, key==='TRACTION'?INK:ACID), seg('OFF', !on, '#c6c6c6'));
+    };
+    const rows = [
+      ['DIFFICULTY', arrows('NORMAL')], ['TRANSMISSION', arrows('AUTOMATIC')],
+      ['TRACTION CONTROL', toggle('TRACTION')], ['STABILITY ASSIST', toggle('STABILITY')],
+      ['ABS', toggle('ABS')], ['STEERING LINE', toggle('STEERING')],
+      ['DAMAGE', arrows('NORMAL')], ['REWIND', toggle('REWIND')], ['UNITS', arrows('KM/H')],
+    ];
+    const settings = rows.map(([label, control], i) => ({ label, control,
+      rowStyle: `display:flex;justify-content:space-between;align-items:center;padding:16px 24px;`
+        + (i < rows.length-1 ? 'border-bottom:1.5px solid #141414;' : '') }));
+
+    // ── brand list
+    const brands = ['ALL','NEXUS','KATANA','VORTEX','PHOENIX','OUTLAW'].map(label => {
+      const active = S.brand === label;
+      return { label, select: () => this.setState({ brand: label }),
+        style: `display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;font-weight:800;font-size:18px;color:${INK};`
+          + (active ? `background:${ACID};` : `opacity:.65;`) };
+    });
+
+    // ── statBar()
+    const stats = [['SPEED',.7],['ACCELERATION',.62],['HANDLING',.8],['DRIFT',.9],['BRAKING',.55]]
+      .map(([label,v],i) => ({ label, fillStyle:`height:100%;width:${v*100}%;background:${ACID};transform-origin:left;animation:growbar ${.7+i*.12}s ease-out both` }));
+
+    // ── car thumbnails
+    const thumbColors = [ACID,'#e0563c','#2c2c2c','#e79ec0','#c9c2b4'];
+    const cars = thumbColors.map((col,i) => ({ slotId:`car-thumb-${i}`,
+      select: () => this.setState({ car: i }),
+      style:`position:relative;flex:1;height:120px;background:${col};cursor:pointer;`
+        + `border:${S.car===i?`3px solid ${INK}`:'1.5px solid #141414'};`
+        + (S.car===i?'':'opacity:.9;') }));
+
+    // ── modal()
+    const btn = (label, kind) => ({ label,
+      style: `padding:13px 30px;font-weight:800;font-size:15px;cursor:pointer;`
+        + (kind==='primary' ? `background:${INK};color:#fff;`
+          : `border:1.5px solid ${INK};background:transparent;color:${INK};`) });
+    const mk = (title, headBg, headColor, body, bodyColor, buttons) => ({
+      title, body, buttons,
+      frameStyle:`border:1.5px solid ${INK};background:#f1f0ec`,
+      headStyle:`display:flex;justify-content:space-between;align-items:center;padding:13px 18px;font-weight:800;font-size:15px;letter-spacing:.03em;background:${headBg};color:${headColor}`,
+      bodyStyle:`font-weight:600;font-size:17px;color:${bodyColor};line-height:1.5;white-space:pre-line` });
+    const modals = [
+      mk('CONFIRM', ACID, INK, 'Purchase this vehicle?\nNX7', INK, [btn('YES','ghost'), btn('NO','primary')]),
+      mk('NOTICE', '#e79ec0', INK, 'Changes have been saved.', INK, [btn('OK','primary')]),
+      mk('DELETE', '#4a97b8', '#fff', 'This data will be deleted.\nThis action cannot be undone.', INK, [btn('DELETE','primary'), btn('CANCEL','ghost')]),
+      mk('INFORMATION', '#c9c2b4', INK, 'Connect to online services?', INK, [btn('ONLINE','primary'), btn('OFFLINE','ghost')]),
+    ];
+
+    return { menu, tabs, settings, brands, stats, cars, modals };
+  }
+}
+</script>
+</body>
+</html>

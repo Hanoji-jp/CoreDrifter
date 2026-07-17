@@ -216,6 +216,29 @@ bool Application::Init(int w, int h)
 	// 文字流体化(ドリフト演出)用の大フォント(No.1)。太字で垂れ・煙が映える。
 	KdFontManager::Instance().AddFont(1, "Arial Black", 130);
 
+	// Drift Project UI：デザイン忠実再現のため Archivo の静的ウェイトを読み込む。
+	//   GDIは可変フォントのウェイト軸を選べないので、ウェイトごとの静的TTFを使う。
+	//   ※可変版 Archivo.ttf は "Archivo" 名が Regular/Bold と衝突するので読み込まない。
+	KdFontManager::Instance().AddFontResource("Asset/Fonts/Archivo-Black.ttf");      // 900 "Archivo Black"
+	KdFontManager::Instance().AddFontResource("Asset/Fonts/Archivo-ExtraBold.ttf");  // 800 "Archivo ExtraBold"
+	KdFontManager::Instance().AddFontResource("Asset/Fonts/Archivo-SemiBold.ttf");   // 600 "Archivo SemiBold"
+	KdFontManager::Instance().AddFontResource("Asset/Fonts/Archivo-Bold.ttf");       // 700 "Archivo"(Bold)
+	KdFontManager::Instance().AddFontResource("Asset/Fonts/Archivo-Regular.ttf");    // 400 "Archivo"
+	// デザインの各サイズ・ウェイト(1536→1280 の 0.833 倍で換算)。
+	//   ※欧文フォントは DEFAULT_CHARSET(1) を指定して別書体への置換を防ぐ(重要)。
+	//   ※高さは負値=em高(CSSのfont-size相当)。正値だとセル高扱いで約15%小さくなるため。
+	constexpr int LAT = 1;   // DEFAULT_CHARSET
+	KdFontManager::Instance().AddFont(2,  "Archivo Black",     -125, 900, LAT);  // DRIFT   (150/900)
+	KdFontManager::Instance().AddFont(3,  "Archivo Black",     -88,  900, LAT);  // PROJECT (106/900)
+	KdFontManager::Instance().AddFont(4,  "Archivo ExtraBold", -18,  800, LAT);  // メニュー (21/800)
+	KdFontManager::Instance().AddFont(5,  "Archivo ExtraBold", -12,  800, LAT);  // タグライン/バッジ (14/800)
+	KdFontManager::Instance().AddFont(6,  "Archivo ExtraBold", -11,  800, LAT);  // トップ帯スローガン (13/800)
+	KdFontManager::Instance().AddFont(7,  "Archivo",           -11,  700, LAT);  // フッター/小見出し (13/700)
+	KdFontManager::Instance().AddFont(8,  "Archivo ExtraBold", -13,  800, LAT);  // NOW PLAYING曲名 (15/800)
+	KdFontManager::Instance().AddFont(9,  "Archivo SemiBold",  -10,  600, LAT);  // NOW PLAYINGアーティスト (11/600)
+	KdFontManager::Instance().AddFont(10, "Archivo Black",     -17,  900, LAT);  // "///" (20/900)
+	KdFontManager::Instance().AddFont(11, "Archivo",           -10,  700, LAT);  // 極小ラベル (12/700)
+
 	//===================================================================
 	// ゲーム固有の初期化
 	//===================================================================

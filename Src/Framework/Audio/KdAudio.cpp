@@ -188,9 +188,20 @@ void KdAudioManager::Init()
 	// AudioEngine初期化
 	DirectX::AUDIO_ENGINE_FLAGS eflags = DirectX::AudioEngine_ReverbUseFilters;
 
-	m_audioEng = std::make_unique<DirectX::AudioEngine>(eflags);
-	m_audioEng->SetReverb(DirectX::Reverb_Default);
-	g_audioAlive = true;   // KdBgmVoice がボイス操作してよい
+	// オーディオデバイスが無い/初期化失敗でもゲームは無音で続行する(クラッシュさせない)。
+	// DirectXTKはAudioEngine生成失敗時にstd::runtime_error("AudioEngine")を投げるため捕まえる。
+	try
+	{
+		m_audioEng = std::make_unique<DirectX::AudioEngine>(eflags);
+		m_audioEng->SetReverb(DirectX::Reverb_Default);
+		g_audioAlive = true;   // KdBgmVoice がボイス操作してよい
+	}
+	catch (const std::exception& e)
+	{
+		m_audioEng = nullptr;
+		g_audioAlive = false;   // 以降 Play()/Update() は m_audioEng の null で素通り
+		OutputDebugStringA((std::string("[Audio] init failed, running silent: ") + e.what() + "\n").c_str());
+	}
 
 	m_listener.OrientFront = { 0, 0, 1 };
 

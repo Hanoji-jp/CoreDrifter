@@ -136,8 +136,12 @@ void BaseScene::DrawSprite()
 	}
 	KdShaderManager::Instance().m_spriteShader.End();
 
-	// 文字流体化(ドリフト演出)：スプライトEndの後にバックバッファへ合成＝最前面に出す
-	KdShaderManager::Instance().m_postProcessShader.DrawFluidText(KdFPSController::GetDt());
+	// 文字流体化(ドリフト演出)：スプライトEndの後にバックバッファへ合成＝最前面に出す。
+	// ゲーム中のスコア演出なので、それを使うシーンだけで描く(タイトル等には出さない)。
+	if (UsesFluidText())
+	{
+		KdShaderManager::Instance().m_postProcessShader.DrawFluidText(KdFPSController::GetDt());
+	}
 }
 
 void BaseScene::DrawDebug()

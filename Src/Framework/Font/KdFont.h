@@ -97,7 +97,7 @@ public:
 	//[in] fontName		�c �ǉ�����t�H���g��
 	//[in] h			�c �t�H���g�̑傫��(����)
 	//------------------------------------------------------------
-	void AddFont(int fontNo, const std::string& fontName, int h);
+	void AddFont(int fontNo, const std::string& fontName, int h, int weight = 400 /*FW_NORMAL*/, int charset = 128 /*SHIFTJIS_CHARSET*/);
 
 	//------------------------------------------------------------
 	// �w��ԍ��̃t�H���g���g�p���A��������t�H���g�e�N�X�`���Ƃ��Đ�������
