@@ -34,9 +34,9 @@ namespace SmokeConst
 	constexpr float TurbStrength = 0.9f;   // 揺らしの強さ
 	constexpr float TurbFreq     = 3.0f;   // 揺らしの周波数
 
-	// ①エロージョン(ディゾルブ)：消え際に雲アルファの薄い所からちぎれて消す
-	constexpr float ErodeStrength = 1.0f;  // 大きいほど縁から強く溶ける
-	constexpr float ErodeEdge     = 0.28f; // 溶けの縁の柔らかさ
+	// ①ディゾルブ：消え際に雲アルファの薄い所から穴が開いて崩れる(不透明度フェードと併用)
+	constexpr float ErodeStrength = 0.6f;  // 穴あきの強さ(控えめ。フェードを主役にする)
+	constexpr float ErodeEdge     = 0.45f; // 穴の縁の柔らかさ(大きいほど滑らか)
 
 	// 放出制御(密な塊をたくさん重ねる)
 	constexpr float SlipThreshold = 2.0f;  // これ以上の後輪スリップ量で煙が出始める
@@ -59,9 +59,9 @@ namespace SmokeConst
 
 	// 不透明度(柔らかい煙アルファを半透明で重ねて"繋がった塊"にする。
 	// 1粒は薄く、重なりで密度を積み上げる＝つなぎ目が消える)
-	constexpr float AlphaPeak    = 0.50f;  // 最大不透明度(薄め＝重なりで繋がる)
+	constexpr float AlphaPeak    = 0.40f;  // 最大不透明度(薄め＝濃すぎ回避・重なりで繋がる)
 	constexpr float FadeInRatio  = 0.12f;  // 寿命比これまでで立ち上がる
-	constexpr float FadeOutRatio = 0.35f;  // 寿命比これぶん残して消えていく
+	constexpr float FadeOutRatio = 0.45f;  // 寿命比これぶん残して消える(長めで滑らかに散る)
 
 	// スモークテクスチャ
 	//   ToonSmoke.png … 輪郭焼き込みの硬いトゥーン(重ねると輪郭線が汚い)

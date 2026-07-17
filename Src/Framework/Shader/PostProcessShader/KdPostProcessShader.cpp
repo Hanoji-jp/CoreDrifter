@@ -85,6 +85,32 @@ bool KdPostProcessShader::Init()
 		}
 	}
 
+	// 煙シルエット輪郭 PS
+	{
+#include "KdPostProcessShader_PS_SmokeOutline.shaderInc"
+
+		if (FAILED(KdDirect3D::Instance().WorkDev()->CreatePixelShader(
+			compiledBuffer, sizeof(compiledBuffer), nullptr, &m_PS_SmokeOutline)))
+		{
+			assert(0 && "ピクセルシェーダー作成失敗");
+			Release();
+			return false;
+		}
+	}
+
+	// 文字流体化 PS
+	{
+#include "KdPostProcessShader_PS_TextFluid.shaderInc"
+
+		if (FAILED(KdDirect3D::Instance().WorkDev()->CreatePixelShader(
+			compiledBuffer, sizeof(compiledBuffer), nullptr, &m_PS_TextFluid)))
+		{
+			assert(0 && "ピクセルシェーダー作成失敗");
+			Release();
+			return false;
+		}
+	}
+
 	m_cb0_BlurInfo.Create();
 
 	m_cb0_DoFInfo.Create();
@@ -92,6 +118,10 @@ bool KdPostProcessShader::Init()
 	m_cb0_BrightInfo.Create();
 
 	m_cb0_OutlineInfo.Create();
+
+	m_cb0_SmokeOutline.Create();
+
+	m_cb0_TextFluid.Create();
 
 	const std::shared_ptr<KdTexture>& backBuffer = KdDirect3D::Instance().GetBackBuffer();
 	
@@ -108,6 +138,14 @@ bool KdPostProcessShader::Init()
 
 	// アウトライン合成画像
 	m_outlineRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
+
+	// 煙専用の描画先(色+アルファ)。深度は既存シーンの物を流用するのでここでは色のみ。
+	m_smokeRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
+
+	// 煙をガウスぼかしした版(縁を柔らかく＋消える粒のポップを目立たなくする)
+	m_smokeBlurRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
+
+	// 文字流体化：文字画像は初回描画時に遅延読み込みする(Init段階だと読めない場合があるため)
 
 	m_brightEffectRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
 
@@ -147,11 +185,15 @@ void KdPostProcessShader::Release()
 	KdSafeRelease(m_PS_DoF);
 	KdSafeRelease(m_PS_Bright);
 	KdSafeRelease(m_PS_Outline);
+	KdSafeRelease(m_PS_SmokeOutline);
+	KdSafeRelease(m_PS_TextFluid);
 
 	m_cb0_BlurInfo.Release();
 	m_cb0_DoFInfo.Release();
 	m_cb0_BrightInfo.Release();
 	m_cb0_OutlineInfo.Release();
+	m_cb0_SmokeOutline.Release();
+	m_cb0_TextFluid.Release();
 }
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -285,6 +327,357 @@ void KdPostProcessShader::ApplySceneOutline()
 	OutlineProcess(m_postEffectRTPack.m_RTTexture);
 	// 結果を現在のRT（=シーンRT m_postEffectRTPack）へ書き戻す
 	KdShaderManager::Instance().m_spriteShader.DrawTex(m_outlineRTPack.m_RTTexture.get(), 0, 0);
+}
+
+// 煙を専用RTへ描き始める。背景は透明でクリアし、シーン深度を流用して遮蔽(地形隠れ)を維持する。
+void KdPostProcessShader::BeginSmoke()
+{
+	if (!m_smokeOutlineEnabled) { return; }
+
+	// 透明でクリア（アルファ0＝カバレッジ0）
+	m_smokeRTPack.ClearTexture(Math::Color(0.0f, 0.0f, 0.0f, 0.0f));
+
+	// 描画先を煙RTへ。深度はシーンの物を流用（地形に隠れる遮蔽を維持）。
+	if (!m_smokeRTChanger.ChangeRenderTarget(m_smokeRTPack.m_RTTexture,
+		m_postEffectRTPack.m_ZBuffer, &m_smokeRTPack.m_viewPort))
+	{
+		m_smokeRTChanger.UndoRenderTarget();
+	}
+}
+
+// 煙RTを閉じ、塊全体のシルエット外周に輪郭を乗せてシーンへアルファ合成する。
+void KdPostProcessShader::EndSmokeAndComposite()
+{
+	if (!m_smokeOutlineEnabled) { return; }
+
+	// 描画先をシーンRT（m_postEffectRTPack）へ戻す
+	m_smokeRTChanger.UndoRenderTarget();
+
+	KdShaderManager& mgr = KdShaderManager::Instance();
+
+	SetSmokeOutlineToDevice();
+	mgr.ChangeSamplerState(KdSamplerState::Linear_Clamp);
+	mgr.ChangeBlendState(KdBlendState::Alpha);                     // 煙＋輪郭を「over」合成
+	mgr.ChangeDepthStencilState(KdDepthStencilState::ZWriteDisable);
+
+	ID3D11DeviceContext* dc = KdDirect3D::Instance().WorkDevContext();
+	dc->PSSetShaderResources(0, 1, m_smokeRTPack.m_RTTexture->WorkSRViewAddress());
+
+	// 全画面クアッドで合成（描画先＝現在のシーンRT）
+	KdDirect3D::Instance().DrawVertices(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, 4,
+		&m_screenVert[0], sizeof(Vertex));
+
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	dc->PSSetShaderResources(0, 1, &nullSRV);
+
+	mgr.UndoDepthStencilState();
+	mgr.UndoBlendState();
+	mgr.UndoSamplerState();
+}
+
+void KdPostProcessShader::SetSmokeOutlineToDevice()
+{
+	ID3D11DeviceContext* DevCon = KdDirect3D::Instance().WorkDevContext();
+	if (!DevCon) { return; }
+
+	// 画面のテクセルサイズを反映
+	const auto& bb = KdDirect3D::Instance().GetBackBuffer();
+	m_cb0_SmokeOutline.Work().TexelX = 1.0f / static_cast<float>(bb->GetWidth());
+	m_cb0_SmokeOutline.Work().TexelY = 1.0f / static_cast<float>(bb->GetHeight());
+	m_cb0_SmokeOutline.Write();
+	DevCon->PSSetConstantBuffers(0, 1, m_cb0_SmokeOutline.GetAddress());
+
+	KdShaderManager& shaderMgr = KdShaderManager::Instance();
+	if (shaderMgr.SetVertexShader(m_VS))
+	{
+		DevCon->IASetInputLayout(m_inputLayout);
+	}
+	shaderMgr.SetPixelShader(m_PS_SmokeOutline);
+}
+
+// 空ならデフォルトの文字エフェクトを1つ用意(初回表示用)。
+void KdPostProcessShader::EnsureFluidItems()
+{
+	if (m_fluidItems.empty())
+	{
+		m_fluidItems.push_back(std::make_shared<FluidTextItem>());
+		m_fluidSelected = 0;
+	}
+}
+
+// 選択中オブジェクトの文字を差し替え(スコア表示などから呼ぶ)。
+void KdPostProcessShader::SetFluidText(const char* str)
+{
+	if (!str) { return; }
+	EnsureFluidItems();
+	if (m_fluidSelected < 0 || m_fluidSelected >= static_cast<int>(m_fluidItems.size())) { return; }
+	auto& it = *m_fluidItems[m_fluidSelected];
+	if (it.str != str)
+	{
+		it.str = str;
+		// ImGui入力欄も同期(はみ出し安全)
+		strncpy_s(it.editBuf, sizeof(it.editBuf), str, _TRUNCATE);
+		it.dirty = true;
+	}
+}
+
+// 選択中オブジェクトの効果強さ(0-1)。
+void KdPostProcessShader::SetFluidTextIntensity(float v)
+{
+	if (m_fluidSelected < 0 || m_fluidSelected >= static_cast<int>(m_fluidItems.size())) { return; }
+	m_fluidItems[m_fluidSelected]->params.Intensity = v;
+}
+
+// 選択中オブジェクトのスタイルを次へ回して番号を返す。
+int KdPostProcessShader::CycleFluidStyle()
+{
+	EnsureFluidItems();
+	if (m_fluidSelected < 0 || m_fluidSelected >= static_cast<int>(m_fluidItems.size())) { return 0; }
+	auto& s = m_fluidItems[m_fluidSelected]->params.Style;
+	int n = ((int)(s + 0.5f) + 1) % kFluidStyleCount;
+	s = static_cast<float>(n);
+	return n;
+}
+
+// UTF-8(ImGui)→Shift-JIS(フォント側が期待)へ変換。数字/英字はそのまま、日本語の化けを防ぐ。
+static std::string Utf8ToSjis(const std::string& u8)
+{
+	if (u8.empty()) { return ""; }
+	int wlen = MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, nullptr, 0);
+	if (wlen <= 0) { return u8; }
+	std::wstring w(wlen, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, &w[0], wlen);
+	int slen = WideCharToMultiByte(932, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+	if (slen <= 0) { return u8; }
+	std::string s(slen, '\0');
+	WideCharToMultiByte(932, 0, w.c_str(), -1, &s[0], slen, nullptr, nullptr);
+	if (!s.empty() && s.back() == '\0') { s.pop_back(); }
+	return s;
+}
+
+// item.str を DrawFont で専用RTへ焼く。RTは"文字の実寸"で作り直す(幅いっぱいに文字が入る)。
+void KdPostProcessShader::BakeFluidText(FluidTextItem& item)
+{
+	auto& sp = KdShaderManager::Instance().m_spriteShader;
+	// 大フォント(No.1)でグリフ生成。UTF-8→SJIS変換して渡す。初回空ならdirtyのまま再試行。
+	auto fs = KdFontManager::Instance().CreateFontTexture(1, Utf8ToSjis(item.str), 0);
+	if (!fs || fs->GetTexList().empty()) { return; }
+
+	// グリフ幅を実測(DrawFontはこの幅ぶんX前進する)＝テキスト全体の幅・高さ＋グリフ数。
+	// 各グリフ幅も控えておく(全角/半角で幅が違う＝桁ごとグラデのエッジ計算に使う)。
+	int tw = 0, th = 1, glyphs = 0;
+	std::vector<int> glyphWidths;
+	for (auto& d : fs->GetTexList())
+	{
+		if (!d || !d->FontTex) { continue; }        // null安全
+		if (d->Code == '\n') { continue; }
+		const int gw = static_cast<int>(d->FontTex->GetInfo().Width);
+		glyphWidths.push_back(gw);
+		tw += gw;
+		th = std::max<int>(th, static_cast<int>(d->FontTex->GetInfo().Height));
+		++glyphs;
+	}
+	item.glyphCount = std::max<int>(glyphs, 1);   // 桁ごとグラデの実文字数
+	tw = std::max<int>(tw, 1);
+	// 左右はほぼ余白なし(文字がRT幅ぴったり=桁ごとグラデが数字と揃う)。上下だけ少し余白。
+	const int hpad = 2;
+	const int vpad = std::max<int>(th / 8, 2);
+	const int rtW  = tw + hpad * 2;
+
+	// 各グリフの左右エッジをRT幅で正規化してparamsへ(可変幅=全角/半角混在に対応)。
+	// [0]=最初のグリフ左端、[i+1]=i番目グリフの右端。最大31文字(=32エッジ)。
+	{
+		float* ep = &item.params.GlyphEdges[0].x;   // float4×8=連続32float
+		int cursor = hpad;
+		ep[0] = static_cast<float>(cursor) / static_cast<float>(rtW);
+		int e = 1;
+		for (int i = 0; i < static_cast<int>(glyphWidths.size()) && e < 32; ++i, ++e)
+		{
+			cursor += glyphWidths[i];
+			ep[e] = static_cast<float>(cursor) / static_cast<float>(rtW);
+		}
+		for (; e < 32; ++e) { ep[e] = 1.0f; }   // 余りは右端で埋める(安全)
+	}
+
+	// テキストの実寸でRTを作り直す
+	item.rt.CreateRenderTarget(rtW, th + vpad * 2);
+	item.rt.ClearTexture(Math::Color(0.0f, 0.0f, 0.0f, 1.0f));   // 黒地
+
+	if (!m_textFluidRTChanger.ChangeRenderTarget(item.rt.m_RTTexture, nullptr, &item.rt.m_viewPort))
+	{
+		m_textFluidRTChanger.UndoRenderTarget();
+		return;
+	}
+	sp.Begin(true);   // リニア。中心原点の正射影が張られる
+	const Math::Color white(1.0f, 1.0f, 1.0f, 1.0f);
+	// 中央寄せ：中心原点系なので左下を (-幅/2, -高さ/2) に
+	sp.DrawFont(fs, Math::Vector2(-tw * 0.5f, -th * 0.5f), &white, 0);
+	sp.End();
+	m_textFluidRTChanger.UndoRenderTarget();
+
+	item.dirty = false;
+}
+
+// 全オブジェクトを各スタイルで加工し、レイヤー順(先頭=奥→末尾=手前)に合成する。
+void KdPostProcessShader::DrawFluidText(float dt)
+{
+	EnsureFluidItems();
+
+	ID3D11DeviceContext* dc = KdDirect3D::Instance().WorkDevContext();
+	if (!dc) { return; }
+	const auto& bb = KdDirect3D::Instance().GetBackBuffer();
+	if (!bb) { return; }
+
+	KdShaderManager& mgr = KdShaderManager::Instance();
+	bool stateSet = false;
+
+	for (auto& sp : m_fluidItems)
+	{
+		if (!sp || !sp->enabled) { continue; }
+		if (sp->dirty) { BakeFluidText(*sp); }
+		if (!sp->rt.m_RTTexture) { continue; }   // まだ焼けてない
+
+		sp->params.Time += dt;
+
+		// このオブジェクトのparamsを共用cbufferへ写し、毎フレーム値を上書きしてアップロード
+		cbTextFluid& w = m_cb0_TextFluid.Work();
+		w = sp->params;
+		w.TexelX      = 1.0f / static_cast<float>(bb->GetWidth());
+		w.TexelY      = 1.0f / static_cast<float>(bb->GetHeight());
+		w.LetterCount = static_cast<float>(sp->glyphCount);
+		m_cb0_TextFluid.Write();
+		dc->PSSetConstantBuffers(0, 1, m_cb0_TextFluid.GetAddress());
+
+		if (mgr.SetVertexShader(m_VS)) { dc->IASetInputLayout(m_inputLayout); }
+		mgr.SetPixelShader(m_PS_TextFluid);
+
+		if (!stateSet)
+		{
+			mgr.ChangeSamplerState(KdSamplerState::Linear_Clamp);
+			mgr.ChangeBlendState(KdBlendState::Alpha);
+			mgr.ChangeDepthStencilState(KdDepthStencilState::ZWriteDisable);
+			stateSet = true;
+		}
+
+		dc->PSSetShaderResources(0, 1, sp->rt.m_RTTexture->WorkSRViewAddress());
+		KdDirect3D::Instance().DrawVertices(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, 4,
+			&m_screenVert[0], sizeof(Vertex));
+
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		dc->PSSetShaderResources(0, 1, &nullSRV);
+	}
+
+	if (stateSet)
+	{
+		mgr.UndoDepthStencilState();
+		mgr.UndoBlendState();
+		mgr.UndoSamplerState();
+	}
+}
+
+// 文字エフェクトのライブ調整パネル(文字化け/例外回避のためASCIIラベル＋安全ウィジェット)
+//   Unity風に Hierarchy(オブジェクトの追加/削除/レイヤー並び替え) と Inspector(選択物の編集) の2枚に分ける。
+void KdPostProcessShader::DrawFluidTextImGui()
+{
+	EnsureFluidItems();
+	const int count = static_cast<int>(m_fluidItems.size());
+	if (m_fluidSelected >= count) { m_fluidSelected = count - 1; }
+	if (m_fluidSelected < 0)      { m_fluidSelected = 0; }
+
+	// --- Hierarchy：オブジェクト一覧＋追加/削除/レイヤー移動 ---
+	ImGui::Begin("Hierarchy");
+
+	if (ImGui::Button("Add"))
+	{
+		auto add = std::make_shared<FluidTextItem>();
+		m_fluidItems.push_back(add);
+		m_fluidSelected = static_cast<int>(m_fluidItems.size()) - 1;   // 追加＝末尾＝最前面
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Delete") && count > 0)
+	{
+		m_fluidItems.erase(m_fluidItems.begin() + m_fluidSelected);
+		if (m_fluidSelected >= static_cast<int>(m_fluidItems.size())) { m_fluidSelected = static_cast<int>(m_fluidItems.size()) - 1; }
+	}
+	ImGui::SameLine();
+	// レイヤー移動：Upで奥へ(描画が早い) / Downで手前へ(描画が遅い＝上に重なる)
+	if (ImGui::Button("Layer Up") && m_fluidSelected > 0)
+	{
+		std::swap(m_fluidItems[m_fluidSelected], m_fluidItems[m_fluidSelected - 1]);
+		--m_fluidSelected;
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Layer Down") && m_fluidSelected >= 0 && m_fluidSelected < static_cast<int>(m_fluidItems.size()) - 1)
+	{
+		std::swap(m_fluidItems[m_fluidSelected], m_fluidItems[m_fluidSelected + 1]);
+		++m_fluidSelected;
+	}
+
+	ImGui::Separator();
+	ImGui::TextDisabled("top=back / bottom=front");
+	// 一覧(先頭=奥→末尾=手前)。ラベルはインデックス＋文字列。IDは##で一意化。
+	for (int i = 0; i < static_cast<int>(m_fluidItems.size()); ++i)
+	{
+		auto& it = m_fluidItems[i];
+		char label[96];
+		sprintf_s(label, sizeof(label), "%s[%d] %s###fluid%d",
+			(it->enabled ? "" : "(off) "), i, it->str.c_str(), i);
+		if (ImGui::Selectable(label, m_fluidSelected == i)) { m_fluidSelected = i; }
+	}
+	ImGui::End();
+
+	// --- Inspector：Hierarchyで選んだオブジェクトのパラメータをここで編集 ---
+	ImGui::Begin("Inspector");
+	if (m_fluidSelected >= 0 && m_fluidSelected < static_cast<int>(m_fluidItems.size()))
+	{
+		auto& item = *m_fluidItems[m_fluidSelected];
+		cbTextFluid& w = item.params;
+
+		ImGui::Text("Text FX [%d]", m_fluidSelected);
+		ImGui::Separator();
+
+		ImGui::Checkbox("Enabled", &item.enabled);
+
+		// テキスト入力。Enterで確定した時だけ反映＝編集中(特にバックスペース)の
+		// 途中文字列を焼かない → 削除時のxmemory例外を回避。バッファはオブジェクトごと。
+		if (ImGui::InputText("Text (Enter)", item.editBuf, sizeof(item.editBuf), ImGuiInputTextFlags_EnterReturnsTrue))
+		{
+			item.str = item.editBuf;
+			item.dirty = true;
+		}
+
+		int st = (int)(w.Style + 0.5f);
+		if (ImGui::SliderInt("Style 0-7", &st, 0, 7)) { w.Style = (float)st; }
+		ImGui::TextUnformatted("0Grad 1Smoke 2Fire 3Dot 4Line 5RGB 6 3D 7Warp");
+
+		ImGui::Separator();
+		ImGui::ColorEdit4("Color1", &w.CoreColor.x);
+		ImGui::ColorEdit4("Color2", &w.FluidColor.x);
+
+		ImGui::Separator();
+		ImGui::DragFloat("Freq/Density", &w.WarpFreq, 0.1f, 0.5f, 80.0f);
+		ImGui::DragFloat("FlowSpeed",    &w.FlowSpeed, 0.02f, 0.0f, 5.0f);
+		ImGui::DragFloat("Amount",       &w.WarpAmp, 0.01f, 0.0f, 2.0f);
+		ImGui::DragFloat("Intensity",    &w.Intensity, 0.01f, 0.0f, 1.0f);
+
+		// ロングシャドウ(Style 3 ハーフトーン)：長さ/角度/色
+		ImGui::Separator();
+		ImGui::TextUnformatted("Long Shadow (Dot style)");
+		ImGui::DragFloat("ShadowLen",   &w.Dilate, 0.02f, 0.0f, 5.0f);
+		ImGui::DragFloat("ShadowAngle", &w.ShadowAngle, 1.0f, 0.0f, 360.0f);
+		ImGui::ColorEdit4("ShadowColor", &w.ShadowColor.x);   // rgb=色 / a=不透明度
+
+		ImGui::Separator();
+		ImGui::DragFloat("PosX",   &w.RectCX, 0.005f, -0.5f, 1.5f);
+		ImGui::DragFloat("PosY",   &w.RectCY, 0.005f, -0.5f, 1.5f);
+		ImGui::DragFloat("Width",  &w.RectW, 0.005f, 0.05f, 2.0f);
+		ImGui::DragFloat("Height", &w.RectH, 0.005f, 0.05f, 2.0f);
+	}
+	else
+	{
+		ImGui::TextUnformatted("Add an object in Hierarchy.");
+	}
+	ImGui::End();
 }
 
 void KdPostProcessShader::DrawDamageFlash()

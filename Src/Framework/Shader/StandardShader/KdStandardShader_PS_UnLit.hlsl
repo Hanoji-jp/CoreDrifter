@@ -74,13 +74,16 @@ float4 main(VSOutputNoLighting In) : SV_Target0
 		float3 lit = shade * lerp(float3(1.0f, 1.0f, 1.0f), g_DL_Color, 0.25f);
 		outColor *= lit;
 
-		//--- エロージョン(ディゾルブ) ---
-		// presence(In.Color.a=生存率0〜1)が下がるほど閾値を上げ、雲アルファの
-		// 薄い所から穴が開いてちぎれて消す。円のまま均一に薄くならない＝グロー円が出ない。
+		//--- ディゾルブ(穴あき) ＋ 不透明度フェード ---
+		// presence(In.Color.a=生存率0〜1)。
+		//  ① ディゾルブ：消えるほど閾値を上げ、雲アルファ(texA)の薄い所から穴が開いて崩れる。
+		//  ② 不透明度フェード：全体を presence で線形に薄くする＝滑らかに消える(ポップ防止)。
 		float texA     = g_tex.Sample(g_ss, In.UV).a;
 		float presence = In.Color.a;
-		float thr      = saturate(1.0f - presence) * g_SmokeErode;
-		baseColor.a    = smoothstep(thr, thr + g_SmokeEdge, texA) * g_SmokePeak;
+
+		float thr      = saturate(1.0f - presence) * g_SmokeErode;   // ディゾルブ閾値
+		float dissolve = smoothstep(thr, thr + g_SmokeEdge, texA);   // 穴あきマスク
+		baseColor.a    = dissolve * g_SmokePeak * presence;          // ×presenceで不透明度フェード
 	}
 
 	// 全体の明度：環境光に1が設定されている場合は影響なし

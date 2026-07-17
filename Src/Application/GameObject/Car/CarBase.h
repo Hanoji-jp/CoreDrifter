@@ -1,8 +1,9 @@
 ﻿#pragma once
 
-#include "../../Const/CarConst.h"   // 既定値(規約上constヘッダはinclude可)
-#include "../Effect/DriftSmoke.h"   // ドリフトスモーク(後輪の煙)
-#include "../../Input/HjGamePad.h"  // コントローラー入力(XInput)
+#include "../../Const/CarConst.h"        // 既定値(規約上constヘッダはinclude可)
+#include "../../Const/AlignmentConst.h"  // アライメント/サスセッティング既定値
+#include "../Effect/DriftSmoke.h"        // ドリフトスモーク(後輪の煙)
+#include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
 
 //==========================================================
 // CarBase
@@ -31,6 +32,12 @@ public:
 
 	// 当たり判定対象(地形など)を登録する。車はこれらへレイ/球判定を飛ばす。
 	void AddCollisionTarget(const std::weak_ptr<KdGameObject>& obj) { m_wpHitList.push_back(obj); }
+
+	// スポーン(初期配置)：位置・向きを与え、速度など運動状態をリセット。
+	// 与えた値はリスポーン地点として記憶する。
+	void SetSpawn(const Math::Vector3& pos, float yaw);
+	// 記憶したスポーン地点へ戻す(Rキーのリスポーン)
+	void Respawn() { SetSpawn(m_spawnPos, m_spawnYaw); }
 
 	// 調整パネルを外部(シーン)から描画するための公開窓口
 	void DrawImGui() { DrawTuningImGui(); }
@@ -118,6 +125,16 @@ protected:
 	// トランジション補助(振り返し。ドリフト中に切った方向へヨーを後押し)
 	float m_transitionAssist = CarConst::TransitionAssist;
 
+	// アライメント/サスセッティング(実挙動に効く。既定は中立=現状維持)
+	float m_toeFront   = AlignmentConst::ToeFront;    // 前トー(rad, 正=トーイン)
+	float m_toeRear    = AlignmentConst::ToeRear;     // 後トー
+	float m_ackermann  = AlignmentConst::Ackermann;   // アッカーマン(-1〜1, 0=平行)
+	float m_camberGrip = AlignmentConst::CamberGrip;  // キャンバーの横グリップ寄与(0=見た目のみ)
+	float m_springF    = AlignmentConst::SpringFront; // 前ばね定数(相対)
+	float m_springR    = AlignmentConst::SpringRear;  // 後ばね定数(相対)
+	float m_arbF       = AlignmentConst::ArbFront;    // 前スタビ(相対)
+	float m_arbR       = AlignmentConst::ArbRear;     // 後スタビ(相対)
+
 	// 見た目(タイヤ配置・向き)
 	float m_bodyScale  = CarConst::CarModelScale;
 	float m_bodyYaw    = CarConst::CarModelYawOffset;
@@ -149,6 +166,8 @@ private:
 	// ランタイム状態
 	Math::Vector3 m_pos = Math::Vector3::Zero;
 	Math::Vector3 m_vel = Math::Vector3::Zero;
+	Math::Vector3 m_spawnPos = Math::Vector3::Zero;   // リスポーン地点(SetSpawnで記憶)
+	float         m_spawnYaw = 0.0f;
 	float         m_yaw     = 0.0f;
 	float         m_yawRate = 0.0f;   // ヨー角速度(rad/s)
 	float         m_mzFilt  = 0.0f;   // 平滑化したヨーモーメント(タイヤリラクゼーション)
@@ -165,6 +184,7 @@ private:
 	int           m_gear      = 1;
 	float         m_clutch    = 1.0f;        // 1=接続 / 0=切断(サイドで自動的に切れる)
 	float         m_driveAccel = 0.0f;       // 今フレームの駆動加速(クラッチ・トルク込み)
+	bool          m_reverse    = false;      // 後退ギア(R)に入っているか
 
 	// サスペンション状態(車体のロール/ピッチ)
 	float         m_rollAngle  = 0.0f, m_rollVel  = 0.0f;
@@ -191,7 +211,25 @@ private:
 	float         m_terrainPitch  = 0.0f;              // 地形の前後傾き(rad, 4輪レイから推定)
 	float         m_terrainRoll   = 0.0f;              // 地形の左右傾き(rad, 4輪レイから推定)
 
+	// ジャンプ/滞空の手触り調整(ImGuiで生調整可)
+	float         m_airGravityMul  = CarConst::AirGravityMul; // 滞空重力倍率(大=ズシッと速い/小=フワッと)
+	float         m_jumpLaunch     = 1.0f;                    // ランプの打ち上げ強さ倍率
+	float         m_landBounce     = CarConst::LandBounce;    // 着地の跳ね返り
+
+	// ジャンプ/滞空(エビス風ジャンプドリフト)：垂直速度・重力・着地を扱う
+	bool          m_airborne       = false;   // 滞空中(タイヤ力なし=横向き/スピンを保持して飛ぶ)
+	float         m_velY           = 0.0f;    // 垂直速度(m/s, 上+)
+	float         m_groundYFilt    = 0.0f;    // 支持面の高さ(低域通過。メッシュ継ぎ目のガタつき除去)
+	float         m_prevGroundY    = 0.0f;    // 前フレームの支持面高さ(上昇速度の算出用)
+	float         m_supportVelY    = 0.0f;    // 支持面の上昇速度(平滑化。クレストで打ち上がる勢い)
+	bool          m_prevGroundValid = false;  // 前フレームに支持面高さが有効だったか
+	// 空中の剛体回転(角運動量)：ランプで付いた回転を空中で保持し空力で弾道へ収束
+	float         m_pitchRate      = 0.0f;    // ピッチ角速度(rad/s)
+	float         m_rollRate       = 0.0f;    // ロール角速度(rad/s)
+
 	// 当たり判定の可視化(F1トグル)：壁プローブ球＋接地レイをワイヤ表示
 	bool          m_debugDraw    = false;
 	bool          m_prevDebugKey = false;              // F1のエッジ検出
+	bool          m_prevOutlineKey = false;            // F2(煙輪郭トグル)のエッジ検出
+	bool          m_prevStyleKey   = false;            // F3(文字エフェクト切替)のエッジ検出
 };

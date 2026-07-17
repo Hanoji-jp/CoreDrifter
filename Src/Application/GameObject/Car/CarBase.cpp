@@ -25,6 +25,32 @@ void CarBase::Init()
 	// 調整パネル(DrawImGui)はシーン側でステージ用パネルと合成して登録する
 }
 
+void CarBase::SetSpawn(const Math::Vector3& pos, float yaw)
+{
+	// 位置・向きを設定し、運動状態(速度・ヨー・駆動輪回転など)をリセット。
+	// 初期配置とリスポーンの両方に使う。
+	m_pos      = pos;
+	m_yaw      = yaw;
+	m_spawnPos = pos;   // リスポーン地点として記憶
+	m_spawnYaw = yaw;
+	m_vel      = Math::Vector3::Zero;
+	m_yawRate  = 0.0f;
+	m_steer    = 0.0f;
+	m_playerSteer = 0.0f;
+	m_driveSpeed  = 0.0f;
+	m_engineRPM   = CarConst::IdleRPM;
+	m_gear        = 1;
+	m_clutch      = 1.0f;
+	m_reverse     = false;
+	// 滞空/垂直状態もリセット(空中でリスポーンしても即接地判定へ)
+	m_airborne        = false;
+	m_velY            = 0.0f;
+	m_supportVelY     = 0.0f;
+	m_prevGroundValid = false;
+	m_pitchRate       = 0.0f;
+	m_rollRate        = 0.0f;
+}
+
 void CarBase::Update()
 {
 	const float dt = KdFPSController::GetDt();
@@ -44,6 +70,23 @@ void CarBase::Update()
 	const bool debugKey = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
 	if (debugKey && !m_prevDebugKey) { m_debugDraw = !m_debugDraw; }
 	m_prevDebugKey = debugKey;
+
+	// F2：煙シルエット輪郭のON/OFFトグル(消え方の切り分け用。OFFで従来の直描き)
+	const bool outlineKey = (GetAsyncKeyState(VK_F2) & 0x8000) != 0;
+	if (outlineKey && !m_prevOutlineKey)
+	{
+		auto& pp = KdShaderManager::Instance().m_postProcessShader;
+		pp.SetSmokeOutlineEnabled(!pp.IsSmokeOutlineEnabled());
+	}
+	m_prevOutlineKey = outlineKey;
+
+	// F3：文字エフェクトのスタイルを切り替え(0=グラデ 1=虹スモ 2=炎 3=ドット 4=縞 5=色収差 6=3D 7=ワープ)
+	const bool styleKey = (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
+	if (styleKey && !m_prevStyleKey)
+	{
+		KdShaderManager::Instance().m_postProcessShader.CycleFluidStyle();
+	}
+	m_prevStyleKey = styleKey;
 
 	// マニュアル操作(キーボード)：左Shift=クラッチ / E=シフトアップ / Q=シフトダウン
 	bool clutchPressed = (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0;
@@ -182,6 +225,20 @@ void CarBase::Update()
 		m_driveAccel = m_enginePower * torque * m_clutch * gearFactor;
 	}
 
+	//===== 後退ギア(R)の断続 =====
+	// ほぼ停止中にS(throttle<0)を踏んだら後退へ入る。W(throttle>0)か
+	// 前進し始めたら解除。前進中のSは通常どおりブレーキ(後退には入らない)。
+	if (m_reverse)
+	{
+		if (throttle > 0.0f || vLong0 > CarConst::ReverseEngageSpeed) { m_reverse = false; }
+	}
+	else
+	{
+		if (throttle < 0.0f && vLong0 < CarConst::ReverseEngageSpeed) { m_reverse = true; }
+	}
+	// 駆動方向へアクセルを踏んでいるか(前進=W / 後退=S)。空転リラックスの判定に使う。
+	const bool accelPressed = m_reverse ? (throttle < 0.0f) : (throttle > 0.0f);
+
 	//===== 4輪シミュレーション(各輪の荷重・スリップ・摩擦円)をサブステップ積分 =====
 	const int   sub = std::max(CarConst::PhysicsSubsteps, 1);
 	const float h   = dt / static_cast<float>(sub);
@@ -207,6 +264,13 @@ void CarBase::Update()
 
 	float aLongPrev = 0.0f, aLatPrev = 0.0f;   // 荷重移動に使う前サブステップの加速度
 
+	// 前後ロール剛性配分(スプリング+スタビ)。横方向の荷重移動を前後どちらへ多く振るか。
+	//   フロント固い→フロント荷重移動大→フロントが逃げてアンダー。リア固い→オーバー(お尻が出る)。
+	//   既定は前後同値+スタビ0 → 0.5(=従来の50:50、挙動そのまま)。
+	const float rollStiffF     = std::max(m_springF + m_arbF, 1e-3f);
+	const float rollStiffR     = std::max(m_springR + m_arbR, 1e-3f);
+	const float frontRollShare = rollStiffF / (rollStiffF + rollStiffR);
+
 	for (int s = 0; s < sub; ++s)
 	{
 		const Math::Vector3 forward(sinf(m_yaw), 0.0f, cosf(m_yaw));
@@ -214,8 +278,17 @@ void CarBase::Update()
 		const float vLong = m_vel.Dot(forward);
 		const float vLat  = m_vel.Dot(right);
 		const float r     = m_yawRate;
-		const float cs    = cosf(m_steer);
-		const float sn    = sinf(m_steer);
+
+		// 滞空中はタイヤ接地なし＝タイヤ力を一切かけない。水平速度もヨーもそのまま保持して
+		// 飛ぶ＝横向き・スピンをキープしたまま宙を舞う「ジャンプドリフト」になる。
+		// エアコントロール：ステアで機首のヨーだけわずかに調整して着地姿勢を作れる。
+		if (m_airborne)
+		{
+			m_yawRate += steerInput * CarConst::AirSteerControl * h;
+			m_yawRate -= m_yawRate * std::min(CarConst::AirYawDamp * h, 1.0f);
+			m_yaw     += m_yawRate * h;
+			continue;
+		}
 
 		// 荷重移動(前後G→前後、横G→左右)。基準は各輪0.25。
 		// サスの反応時間ぶん"なめらかに"移す＝アクセルオフでリアが一気に抜けない(急スリップ防止)。
@@ -227,8 +300,19 @@ void CarBase::Update()
 		const float dLat  = m_dLatF;
 
 		// 駆動(後輪合計)とブレーキ(全輪)
-		const float engineTotal = (throttle > 0.0f) ? (m_driveAccel * throttle) : 0.0f;
-		const float brakeEach   = (throttle < 0.0f) ? (m_brakePower * throttle * 0.25f) : 0.0f;
+		float engineTotal, brakeEach;
+		if (m_reverse)
+		{
+			// 後退ギア：Sで後ろへ駆動(後退速度に上限)。ブレーキは掛けない。
+			// throttle<0 なので engineTotal は負＝m_driveSpeedが負へ動き車が後退する。
+			engineTotal = (vLong > -CarConst::MaxReverseSpeed) ? (CarConst::ReversePower * throttle) : 0.0f;
+			brakeEach   = 0.0f;
+		}
+		else
+		{
+			engineTotal = (throttle > 0.0f) ? (m_driveAccel * throttle) : 0.0f;
+			brakeEach   = (throttle < 0.0f) ? (m_brakePower * throttle * 0.25f) : 0.0f;
+		}
 
 		float sumLong = 0.0f, sumLat = 0.0f, sumMz = 0.0f;
 		float rearReaction = 0.0f;   // 後輪の縦力合計(駆動輪回転の反力)
@@ -240,19 +324,34 @@ void CarBase::Update()
 			const float vlx = vLong - r * w.px;   // 縦
 			const float vly = vLat  + r * w.pz;   // 横
 
-			// 操舵輪はホイール座標へ回転
-			float wLong = vlx, wLat = vly;
+			// 各輪の実舵角＝(前輪: アッカーマン適用の操舵 + 前トー) / (後輪: 後トーのみ)。
+			//   トーは正=トーイン(左右が内側を向く)。アッカーマンはイン側を多く/アウト側を少なく切る。
+			const bool  left    = (w.px < 0.0f);
+			const float toeSign = left ? +1.0f : -1.0f;   // トーイン方向(左輪は+へ、右輪は-へ)
+			float wsteer;
 			if (w.front)
 			{
-				wLong =  vlx * cs + vly * sn;
-				wLat  = -vlx * sn + vly * cs;
+				const bool inner = (m_steer * w.px > 0.0f);   // 旋回内側の前輪
+				wsteer = m_steer * (inner ? (1.0f + m_ackermann) : (1.0f - m_ackermann))
+				       + m_toeFront * toeSign;
 			}
+			else
+			{
+				wsteer = m_toeRear * toeSign;
+			}
+			const float wcs = cosf(wsteer);
+			const float wsn = sinf(wsteer);
 
-			// 荷重：加速で後・ブレーキで前、旋回で外側(左右)へ移動
-			const bool left = (w.px < 0.0f);
+			// 接地点速度をホイール座標へ回転(全輪。後輪もトーの分だけ回る)
+			const float wLong =  vlx * wcs + vly * wsn;
+			const float wLat  = -vlx * wsn + vly * wcs;
+
+			// 荷重：加速で後・ブレーキで前、旋回で外側(左右)へ移動。
+			//   横方向はロール剛性配分(frontRollShare)で前後の移動量を変える＝アンダー/オーバー調整。
+			const float latCoef = w.front ? frontRollShare : (1.0f - frontRollShare);
 			float load = 0.25f
 			           + (w.front ? -dLong : dLong) * 0.5f
-			           + (left    ?  dLat  : -dLat) * 0.5f;
+			           + (left    ?  dLat  : -dLat) * latCoef;
 			load = std::clamp(load, 0.02f, 0.6f);
 
 			const float mu   = w.front ? m_muFront : m_muRear;
@@ -265,6 +364,8 @@ void CarBase::Update()
 			const float denom = fabsf(wLong) + m_slipEps;
 			const float alpha = atan2f(wLat, denom);
 			float Fy = latForce(alpha, Dmax);
+			// キャンバー：ネガキャン(|camber|)に応じて横グリップを増す(荷重が乗った外輪ほど効く)
+			Fy *= (1.0f + m_camberGrip * fabsf(m_camber));
 
 			// 縦力：後輪=駆動スリップ、全輪=ブレーキ
 			float Fx = brakeEach;
@@ -279,13 +380,9 @@ void CarBase::Update()
 			const float mag = sqrtf(Fx * Fx + Fy * Fy);
 			if (mag > Dmax && mag > 1e-4f) { const float scl = Dmax / mag; Fx *= scl; Fy *= scl; }
 
-			// ホイール座標→車体座標
-			float FcarLong = Fx, FcarLat = Fy;
-			if (w.front)
-			{
-				FcarLong = Fx * cs - Fy * sn;
-				FcarLat  = Fx * sn + Fy * cs;
-			}
+			// ホイール座標→車体座標(各輪の実舵角ぶん回す。後輪もトーの分だけ回る)
+			const float FcarLong = Fx * wcs - Fy * wsn;
+			const float FcarLat  = Fx * wsn + Fy * wcs;
 
 			sumLong += FcarLong;
 			sumLat  += FcarLat;
@@ -308,8 +405,12 @@ void CarBase::Update()
 
 		// 駆動輪の回転ダイナミクス：エンジン - 後輪縦反力
 		m_driveSpeed += (engineTotal - rearReaction) * (h / std::max(m_wheelInertia, 0.05f));
-		if (handbrake)            { m_driveSpeed = 0.0f; }                                            // ロック
-		else if (throttle <= 0.0f){ m_driveSpeed += (vLong - m_driveSpeed) * std::min(m_driveRelax * h, 1.0f); } // 惰行で路面速へ
+		if (handbrake)                            { m_driveSpeed = 0.0f; }                                            // ロック
+		// 駆動方向へ踏んでいない(惰行) or クラッチ切断中はフリーホイール＝駆動輪が路面速へ緩和する。
+		// これを入れないと、切ったはずの高い駆動輪回転が凍結して残り、m_driveSpeed>接地速で
+		// 幽霊の駆動力(m_longStiff*(m_driveSpeed-wLong))が出続けて「クラッチ踏みながら加速」する。
+		// ※後退中はaccelPressed=(S踏み)なので、後退駆動を打ち消さない。
+		else if (!accelPressed || clutchPressed)  { m_driveSpeed += (vLong - m_driveSpeed) * std::min(m_driveRelax * h, 1.0f); } // 路面速へ
 
 		// 積分(ヨーはタイヤ力に即応＝グリップは一瞬でかかる。切り返しがキレる)
 		m_vel     += (forward * aLong + right * aLat) * h;
@@ -345,7 +446,10 @@ void CarBase::Update()
 	// アクセルON中は何もしない＝物理どおりドリフト維持(スロットルコントロール可)。
 	// アクセルを抜くほど強く効く(liftFactor=1で全開)。二値でなく踏み加減に連続。
 	const float alignEngage = 1.0f - m_liftCounterFactor;   // オフに近いほど大きい
-	if (!handbrake && m_bodyAlign > 0.0f && alignEngage > 0.01f)
+	// ※後退中(m_reverse)や実際に後退している時(vLong0<0)は無効。さもないと車体を
+	//   「進行方向=真後ろ」へ向けようと180度回頭し続けて、その場でグルグル回る＆
+	//   真っ直ぐバックできなくなる。前進時だけ効かせる。
+	if (!handbrake && !m_reverse && !m_airborne && vLong0 > 0.0f && m_bodyAlign > 0.0f && alignEngage > 0.01f)
 	{
 		const float sp = m_vel.Length();
 		if (sp > 2.0f)
@@ -390,8 +494,13 @@ void CarBase::Update()
 	// 「面法線がほぼ垂直＝壁」のヒットだけ採用し(水平な床は無視)、壁向きの速度成分だけ殺す
 	// →垂直な崖・ガードレールで止まり、接線方向へは滑る(擦りドリフト可)。
 	{
-		const Math::Vector3 fwdW(sinf(m_yaw), 0.0f, cosf(m_yaw));
-		const Math::Vector3 rightW(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+		// 地形の傾き(ピッチ/ロール)込みの回転。プローブ配置を車体の傾きに沿わせる＝
+		// 坂で前側の球が車の傾きどおり持ち上がり、登り坂の地面へめり込む誤ヒットを防ぐ。
+		// 回転順は DrawLit の carWorld と一致させる。
+		const Math::Matrix tiltRot =
+			Math::Matrix::CreateRotationX(-m_terrainPitch) *
+			Math::Matrix::CreateRotationZ(-m_terrainRoll) *
+			Math::Matrix::CreateRotationY(m_yaw);
 
 		// 車体近似プローブ(車体ローカル：px=右, pz=前)。四隅＋前後端の6点。
 		struct Probe { float px; float pz; };
@@ -436,9 +545,9 @@ void CarBase::Update()
 
 		for (const Probe& p : probes)
 		{
-			const Math::Vector3 center = m_pos
-			                           + Math::Vector3(0.0f, CarConst::WallSphereHeight, 0.0f)
-			                           + rightW * p.px + fwdW * p.pz;
+			// 傾いた車体ローカル配置(px=右, WallSphereHeight=上, pz=前)を回転してワールドへ
+			const Math::Vector3 localOff(p.px, CarConst::WallSphereHeight, p.pz);
+			const Math::Vector3 center = m_pos + Math::Vector3::TransformNormal(localOff, tiltRot);
 			resolveSphere(center);
 		}
 	}
@@ -499,45 +608,112 @@ void CarBase::Update()
 
 		const float k = std::min(CarConst::GroundFollowSmooth * dt, 1.0f);
 
+		//----- 垂直ダイナミクス(重力＋接地拘束)：これでジャンプ→滞空→着地ができる -----
+		// 毎フレーム重力で落とし、支持面(接地面)より上なら滞空、下(=めり込む)なら接地。
+		// ランプを駆け上がる支持面の"上昇速度"を車の垂直速度として持たせ、クレスト(頂点)で
+		// 地面が離れた瞬間その勢いで自然に打ち上がる＝エビス風のジャンプになる。
+		const float gY = CarConst::Gravity * m_airGravityMul;
+		m_velY -= gY * dt;
+		const float yBallistic = m_pos.y + m_velY * dt;
+
+		// 空中の車体姿勢は剛体の角運動量で回す(物理)。ランプで付いた回転(m_pitchRate/m_rollRate)を
+		// そのまま保持しつつ、空力(矢羽根効果)で機首を進行方向=弾道へ揃える復元トルク＋角速度減衰を掛ける。
+		// →離陸で付いた回転が残りつつ、だんだん弾道に沿って収束＝がっつり物理っぽい弧になる。
+		auto applyAirAttitude = [&]()
+		{
+			const float hSpeed    = sqrtf(m_vel.x * m_vel.x + m_vel.z * m_vel.z);
+			const float trajPitch = std::clamp(atan2f(m_velY, std::max(hSpeed, 1.0f)),
+			                                   -CarConst::AirMaxPitch, CarConst::AirMaxPitch);
+			// ピッチ：弾道角への復元トルク＋空気減衰(角運動量は保存されつつ収束)
+			m_pitchRate += (trajPitch - m_terrainPitch) * CarConst::AirAeroAlign * dt;
+			m_pitchRate -= m_pitchRate * std::min(CarConst::AirAeroDamp * dt, 1.0f);
+			m_terrainPitch += m_pitchRate * dt;
+			m_terrainPitch  = std::clamp(m_terrainPitch, -CarConst::AirMaxPitch, CarConst::AirMaxPitch);
+			// ロール：水平(0)への復元トルク＋空気減衰
+			m_rollRate += (0.0f - m_terrainRoll) * CarConst::AirAeroAlign * dt;
+			m_rollRate -= m_rollRate * std::min(CarConst::AirAeroDamp * dt, 1.0f);
+			m_terrainRoll += m_rollRate * dt;
+		};
+
 		if (hitCount > 0)
 		{
-			m_onGround = true;
-
-			// 車体高さ＝接地タイヤの平均
+			// 車体高さ＝接地タイヤの平均(支持面の生の高さ)
 			float sum = 0.0f;
 			for (int i = 0; i < 4; ++i) { if (contactHit[i]) { sum += contactY[i]; } }
-			const float avgY = sum / static_cast<float>(hitCount);
+			const float avgY    = sum / static_cast<float>(hitCount);
+			const float groundY = avgY + CarConst::RideHeight;
 
-			// 前後差→ピッチ(坂)、左右差→ロール(バンク)。両ペアが接地しているときだけ更新。
-			float terrainPitchTarget = m_terrainPitch;
-			float terrainRollTarget  = m_terrainRoll;
-			if ((contactHit[0] || contactHit[1]) && (contactHit[2] || contactHit[3]))
-			{
-				const float frontY = pairAvg(0, 1);
-				const float rearY  = pairAvg(2, 3);
-				terrainPitchTarget = atan2f(frontY - rearY, 2.0f * std::max(m_base, 0.05f));  // 前が高い=登り
-			}
-			if ((contactHit[0] || contactHit[2]) && (contactHit[1] || contactHit[3]))
-			{
-				const float leftY  = pairAvg(0, 2);
-				const float rightY = pairAvg(1, 3);
-				terrainRollTarget = atan2f(leftY - rightY, 2.0f * std::max(m_track, 0.05f));   // 左が高い=右下がり
-			}
-			terrainPitchTarget = std::clamp(terrainPitchTarget, -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
-			terrainRollTarget  = std::clamp(terrainRollTarget,  -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+			// 支持面高さを低域通過(メッシュ継ぎ目のガタつき除去)。
+			// 上昇速度は"生の高さ差"から取り、速度側で平滑化＝ランプの勢いを正確に拾いつつ
+			// 一瞬のメッシュ暴れは弾く(その暴れで勝手にジャンプしないように)。
+			if (!m_prevGroundValid) { m_groundYFilt = groundY; m_prevGroundY = groundY; m_supportVelY = 0.0f; }
+			m_groundYFilt += (groundY - m_groundYFilt) * k;
+			const float rawSupportVelY = (groundY - m_prevGroundY) / std::max(dt, 1e-4f);
+			m_supportVelY += (rawSupportVelY - m_supportVelY) * std::min(CarConst::SupportVelSmooth * dt, 1.0f);
+			m_prevGroundY     = groundY;
+			m_prevGroundValid = true;
 
-			// メッシュのガタつきで跳ねないよう、高さ・傾きをなめらかに追従
-			m_pos.y        += (avgY + CarConst::RideHeight - m_pos.y) * k;
-			m_terrainPitch += (terrainPitchTarget - m_terrainPitch) * k;
-			m_terrainRoll  += (terrainRollTarget  - m_terrainRoll ) * k;
+			if (yBallistic > m_groundYFilt + CarConst::AirLaunchEps)
+			{
+				// 支持面より上＝滞空(ランプの勢いで飛んだ or まだ落下中)。姿勢は弾道へ沿わせる。
+				m_airborne = true;
+				m_onGround = false;
+				m_pos.y    = yBallistic;
+				applyAirAttitude();
+			}
+			else
+			{
+				// 接地。ピッチ(坂)・ロール(バンク)を計算して追従。
+				float terrainPitchTarget = m_terrainPitch;
+				float terrainRollTarget  = m_terrainRoll;
+				if ((contactHit[0] || contactHit[1]) && (contactHit[2] || contactHit[3]))
+				{
+					const float frontY = pairAvg(0, 1);
+					const float rearY  = pairAvg(2, 3);
+					terrainPitchTarget = atan2f(frontY - rearY, 2.0f * std::max(m_base, 0.05f));  // 前が高い=登り
+				}
+				if ((contactHit[0] || contactHit[2]) && (contactHit[1] || contactHit[3]))
+				{
+					const float leftY  = pairAvg(0, 2);
+					const float rightY = pairAvg(1, 3);
+					terrainRollTarget = atan2f(leftY - rightY, 2.0f * std::max(m_track, 0.05f));   // 左が高い=右下がり
+				}
+				terrainPitchTarget = std::clamp(terrainPitchTarget, -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+				terrainRollTarget  = std::clamp(terrainRollTarget,  -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+				const float prevPitch = m_terrainPitch;
+				const float prevRoll  = m_terrainRoll;
+				m_terrainPitch += (terrainPitchTarget - m_terrainPitch) * k;
+				m_terrainRoll  += (terrainRollTarget  - m_terrainRoll ) * k;
+				// 接地中も回転角速度を追従の微分から更新＝離陸した瞬間その角運動量で回り出す(物理)
+				m_pitchRate = (m_terrainPitch - prevPitch) / std::max(dt, 1e-4f) * CarConst::AirLaunchSpin;
+				m_rollRate  = (m_terrainRoll  - prevRoll ) / std::max(dt, 1e-4f) * CarConst::AirLaunchSpin;
+
+				if (m_airborne)
+				{
+					// 着地：垂直の衝撃を吸収(小さくバウンド)。水平速度・ヨーは保持＝横向き着地でドリフト継続。
+					m_pos.y = groundY;
+					m_velY  = -m_velY * m_landBounce;
+				}
+				else
+				{
+					// 接地走行：高さは平滑化した支持面へ吸着。ランプの上昇速度を垂直速度として保持
+					// →クレストで地面が離れた瞬間、この勢いでジャンプする。
+					m_pos.y = m_groundYFilt;
+					m_velY  = std::clamp(m_supportVelY * m_jumpLaunch, -CarConst::MaxLandVelY, CarConst::MaxLaunchVelY);
+				}
+				m_onGround = true;
+				m_airborne = false;
+			}
 		}
 		else
 		{
-			// 4輪とも地形が無い＝平地扱いへ戻す
+			// 4輪とも真下に地形なし＝完全に空中(崖から飛び出し等)。落下しつつ姿勢を弾道へ沿わせる。
+			m_airborne = true;
 			m_onGround = false;
-			m_pos.y        += (CarConst::FallbackY - m_pos.y) * k;
-			m_terrainPitch += (0.0f - m_terrainPitch) * k;
-			m_terrainRoll  += (0.0f - m_terrainRoll ) * k;
+			m_prevGroundValid = false;
+			m_supportVelY = 0.0f;
+			m_pos.y = yBallistic;
+			applyAirAttitude();
 		}
 	}
 
@@ -570,8 +746,8 @@ void CarBase::Update()
 			(rearSlip - SmokeConst::SlipThreshold) /
 			(SmokeConst::SlipFull - SmokeConst::SlipThreshold), 0.0f, 1.0f);
 
-		// 車速ガード：ほぼ停止しているときは一切煙を出さない
-		if (slip01 > 0.0f && carSpeed > SmokeConst::MinSpeed)
+		// 車速ガード：ほぼ停止しているときは一切煙を出さない。滞空中もタイヤ非接地なので出さない。
+		if (slip01 > 0.0f && carSpeed > SmokeConst::MinSpeed && m_onGround)
 		{
 			// 端数を蓄積して整数枚に(1輪あたりの枚数)
 			m_smokeCarry += SmokeConst::SpawnPerSec * slip01 * dt;
@@ -588,7 +764,9 @@ void CarBase::Update()
 					Math::Vector3 wp = m_pos
 					                 + rightV * (static_cast<float>(side) * m_track)
 					                 - fwdV   * m_base;
-					wp.y = SmokeConst::WheelGroundY;
+					// 地形追従する車のY(m_pos.y)基準に接地点のわずかな浮きを足す。
+					// (固定値で上書きすると坂を登っても煙が原点高さに取り残される)
+					wp.y = m_pos.y + SmokeConst::WheelGroundY;
 					m_smoke.Emit(wp, trail, n);
 				}
 			}
@@ -622,15 +800,19 @@ void CarBase::DrawDebug()
 		const Math::Vector3 fwdW(sinf(m_yaw), 0.0f, cosf(m_yaw));
 		const Math::Vector3 rightW(cosf(m_yaw), 0.0f, -sinf(m_yaw));
 
-		// 壁プローブ球(四隅＋前後端の6個)＝壁の当たり判定に使っている球そのもの
+		// 壁プローブ球(四隅＋前後端の6個)＝壁の当たり判定に使っている球そのもの。
+		// 物理側と同じく地形の傾き(ピッチ/ロール)込みで配置＝坂で車体に沿う。
+		const Math::Matrix tiltRot =
+			Math::Matrix::CreateRotationX(-m_terrainPitch) *
+			Math::Matrix::CreateRotationZ(-m_terrainRoll) *
+			Math::Matrix::CreateRotationY(m_yaw);
 		const float tip = m_base * CarConst::WallProbeTip;
 		const float ppx[6] = { -m_track, m_track, -m_track, m_track, 0.0f, 0.0f };
 		const float ppz[6] = {  m_base,  m_base, -m_base, -m_base, tip, -tip };
 		for (int i = 0; i < 6; ++i)
 		{
-			const Math::Vector3 c = m_pos
-			                      + Math::Vector3(0.0f, CarConst::WallSphereHeight, 0.0f)
-			                      + rightW * ppx[i] + fwdW * ppz[i];
+			const Math::Vector3 localOff(ppx[i], CarConst::WallSphereHeight, ppz[i]);
+			const Math::Vector3 c = m_pos + Math::Vector3::TransformNormal(localOff, tiltRot);
 			m_pDebugWire->AddDebugSphere(c, CarConst::WallProbeRadius, wallCol);
 		}
 
@@ -652,8 +834,8 @@ void CarBase::DrawDebug()
 
 void CarBase::DrawLit()
 {
+	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);
 	auto& shader = KdShaderManager::Instance().m_StandardShader;
-
 	// 車体全体(本体＋4輪)を地形の傾きへ合わせる＝坂・バンクで車ごと傾く(CarX風の床判定)
 	// 傾きは"車のローカル軸"で掛ける＝ヨー(向き)より先に適用する。後に掛けると
 	// ワールド軸基準になり、車が向きを変えるとピッチとロールが入れ替わってしまう。
@@ -712,9 +894,14 @@ void CarBase::DrawLit()
 			carWorld;
 	}
 
-	//===== 本体(通常ライティング) =====
+	//===== 本体(通常ライティング)。両面描画＝裏面も出す(Blender同様) =====
+	// CullNone(表裏カリング無効)を本体・4輪の描画の"間だけ"有効化し、直後に元へ戻す。
+	// ※裏面は法線が逆向きなので、Litシェーダー側で SV_IsFrontFace により法線を反転して
+	//   正しく陰影を付けている(そうしないと裏面が真っ黒になる)。
+
 	shader.DrawModel(m_body, bodyW);
 	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m); }
+	KdShaderManager::Instance().UndoRasterizerState();
 
 	//===== アウトライン(原神式：背面押し出し。本体の"後"に描く) =====
 	if (m_outlineEnabled)
@@ -769,8 +956,12 @@ void CarBase::DrawSprite()
 	//===== RPM + ギア(上段) =====
 	int y = CarConst::HudBaseY + CarConst::HudRowGap * 2;
 	drawBar(y, rpmRatio, (rpm >= CarConst::HudRedline) ? colRed : colRpm);
+	// ギア表示：後退中は "R"、前進はギア段数
+	char gearBuf[8];
+	if (m_reverse) { gearBuf[0] = 'R'; gearBuf[1] = '\0'; }
+	else           { snprintf(gearBuf, sizeof(gearBuf), "%d", m_gear); }
 	sp.DrawFont(Math::Vector2(static_cast<float>(L), static_cast<float>(y + bH / 2 + CarConst::HudTextDY)),
-	            &colText, "RPM %4.0f  GEAR %d  %s", rpm, m_gear, (m_clutch < 0.5f) ? "[CLUTCH]" : "");
+	            &colText, "RPM %4.0f  GEAR %s  %s", rpm, gearBuf, (m_clutch < 0.5f) ? "[CLUTCH]" : "");
 
 	//===== SPEED(中段) =====
 	y = CarConst::HudBaseY + CarConst::HudRowGap;
@@ -899,6 +1090,25 @@ void CarBase::DrawTuningImGui()
 	ImGui::DragFloat(U8("最大角(rad)"), &m_suspMax, 0.01f, 0.0f, 0.7f);
 	ImGui::DragFloat(U8("入力平滑化(小=なめらか)"), &m_accelSmooth, 0.2f, 0.5f, 30.0f);
 
+	ImGui::SeparatorText(U8("アライメント / セッティング(挙動に効く)"));
+	ImGui::DragFloat(U8("前トー(rad, +イン/-アウト)"), &m_toeFront, 0.002f, -0.2f, 0.2f);
+	ImGui::DragFloat(U8("後トー(rad, +イン/-アウト)"), &m_toeRear, 0.002f, -0.2f, 0.2f);
+	ImGui::DragFloat(U8("アッカーマン(0=平行/-=アンチ)"), &m_ackermann, 0.01f, -1.0f, 1.0f);
+	ImGui::DragFloat(U8("キャンバー横グリップ寄与(0=見た目のみ)"), &m_camberGrip, 0.02f, 0.0f, 3.0f);
+	ImGui::DragFloat(U8("前ばね定数(相対)"), &m_springF, 0.05f, 0.1f, 5.0f);
+	ImGui::DragFloat(U8("後ばね定数(相対)"), &m_springR, 0.05f, 0.1f, 5.0f);
+	ImGui::DragFloat(U8("前スタビ(相対)"), &m_arbF, 0.05f, 0.0f, 5.0f);
+	ImGui::DragFloat(U8("後スタビ(相対)"), &m_arbR, 0.05f, 0.0f, 5.0f);
+	ImGui::Text(U8("ロール剛性 前:後 = %.0f%% : %.0f%%  (前↑=アンダー/後↑=オーバー)"),
+	            (m_springF + m_arbF) / std::max((m_springF + m_arbF) + (m_springR + m_arbR), 1e-3f) * 100.0f,
+	            (m_springR + m_arbR) / std::max((m_springF + m_arbF) + (m_springR + m_arbR), 1e-3f) * 100.0f);
+
+	ImGui::SeparatorText(U8("ジャンプ/滞空(エビス風ジャンプドリフト)"));
+	ImGui::DragFloat(U8("重力倍率(大=ズシッ/小=フワッ)"), &m_airGravityMul, 0.02f, 0.2f, 4.0f);
+	ImGui::DragFloat(U8("打ち上げ強さ倍率"), &m_jumpLaunch, 0.05f, 0.0f, 4.0f);
+	ImGui::DragFloat(U8("着地の跳ね返り(0=吸収)"), &m_landBounce, 0.01f, 0.0f, 0.8f);
+	ImGui::Text(U8("状態: %s  垂直速度 %.1f m/s"), m_airborne ? U8("滞空") : U8("接地"), m_velY);
+
 	ImGui::SeparatorText(U8("オートカウンター(CarX風)"));
 	ImGui::Checkbox(U8("有効##counter"), &m_counterSteerEnabled);
 	ImGui::DragFloat(U8("カウンター強さ(0-1.3)"), &m_counterAssist, 0.01f, 0.0f, 1.3f);
@@ -935,6 +1145,11 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 		{ "enginePower", &m_enginePower }, { "brakePower", &m_brakePower },
 		{ "maxSpeed", &m_maxSpeed }, { "drag", &m_drag }, { "scrubDrag", &m_scrubDrag },
 		{ "maxSteerAngle", &m_maxSteerAngle }, { "steerSpeed", &m_steerSpeed },
+		// アライメント/セッティング(トー・アッカーマン・キャンバー寄与・前後ロール剛性)
+		{ "toeFront", &m_toeFront }, { "toeRear", &m_toeRear },
+		{ "ackermann", &m_ackermann }, { "camberGrip", &m_camberGrip },
+		{ "springF", &m_springF }, { "springR", &m_springR },
+		{ "arbF", &m_arbF }, { "arbR", &m_arbR },
 		// CarX風タイヤモデル
 		{ "muFront", &m_muFront }, { "muRear", &m_muRear },
 		{ "tireB", &m_tireB }, { "tireC", &m_tireC },

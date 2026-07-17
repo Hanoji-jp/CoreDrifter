@@ -240,7 +240,7 @@ float CalcShadow(float3 wPos, float3 wN)
 //=============================================================
 // ピクセルシェーダ
 //=============================================================
-float4 main(VSOutput In) : SV_Target0
+float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
 	//------------------------------------------
 	// ディゾルブ
@@ -409,6 +409,10 @@ float4 main(VSOutput In) : SV_Target0
 		float3 sphereCenter = float3(g_mWorld._41, g_mWorld._42, g_mWorld._43);
 		wN = normalize(In.wPos - sphereCenter);
 	}
+
+	// 両面描画(CullNone)時：裏面は法線が逆向きなので反転して両面ライティング(Blender同様)。
+	// 表面カリングの通常オブジェクトは常に isFrontFace=true なので影響なし。
+	if (!isFrontFace) { wN = -wN; }
 
 	//------------------------------------------
 	// PBR マテリアルパラメータ

@@ -21,9 +21,22 @@ public:
 	// 位置合わせ用の調整パネル(ImGui)
 	void DrawTuningImGui();
 
+	// プレイヤースポーン(シーンが起動時に車へ適用する)
+	const Math::Vector3& GetSpawnPos() const { return m_spawnPos; }
+	float                GetSpawnYaw() const { return m_spawnYaw; }
+	// 現在の車位置などをスポーンとして設定(GameSceneのボタンから呼ぶ)
+	void SetSpawn(const Math::Vector3& pos, float yaw) { m_spawnPos = pos; m_spawnYaw = yaw; }
+
+	// マップ配置(大きさ・座標・向き)＋スポーンをファイルへ保存/読込
+	void SaveConfig();
+	void LoadConfig();
+
 private:
 	// m_offset / m_scale / m_yaw から m_mWorld を作り直す
 	void RebuildMatrix();
+
+	// 保存対象(名前→float*)。SaveConfig/LoadConfigが共通で使う
+	std::vector<std::pair<const char*, float*>> ConfigParamList();
 
 	KdModelWork   m_model;
 
@@ -31,4 +44,8 @@ private:
 	Math::Vector3 m_offset = Math::Vector3(StageConst::OffsetX, StageConst::OffsetY, StageConst::OffsetZ);
 	float         m_scale  = StageConst::ModelScale;
 	float         m_yaw    = StageConst::YawOffset;
+
+	// プレイヤーの初期スポーン(位置＋向き)
+	Math::Vector3 m_spawnPos = Math::Vector3(StageConst::SpawnX, StageConst::SpawnY, StageConst::SpawnZ);
+	float         m_spawnYaw = StageConst::SpawnYaw;
 };

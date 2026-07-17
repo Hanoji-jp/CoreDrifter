@@ -17,6 +17,17 @@ namespace StageConst
 	// 向き(Y回転, rad)
 	constexpr float YawOffset = 0.0f;
 
+	// マップ配置(大きさ・座標・向き)とプレイヤースポーンの保存ファイル
+	// key value 形式のテキスト(CarTune_*.txt と同じ簡易フォーマット)
+	constexpr const char* ConfigPath = "Asset/Data/StageConfig.txt";
+
+	// プレイヤーの初期スポーン(ImGuiで設定→保存。ロード時に車へ適用)
+	constexpr float SpawnX   = 0.0f;
+	constexpr float SpawnY   = 0.0f;
+	constexpr float SpawnZ   = 0.0f;
+	constexpr float SpawnYaw = 0.0f;   // スポーン時の車の向き(Y回転, rad)
+	constexpr float SpawnStep = 0.1f;  // スポーン座標スライダーの刻み
+
 	// フラスタムカリング半径(広大なマップなので大きめにして消えないように)
 	constexpr float CullingRadius = 100000.0f;
 

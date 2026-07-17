@@ -7,6 +7,11 @@ namespace CarConst
 	constexpr float EnginePower   = 22.0f;   // 前進加速度
 	constexpr float BrakePower    = 30.0f;   // ブレーキ / 後退の力
 	constexpr float MaxSpeed      = 45.0f;   // 最高速度
+
+	//===== 後退(バックギア) =====
+	constexpr float ReversePower       = 9.0f;   // 後退の駆動加速(前進より弱く)
+	constexpr float MaxReverseSpeed    = 10.0f;  // 後退の最高速(m/s)
+	constexpr float ReverseEngageSpeed = 1.5f;   // この前進速度(m/s)未満でSを踏むと後退ギアへ入る
 	constexpr float Drag          = 0.12f;   // 転がり/空気抵抗(速度比例の減速係数 1/s)
 	constexpr float ScrubDrag     = 0.5f;    // 横滑りスクラブ抵抗(小=ツルツル滑る/ダート感。大=路面を削る/アスファルト感)
 
@@ -179,7 +184,8 @@ namespace CarConst
 	constexpr float WallSphereHeight = 0.9f;  // 壁判定球の中心高さ(m, 路面に触れない高さに上げる)
 	constexpr float WallProbeRadius  = 0.55f; // 車体近似の各プローブ球の半径(m)
 	constexpr float WallProbeTip     = 1.15f; // 前後端プローブの位置(m_base比。車体の張り出しをカバー)
-	constexpr float WallNormalMaxY   = 0.6f;  // 面法線のYがこれを超えたら床とみなし壁押し戻ししない
+	constexpr float WallNormalMaxY   = 0.3f;  // 面法線のYがこれを超えたら床とみなし壁押し戻ししない
+	                                          // 小さいほど急坂も"床"扱い。0.3≒72°より急な面だけ壁＝坂登りのガクガク回避
 	constexpr float WallSlideBounce  = 0.0f;  // 壁の反発(0=跳ねず擦る/CarX的, 上げると跳ね返る)
 
 	// サイドブレーキ中はスピン防止アシストを弱める＝リアが自由に回り込んで
@@ -189,4 +195,21 @@ namespace CarConst
 	// CarX風の床判定：4輪レイで路面の高さ＋傾き(坂・バンク)に車を合わせる
 	constexpr float GroundFollowSmooth = 12.0f;  // 接地Y・傾きの追従速度(1/s, 大=キビキビ・小=ふわっと)
 	constexpr float MaxTerrainTilt     = 0.6f;   // 地形追従の最大傾き(rad, 急斜面での見た目暴れを抑える)
+
+	//===== ジャンプ / 滞空(エビス風ジャンプドリフト) =====
+	// ランプの勢いで宙に浮き、横向き・スピンを保持したまま飛んで着地する。
+	constexpr float AirGravityMul   = 1.0f;   // 滞空中の重力倍率(Gravityに掛ける。上げると重い/キビキビ)
+	constexpr float AirLaunchEps    = 0.03f;  // 支持面よりこの高さ(m)上で滞空とみなす
+	constexpr float MaxLaunchVelY   = 12.0f;  // ランプで打ち上がる垂直速度の上限(m/s, メッシュ暴れ対策)
+	constexpr float MaxLandVelY     = 40.0f;  // 落下側の垂直速度クランプ
+	constexpr float LandBounce      = 0.12f;  // 着地時の跳ね返り(0=吸収, 1=完全反発)
+	constexpr float SupportVelSmooth = 22.0f; // 支持面の上昇速度の平滑化(1/s, 大=鋭いランプで強く飛ぶ)
+	constexpr float AirYawDamp      = 0.3f;   // 滞空中のヨー減衰(1/s, 無制御スピン防止。小=回転を保つ)
+	constexpr float AirSteerControl = 1.2f;   // 滞空中のエアコントロール(ステアで機首のヨーを微調整 rad/s)
+	// 空中姿勢=剛体の角運動量(物理)。ランプで付いた回転(角速度)を空中で保持し、
+	// 空力(矢羽根効果)で機首がだんだん進行方向=弾道へ収束する。着地で角速度は解消。
+	constexpr float AirAeroAlign    = 6.0f;   // 空力で機首を弾道へ揃える復元トルク(大=すぐ整う)
+	constexpr float AirAeroDamp     = 2.5f;   // 空中の角速度の空気減衰(1/s, 大=すぐ安定/小=よく回る)
+	constexpr float AirMaxPitch     = 0.9f;   // 空中ピッチ姿勢の安全クランプ(rad, ≈51°)
+	constexpr float AirLaunchSpin   = 1.0f;   // 離陸時に引き継ぐ回転(角運動量)の強さ倍率
 }

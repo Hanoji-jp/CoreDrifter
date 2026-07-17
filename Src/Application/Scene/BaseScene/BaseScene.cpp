@@ -96,7 +96,11 @@ void BaseScene::Draw()
 	KdShaderManager::Instance().m_postProcessShader.ApplySceneOutline();
 
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
-	// 陰影のないオブジェクト(エフェクトなど)はBeginとEndの間にまとめてDrawする
+	// 陰影のないオブジェクト(エフェクトなど)はBeginとEndの間にまとめてDrawする。
+	// 煙などは専用RTへ描き、塊全体のシルエット外周に輪郭を乗せてシーンへ合成する
+	// (1粒ごとではなく合成後のシルエットに線を引くので内部が線だらけにならない)。
+	// ※煙輪郭OFF時は Begin/End がスルーされ、従来通りシーンへ直描きされる。
+	KdShaderManager::Instance().m_postProcessShader.BeginSmoke();
 	KdShaderManager::Instance().m_StandardShader.BeginUnLit();
 	{
 		for (auto& obj : m_objList)
@@ -105,6 +109,7 @@ void BaseScene::Draw()
 		}
 	}
 	KdShaderManager::Instance().m_StandardShader.EndUnLit();
+	KdShaderManager::Instance().m_postProcessShader.EndSmokeAndComposite();
 
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
 	// 光源オブジェクト(自ら光るオブジェクトやエフェクト)はBeginとEndの間にまとめてDrawする
@@ -130,6 +135,9 @@ void BaseScene::DrawSprite()
 		}
 	}
 	KdShaderManager::Instance().m_spriteShader.End();
+
+	// 文字流体化(ドリフト演出)：スプライトEndの後にバックバッファへ合成＝最前面に出す
+	KdShaderManager::Instance().m_postProcessShader.DrawFluidText(KdFPSController::GetDt());
 }
 
 void BaseScene::DrawDebug()

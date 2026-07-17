@@ -1,0 +1,9 @@
+scale 55
+offX 0
+offY -9
+offZ -1096
+yaw 0
+spawnX -7.95901
+spawnY 17.767
+spawnZ 14.4222
+spawnYaw -1.09705

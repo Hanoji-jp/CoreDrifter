@@ -213,6 +213,8 @@ bool Application::Init(int w, int h)
 	KdFontManager::Instance().Init(GetWindowHandle());
 	// HUD用フォント(No.0)を登録。DrawFont(Pos,color,fmt,...)はNo.0を使う。
 	KdFontManager::Instance().AddFont(0, "Consolas", 22);
+	// 文字流体化(ドリフト演出)用の大フォント(No.1)。太字で垂れ・煙が映える。
+	KdFontManager::Instance().AddFont(1, "Arial Black", 130);
 
 	//===================================================================
 	// ゲーム固有の初期化
