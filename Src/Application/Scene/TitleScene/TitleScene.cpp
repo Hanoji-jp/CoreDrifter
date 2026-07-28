@@ -1,22 +1,36 @@
 ﻿#include "TitleScene.h"
 #include "../SceneManager.h"
+#include "../HjTransition.h"
 #include "../../GameObject/UI/TitleMenuUI.h"
 
 void TitleScene::Event()
 {
-	// Enter/Space で決定。QUIT(index4)なら終了、それ以外はゲームへ。
-	if (GetAsyncKeyState(VK_RETURN) & 0x8000 || GetAsyncKeyState(VK_SPACE) & 0x8000)
+	// ELEMENTS(UIキット)確認用：F5 でいつでも開ける(デバッグ)
+	if (GetAsyncKeyState(VK_F5) & 0x8000)
 	{
-		int sel = 0;
-		if (auto menu = m_wpMenu.lock()) { sel = menu->GetSelected(); }
+		HjTransition::Instance().Go(SceneManager::SceneType::Elements);
+		return;
+	}
 
-		if (sel == UIConst::MenuCount - 1)   // QUIT
+	// Enter/Space または マウスクリックで決定。選択中メニューに応じて遷移。
+	bool decide = (GetAsyncKeyState(VK_RETURN) & 0x8000) || (GetAsyncKeyState(VK_SPACE) & 0x8000);
+	int sel = 0;
+	if (auto menu = m_wpMenu.lock())
+	{
+		sel = menu->GetSelected();
+		if (menu->ConsumeActivated()) { decide = true; }
+	}
+	if (decide)
+	{
+		switch (sel)
 		{
-			PostQuitMessage(0);
-			return;
+		case 0: // PLAY：PLAYバーが伸びて次レイアウトへ変形するモーフ遷移
+			HjTransition::Instance().GoMorph(SceneManager::SceneType::PlayMode, 54.0f, 380.0f, 400.0f, 51.0f);
+			break;
+		case 2: HjTransition::Instance().Go(SceneManager::SceneType::Settings); break;  // SETTINGS
+		case 4: PostQuitMessage(0);                                             break;  // QUIT
+		default: HjTransition::Instance().Go(SceneManager::SceneType::Game);    break;  // GARAGE/STATS(未実装)→暫定Game
 		}
-
-		SceneManager::Instance().SetNextScene(SceneManager::SceneType::Game);
 	}
 }
 

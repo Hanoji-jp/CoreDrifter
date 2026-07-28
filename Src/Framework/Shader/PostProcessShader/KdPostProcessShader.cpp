@@ -111,6 +111,32 @@ bool KdPostProcessShader::Init()
 		}
 	}
 
+	// 彩度(グレースケール)PS
+	{
+#include "KdPostProcessShader_PS_Desaturate.shaderInc"
+
+		if (FAILED(KdDirect3D::Instance().WorkDev()->CreatePixelShader(
+			compiledBuffer, sizeof(compiledBuffer), nullptr, &m_PS_Desaturate)))
+		{
+			assert(0 && "ピクセルシェーダー作成失敗");
+			Release();
+			return false;
+		}
+	}
+
+	// 画面全体のハーフトーン(印刷風)PS
+	{
+#include "KdPostProcessShader_PS_Halftone.shaderInc"
+
+		if (FAILED(KdDirect3D::Instance().WorkDev()->CreatePixelShader(
+			compiledBuffer, sizeof(compiledBuffer), nullptr, &m_PS_Halftone)))
+		{
+			assert(0 && "ピクセルシェーダー作成失敗");
+			Release();
+			return false;
+		}
+	}
+
 	m_cb0_BlurInfo.Create();
 
 	m_cb0_DoFInfo.Create();
@@ -122,6 +148,10 @@ bool KdPostProcessShader::Init()
 	m_cb0_SmokeOutline.Create();
 
 	m_cb0_TextFluid.Create();
+
+	m_cb0_DesaturateInfo.Create();
+
+	m_cb0_Halftone.Create();
 
 	const std::shared_ptr<KdTexture>& backBuffer = KdDirect3D::Instance().GetBackBuffer();
 	
@@ -187,6 +217,8 @@ void KdPostProcessShader::Release()
 	KdSafeRelease(m_PS_Outline);
 	KdSafeRelease(m_PS_SmokeOutline);
 	KdSafeRelease(m_PS_TextFluid);
+	KdSafeRelease(m_PS_Desaturate);
+	KdSafeRelease(m_PS_Halftone);
 
 	m_cb0_BlurInfo.Release();
 	m_cb0_DoFInfo.Release();
@@ -194,6 +226,8 @@ void KdPostProcessShader::Release()
 	m_cb0_OutlineInfo.Release();
 	m_cb0_SmokeOutline.Release();
 	m_cb0_TextFluid.Release();
+	m_cb0_DesaturateInfo.Release();
+	m_cb0_Halftone.Release();
 }
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -245,9 +279,18 @@ void KdPostProcessShader::PostEffectProcess()
 
 	LightBloomProcess();
 
-	BlurProcess();
-
-	DepthOfFieldProcess();
+	// 被写界深度(DoF)は焦点を設定する箇所がどこにも無く、既定値では全域にピントが
+	// 合った状態＝入力をそのまま写すだけになっている。
+	// そのための下準備であるBlurProcess(全画面4パス)も含めて丸ごと無駄なので、
+	// 使うときだけ通す。切っている間はシーンRTをそのまま最終画像として使う。
+	if (m_dofEnabled)
+	{
+		BlurProcess();
+		DepthOfFieldProcess();
+	}
+	// この後の工程が読む「現在の画像」
+	std::shared_ptr<KdTexture> sceneTex =
+		m_dofEnabled ? m_depthOfFieldRTPack.m_RTTexture : m_postEffectRTPack.m_RTTexture;
 
 	// ---- モーションブラー（デバッグ: 常時強制ブラーで動作確認）----
 	{
@@ -292,7 +335,7 @@ void KdPostProcessShader::PostEffectProcess()
 					blurDir *= strength;
 
 					GenerateMotionBlurTexture(
-						m_depthOfFieldRTPack.m_RTTexture,
+						sceneTex,
 						m_motionBlurRTPack.m_RTTexture,
 						m_motionBlurRTPack.m_viewPort,
 						PostProcessConst::MotionBlurSamplingRadius,
@@ -313,7 +356,36 @@ void KdPostProcessShader::PostEffectProcess()
 		// 最終画像（DoF or モーションブラー）をバックバッファへ
 		// ※アウトラインは ApplySceneOutline()（不透明シーン直後）で適用済み
 		std::shared_ptr<KdTexture> finalColor =
-			useMotionBlur ? m_motionBlurRTPack.m_RTTexture : m_depthOfFieldRTPack.m_RTTexture;
+			useMotionBlur ? m_motionBlurRTPack.m_RTTexture : sceneTex;
+
+		// グレースケール→フルカラー復帰演出：彩度を時間で0→1へ上げつつ最終画像を作る
+		if (m_colorRestoreActive && m_colorRestoreTimer < 1.0f)
+		{
+			constexpr float kDt = 1.0f / 60.0f;
+			m_colorRestoreTimer += kDt / PostProcessConst::ColorRestoreDuration;
+			m_colorRestoreTimer = std::min(m_colorRestoreTimer, 1.0f);
+
+			const float x   = m_colorRestoreTimer;
+			const float sat = x * x * (3.0f - 2.0f * x);   // smoothstepで滑らかに
+			SetSaturation(sat);
+			SetDesaturateToDevice();
+			// 出力先はDoF用RTを流用する。DoFを切っている間 finalColor はシーンRT自身なので、
+			// シーンRTへ書き戻すと入力と出力が同じテクスチャになってしまう。
+			DrawTexture(&finalColor, 1, m_depthOfFieldRTPack.m_RTTexture, &m_depthOfFieldRTPack.m_viewPort);
+			finalColor = m_depthOfFieldRTPack.m_RTTexture;
+
+			if (m_colorRestoreTimer >= 1.0f) { m_colorRestoreActive = false; }
+		}
+
+		// 画面全体のハーフトーン(印刷風)。仕上げなので一番最後に掛ける。
+		// 出力先はアウトライン用RTを流用(この時点では役目を終えていて空いている)。
+		if (m_halftoneEnabled)
+		{
+			SetHalftoneToDevice();
+			DrawTexture(&finalColor, 1, m_outlineRTPack.m_RTTexture, &m_outlineRTPack.m_viewPort);
+			finalColor = m_outlineRTPack.m_RTTexture;
+		}
+
 		KdShaderManager::Instance().m_spriteShader.DrawTex(finalColor.get(), 0, 0);
 	}
 }
@@ -849,8 +921,19 @@ void KdPostProcessShader::GenerateBlurTexture(std::shared_ptr<KdTexture>& spSrcT
 
 	KdShaderManager::Instance().ChangeSamplerState(KdSamplerState::Linear_Clamp);
 
-	KdRenderTargetPack tmpBlurRTPack;
-	tmpBlurRTPack.CreateRenderTarget(spDstTex->GetWidth(), spDstTex->GetHeight());
+	// 横ぼかしの中間結果を置く作業用RT。
+	// ここで毎回 CreateRenderTarget すると、テクスチャ・RTV・SRVの生成が
+	// 1フレームに何度も走って極端に重くなる(この関数はブルームだけで4回呼ばれる)。
+	// サイズごとに1枚だけ作って使い回す。
+	const uint64_t key = (static_cast<uint64_t>(spDstTex->GetWidth()) << 32)
+	                   | static_cast<uint64_t>(spDstTex->GetHeight());
+	auto it = m_tmpBlurRTCache.find(key);
+	if (it == m_tmpBlurRTCache.end())
+	{
+		it = m_tmpBlurRTCache.emplace(key, KdRenderTargetPack{}).first;
+		it->second.CreateRenderTarget(spDstTex->GetWidth(), spDstTex->GetHeight());
+	}
+	KdRenderTargetPack& tmpBlurRTPack = it->second;
 
 	// 横にぼかす
 	std::vector<Math::Vector3> horizontalBlurInfo;
@@ -991,6 +1074,48 @@ void KdPostProcessShader::SetBrightToDevice()
 	}
 
 	shaderMgr.SetPixelShader(m_PS_Bright);
+}
+
+void KdPostProcessShader::SetDesaturateToDevice()
+{
+	ID3D11DeviceContext* DevCon = KdDirect3D::Instance().WorkDevContext();
+	if (!DevCon) { return; }
+
+	m_cb0_DesaturateInfo.Write();
+
+	DevCon->PSSetConstantBuffers(0, 1, m_cb0_DesaturateInfo.GetAddress());
+
+	KdShaderManager& shaderMgr = KdShaderManager::Instance();
+
+	if (shaderMgr.SetVertexShader(m_VS))
+	{
+		DevCon->IASetInputLayout(m_inputLayout);
+	}
+
+	shaderMgr.SetPixelShader(m_PS_Desaturate);
+}
+
+void KdPostProcessShader::SetHalftoneToDevice()
+{
+	ID3D11DeviceContext* DevCon = KdDirect3D::Instance().WorkDevContext();
+	if (!DevCon) { return; }
+
+	// 画面サイズを毎回反映(ウィンドウサイズ変更に追従)
+	const auto& bb = KdDirect3D::Instance().GetBackBuffer();
+	m_cb0_Halftone.Work().ScreenW = static_cast<float>(bb->GetWidth());
+	m_cb0_Halftone.Work().ScreenH = static_cast<float>(bb->GetHeight());
+	m_cb0_Halftone.Write();
+
+	DevCon->PSSetConstantBuffers(0, 1, m_cb0_Halftone.GetAddress());
+
+	KdShaderManager& shaderMgr = KdShaderManager::Instance();
+
+	if (shaderMgr.SetVertexShader(m_VS))
+	{
+		DevCon->IASetInputLayout(m_inputLayout);
+	}
+
+	shaderMgr.SetPixelShader(m_PS_Halftone);
 }
 
 void KdPostProcessShader::SetOutlineToDevice()

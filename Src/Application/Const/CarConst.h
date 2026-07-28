@@ -126,6 +126,18 @@ namespace CarConst
 	constexpr float CamDriftBias     = 0.6f;   // 進行方向を向く度合い(0=車の向き, 1=進行方向)
 	constexpr float CamYawFollow     = 4.0f;   // カメラ向きの追従速度(1/s)
 	constexpr float CamMinTravelSpeed = 2.0f;  // この速度以上で進行方向を採用(低速は車の向き)
+	// 動的カメラ(演出④：速度でFOVが開く・ドリフトで寄る)
+	constexpr float CamFovSpeedGain  = 16.0f;  // 最高速で開くFOV量(度)
+	constexpr float CamFovDriftGain  = 10.0f;  // ドリフト最大で開くFOV量(度)
+	constexpr float CamDriftPull     = 1.3f;   // ドリフト時に寄る距離(m)
+	constexpr float CamDynSmooth     = 5.0f;   // FOV/距離の追従速度(1/s)
+	constexpr float CamDriftSlipDeg  = 40.0f;  // この横滑り角(度)でドリフト演出フル
+	// ドリフト方向へカメラを傾ける(視線軸まわりのロール)。スライドに持っていかれる臨場感が出る。
+	constexpr float CamDriftRoll = 0.22f;  // 横滑り角1radあたりのロール量(符号を反転すると傾く向きが逆)
+	constexpr float CamMaxRoll   = 0.15f;  // ロールの上限(rad, ≈8.6度)
+	// 注視点を進行方向へ前出しする距離(m)。車を画面中央に置くとドリフト中に
+	// 進行方向が見えづらいので、行き先寄りに画面を振る。速度に比例して伸ばす。
+	constexpr float CamLookAhead = 3.5f;
 
 	//===== エンジン / ギア / クラッチ =====
 	constexpr float IdleRPM      = 900.0f;    // アイドル回転
@@ -187,6 +199,11 @@ namespace CarConst
 	constexpr float WallNormalMaxY   = 0.3f;  // 面法線のYがこれを超えたら床とみなし壁押し戻ししない
 	                                          // 小さいほど急坂も"床"扱い。0.3≒72°より急な面だけ壁＝坂登りのガクガク回避
 	constexpr float WallSlideBounce  = 0.0f;  // 壁の反発(0=跳ねず擦る/CarX的, 上げると跳ね返る)
+	// 車ゲー的な堅牢化：サブステップ(すり抜け防止)＋リラクゼーション(角のめり込み解消)
+	constexpr float WallSubStepFactor = 0.5f; // 1ステップの最大移動＝半径×これ(小さいほど貫通しにくい/重い)
+	constexpr int   WallMaxSubSteps   = 12;   // サブステップ上限(高速時の分割数の上限)
+	constexpr int   WallRelaxIters    = 4;    // 1ステップ内の押し戻し反復回数(角・複数壁の収束)
+	constexpr float WallMaxPush       = 0.5f; // 1回の押し出し上限(m。暴発防止)
 
 	// サイドブレーキ中はスピン防止アシストを弱める＝リアが自由に回り込んで
 	// "ブワッと広がる"サイドドリフトが出せる(引いてるときは意図的に出してるため)。
@@ -212,4 +229,6 @@ namespace CarConst
 	constexpr float AirAeroDamp     = 2.5f;   // 空中の角速度の空気減衰(1/s, 大=すぐ安定/小=よく回る)
 	constexpr float AirMaxPitch     = 0.9f;   // 空中ピッチ姿勢の安全クランプ(rad, ≈51°)
 	constexpr float AirLaunchSpin   = 1.0f;   // 離陸時に引き継ぐ回転(角運動量)の強さ倍率
+	// 既存の車ゲー的に「地面吸着＝ジャンプ/浮き無し」にする際の、崖落下中の水平戻し速度
+	constexpr float AirLevelSmooth  = 3.0f;   // 崖から落ちている間に車体を水平へ戻す速さ(1/s)
 }

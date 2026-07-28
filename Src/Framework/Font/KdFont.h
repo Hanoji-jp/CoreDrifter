@@ -138,7 +138,7 @@ private:
 		HFONT hFont;														// �t�H���g�n���h��
 		std::array<std::shared_ptr<KdFontData>, 65536>	CreatedFontDataTbl;	// �쐬�ς݃t�H���g�f�[�^�z��
 	};
-	std::array<FontData, 16>			m_FontTbl;							// �o�^���ꂽ�t�H���g�̔z��
+	std::array<FontData, 24>			m_FontTbl;							// �o�^���ꂽ�t�H���g�̔z��
 
 	HWND								m_hWnd = 0;							// �E�B���h�E�n���h��
 	HDC									m_hDC = 0;							// �f�o�C�X�R���e�L�X�g

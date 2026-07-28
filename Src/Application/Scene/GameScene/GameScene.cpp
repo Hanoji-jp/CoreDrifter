@@ -5,6 +5,7 @@
 #include "../../GameObject/Stage/SkySphere.h"
 #include "../../GameObject/Car/Silvia.h"
 #include "../../GameObject/Camera/ChaseCamera.h"
+#include "../../GameObject/Score/DriftScore.h"
 
 void GameScene::Event()
 {
@@ -27,6 +28,9 @@ void GameScene::Event()
 
 void GameScene::Init()
 {
+	// ゲーム開始演出：グレースケール→徐々にフルカラーへ戻す
+	KdShaderManager::Instance().m_postProcessShader.TriggerColorRestore();
+
 	// 天球(背景の星空)。最初に追加＝背景として描画。
 	auto sky = std::make_shared<SkySphere>();
 	sky->Init();
@@ -50,6 +54,11 @@ void GameScene::Init()
 	car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw());
 	AddObject(car);
 	m_wpCar = car;   // Rキーのリスポーン用に保持
+
+	// ドリフト採点＆スコア表示演出(車の速度・向きを参照)
+	auto score = std::make_shared<DriftScore>();
+	score->SetCar(car);
+	AddObject(score);
 
 	// 調整パネル(ImGui)：車のチューニングとマップ配置を1つのコールバックにまとめて登録
 	//   ※SetPersistentGuiCallbackは単一スロット(上書き)なので合成して渡す

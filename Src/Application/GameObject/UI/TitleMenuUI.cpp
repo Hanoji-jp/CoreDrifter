@@ -1,4 +1,5 @@
 ﻿#include "TitleMenuUI.h"
+#include "HjUI.h"   // マウス入力(BeginInput/Hover/Clicked)
 
 namespace
 {
@@ -31,6 +32,15 @@ void TitleMenuUI::Update()
 
 	m_prevUp = up;
 	m_prevDn = dn;
+
+	// マウス：行にホバーで選択、クリックで決定
+	HjUI::BeginInput();
+	for (int i = 0; i < UIConst::MenuCount; ++i)
+	{
+		const float rowDy = kMenuTopDy + i * kMenuRowDy;
+		if (HjUI::Hover(kMenuLeftDx, rowDy, kMenuWDx, kMenuRowDy)) { m_sel = i; }
+		if (HjUI::Clicked(kMenuLeftDx, rowDy, kMenuWDx, kMenuRowDy)) { m_sel = i; m_activated = true; }
+	}
 }
 
 // ════════════ 描画ヘルパー(すべてデザイン座標 1536x864 基準) ════════════
@@ -38,7 +48,7 @@ void TitleMenuUI::Update()
 void TitleMenuUI::DrawText(int fontId, float dLeft, float dTop, float pxHeight,
 	const char* str, const Math::Color& col)
 {
-	auto sprite = KdFontManager::Instance().CreateFontTexture(fontId, str, false);
+	auto sprite = KdFontManager::Instance().CreateFontTexture(fontId, str, 3);
 	if (!sprite || sprite->GetTexList().empty()) { return; }
 	// DrawFontはグリフのテクスチャ高(=セル高)ぶん上へ描く。em高(小=上寄り)とセル高(大=下寄り)の
 	// 中点で下げると、キャップ上端が概ねdTopに揃う。
@@ -63,7 +73,7 @@ float TitleMenuUI::DrawTextTracked(int fontId, float dLeft, float dTop, float px
 	// em高とセル高の中点で下げる(DrawTextと同じ基準)。
 	float yb = MapY(dTop) - pxHeight;
 	{
-		auto probe = fm.CreateFontTexture(fontId, "M", false);
+		auto probe = fm.CreateFontTexture(fontId, "M", 3);
 		if (probe && !probe->GetTexList().empty() && probe->GetTexList()[0]->FontTex)
 		{
 			const float cell = static_cast<float>(probe->GetTexList()[0]->FontTex->GetInfo().Height);
@@ -73,7 +83,7 @@ float TitleMenuUI::DrawTextTracked(int fontId, float dLeft, float dTop, float px
 	for (const char* p = str; *p; ++p)
 	{
 		char one[2] = { *p, '\0' };
-		auto s = fm.CreateFontTexture(fontId, one, false);
+		auto s = fm.CreateFontTexture(fontId, one, 3);
 		float w = 0.0f;
 		if (s && !s->GetTexList().empty() && s->GetTexList()[0]->FontTex)
 		{
@@ -94,7 +104,7 @@ float TitleMenuUI::MeasureText(int fontId, const char* str, float trackDesign)
 	for (const char* p = str; *p; ++p)
 	{
 		char one[2] = { *p, '\0' };
-		auto s = fm.CreateFontTexture(fontId, one, false);
+		auto s = fm.CreateFontTexture(fontId, one, 3);
 		if (s && !s->GetTexList().empty() && s->GetTexList()[0]->FontTex)
 		{
 			w += static_cast<float>(s->GetTexList()[0]->FontTex->GetInfo().Width) + track;
@@ -113,7 +123,7 @@ void TitleMenuUI::DrawTextVert(int fontId, float dLeft, float dTop, float pxStep
 	{
 		char one[2] = { *p, '\0' };
 		if (*p == ' ') { continue; }
-		auto sprite = fm.CreateFontTexture(fontId, one, false);
+		auto sprite = fm.CreateFontTexture(fontId, one, 3);
 		if (!sprite) { continue; }
 		const Math::Vector2 pos = { MapX(dLeft), MapY(dTop + i * (pxStep / UIConst::Scale)) - pxStep };
 		sp.DrawFont(sprite, pos, &col, 0);
@@ -126,7 +136,7 @@ void TitleMenuUI::DrawTextRotated(int fontId, float dCx, float dCy,
 {
 	auto& fm = KdFontManager::Instance();
 	auto& sp = KdShaderManager::Instance().m_spriteShader;
-	auto sprite = fm.CreateFontTexture(fontId, str, false);
+	auto sprite = fm.CreateFontTexture(fontId, str, 3);
 	if (!sprite || sprite->GetTexList().empty()) { return; }
 
 	const float track = trackDesign * UIConst::Scale;
@@ -172,7 +182,8 @@ void TitleMenuUI::DrawRectTL(float dx, float dy, float w, float h, const Math::C
 }
 
 // シーンRT(ゲーム画面)を、このボックスの画面位置に1:1で窓抜き描画する。
-void TitleMenuUI::DrawSceneWindow(float dx, float dy, float w, float h)
+// tintはテクスチャに乗算される(緑を渡せば mix-blend:multiply の二階調になる)。
+void TitleMenuUI::DrawSceneWindow(float dx, float dy, float w, float h, const Math::Color& tint)
 {
 	const auto& tex = KdShaderManager::Instance().m_postProcessShader.GetSceneRT();
 	if (!tex) { return; }
@@ -191,7 +202,7 @@ void TitleMenuUI::DrawSceneWindow(float dx, float dy, float w, float h)
 	const int cy = static_cast<int>(MapY(dy + h * 0.5f));
 	const int dw = static_cast<int>(w * UIConst::Scale);
 	const int dh = static_cast<int>(h * UIConst::Scale);
-	sp.DrawTex(tex.get(), cx, cy, dw, dh, &src, &UIConst::WHITE, { 0.5f, 0.5f });
+	sp.DrawTex(tex.get(), cx, cy, dw, dh, &src, &tint, { 0.5f, 0.5f });
 }
 
 // 太さpx(screen)の枠を4辺のベタ塗りで描く(デザインの2px罫線を再現)
@@ -312,16 +323,25 @@ void TitleMenuUI::DrawSprite()
 	// ── 背景(紙) ──
 	sp.DrawBox(0, 0, ScreenW / 2, ScreenH / 2, &PAPER, true);
 
+	// ── 中断された縦の構築線＋切れ目のクロップティック(参考menu最新版。背面) ──
+	{
+		const Math::Color gl = { 0.078f, 0.078f, 0.078f, 0.07f };   // ~0.07
+		const Math::Color tk = { 0.078f, 0.078f, 0.078f, 0.22f };   // ~0.22
+		DrawLineD(470.0f,    0.0f, 470.0f,  180.0f, 1.0f, gl);  DrawLineD(470.0f,  240.0f, 470.0f,  560.0f, 1.0f, gl);
+		DrawLineD(770.0f,  120.0f, 770.0f,  430.0f, 1.0f, gl);  DrawLineD(770.0f,  500.0f, 770.0f,  864.0f, 1.0f, gl);
+		DrawLineD(1120.0f,   0.0f, 1120.0f, 120.0f, 1.0f, gl);  DrawLineD(1120.0f, 300.0f, 1120.0f, 700.0f, 1.0f, gl);
+		auto tick = [&](float x, float y) { DrawLineD(x - 5.0f, y, x + 5.0f, y, 1.5f, tk); };
+		tick(470.0f, 180.0f); tick(470.0f, 240.0f); tick(770.0f, 430.0f); tick(770.0f, 500.0f); tick(1120.0f, 120.0f); tick(1120.0f, 300.0f);
+	}
+
 	// ══ 画像処理(z2)：ボックス群にゲーム画面(シーンRT)を窓抜きマスク ══
 	DrawRectTL(726.0f, 66.0f, 430.0f, 450.0f, GREY, true);     // 背面フレーム(下地)
 	DrawSceneWindow(726.0f, 66.0f, 430.0f, 450.0f);           // 背面フレームにゲーム画面
 	DrawRectTL(796.0f, 128.0f, 590.0f, 540.0f, GREY, true);    // メインフレーム(下地)
 	DrawSceneWindow(796.0f, 128.0f, 590.0f, 540.0f);          // メインフレームにゲーム画面
-	{   // アシッドのデュオトーン・スライス(右44%。ゲーム画面が透ける半透明)
-		Math::Color slice = ACID; slice.w = 0.55f;
-		DrawRectTL(1126.0f, 128.0f, 260.0f, 540.0f, slice, true);
-	}
-	DrawRectTL(796.0f, 650.0f, 160.0f, 32.0f, ACID, true);     // アクセントブロック
+	// 一番右のスライス(右44%)：ゲーム画面のマスク＋緑を乗算(mix-blend:multiply の二階調)
+	DrawSceneWindow(1126.0f, 128.0f, 260.0f, 540.0f, ACID);
+	DrawRectTL(796.0f, 650.0f, 160.0f, 32.0f, ACID, true);     // 細い緑のアクセントboxはそのまま
 
 	// ══ トップ帯(z3) ══
 	// 左：◍ + スローガン
@@ -338,7 +358,8 @@ void TitleMenuUI::DrawSprite()
 	DrawText(FontSmall, 1394.0f, 49.0f, 12.0f, "LV.23", INK);
 	{
 		Math::Color slash = INK; slash.w = 0.85f;
-		DrawText(FontSlash, 1462.0f, 40.0f, 17.0f, "///", slash);
+		const float fy = std::sin(HjUI::Time() * 1.6f) * 5.0f;   // 上下フロート
+		DrawText(FontSlash, 1462.0f, 40.0f + fy, 17.0f, "///", slash);
 	}
 
 	// ══ 大タイトル(z3) ══ CSS: DRIFT 150/lh.72/-.045em, PROJECT 106/lh.8/-.02em
@@ -406,17 +427,18 @@ void TitleMenuUI::DrawSprite()
 	}
 
 	// ══ SVGデコ(z5, 最前面) ══
-	// 十字(小さな+)
-	DrawCross(648.0f, 80.0f, 8.0f, 2.5f, INK);
-	DrawCross(684.0f, 92.0f, 8.0f, 2.5f, INK);
-	DrawCross(968.0f, 44.0f, 8.0f, 2.5f, INK);
-	// ドットフィールド群
-	DrawDotField(700.0f, 150.0f, 70.0f, 42.0f, DOTS);
-	DrawDotField(1170.0f, 120.0f, 150.0f, 110.0f, DOTS);
-	DrawDotField(1330.0f, 120.0f, 90.0f, 110.0f, GREY9);
-	DrawDotField(70.0f,  470.0f, 90.0f, 70.0f, DOTS);
-	DrawDotField(840.0f, 720.0f, 180.0f, 46.0f, DOTS);
-	DrawDotField(1150.0f, 712.0f, 150.0f, 14.0f, DOTS);
+	// 十字(小さな+)：点滅
+	auto blinkCol = [&](float phase) { Math::Color c = INK; c.w = 0.35f + 0.65f * std::fabs(std::sin(HjUI::Time() * 3.0f + phase)); return c; };
+	DrawCross(648.0f, 80.0f, 8.0f, 2.5f, blinkCol(0.0f));
+	DrawCross(684.0f, 92.0f, 8.0f, 2.5f, blinkCol(1.0f));
+	DrawCross(968.0f, 44.0f, 8.0f, 2.5f, blinkCol(2.0f));
+	// ドットフィールド群(明滅アニメ)
+	HjUI::DotFieldTwinkle(700.0f, 150.0f, 70.0f, 42.0f, DOTS, 0.0f);
+	HjUI::DotFieldTwinkle(1170.0f, 120.0f, 150.0f, 110.0f, DOTS, 0.7f);
+	HjUI::DotFieldTwinkle(1330.0f, 120.0f, 90.0f, 110.0f, GREY9, 1.4f);
+	HjUI::DotFieldTwinkle(70.0f,  470.0f, 90.0f, 70.0f, DOTS, 2.1f);
+	HjUI::DotFieldTwinkle(840.0f, 720.0f, 180.0f, 46.0f, DOTS, 2.8f);
+	HjUI::DotFieldTwinkle(1150.0f, 712.0f, 150.0f, 14.0f, DOTS, 3.5f);
 	// 破線のクロップマーク
 	DrawDashed(720.0f, 200.0f, 790.0f, 200.0f, INK30);
 	DrawDashed(720.0f, 200.0f, 720.0f, 250.0f, INK30);

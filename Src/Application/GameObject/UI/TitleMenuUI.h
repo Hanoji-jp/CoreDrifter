@@ -17,6 +17,8 @@ public:
 
 	// 現在選択中のメニュー番号(0=PLAY …)。TitleSceneが参照。
 	int  GetSelected() const { return m_sel; }
+	// マウスクリックで決定されたか(1回読むとクリアされる)。TitleSceneが遷移に使う。
+	bool ConsumeActivated() { bool a = m_activated; m_activated = false; return a; }
 
 private:
 	// デザイン座標(1536x864, 左上原点)→画面座標(中心原点)へ変換
@@ -41,8 +43,8 @@ private:
 	// デザイン矩形(左上dx,dy,幅w,高さh)を塗る/囲む
 	void  DrawRectTL(float dx, float dy, float w, float h, const Math::Color& col, bool fill = true);
 	// デザイン矩形の位置にシーンRTを1:1で窓抜き描画(ゲーム画面をボックス形状にマスク)。
-	// 将来ここへショーケースカメラの映像を流す。
-	void  DrawSceneWindow(float dx, float dy, float w, float h);
+	// 将来ここへショーケースカメラの映像を流す。tintでゲーム画面に色を乗算(二階調化)できる。
+	void  DrawSceneWindow(float dx, float dy, float w, float h, const Math::Color& tint = { 1.0f, 1.0f, 1.0f, 1.0f });
 	// 太さ付きの枠(2px罫線をデザイン通りに)
 	void  DrawFrameTL(float dx, float dy, float w, float h, float px, const Math::Color& col);
 
@@ -59,7 +61,8 @@ private:
 	// メニューアイコン(幾何形状でユニコード字形を代替)
 	void  DrawMenuIcon(int index, float cx, float cy, const Math::Color& col);
 
-	int  m_sel     = 0;      // 選択中メニュー
-	bool m_prevUp  = false;  // 上キーの前フレーム状態
-	bool m_prevDn  = false;  // 下キーの前フレーム状態
+	int  m_sel       = 0;      // 選択中メニュー
+	bool m_prevUp    = false;  // 上キーの前フレーム状態
+	bool m_prevDn    = false;  // 下キーの前フレーム状態
+	bool m_activated = false;  // マウスクリックで決定された
 };

@@ -422,6 +422,35 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	float  roughness = saturate(mr.g * g_Roughness);
 	roughness = max(roughness, 0.04f); // 完全鏡面防止
 
+	// アクセントカラー塗り：車体を指定色1色で塗り潰す(ドリフト演出など)。
+	// 陰影・輪郭・ハイライトはそのまま残るので、フラットな1色になっても立体感は保たれる。
+	// 金属度も落として、塗料を塗ったようなマットな見た目にする。
+	if (g_TintAmount > 0.001f)
+	{
+		float3 tint = float3(g_TintR, g_TintG, g_TintB);
+
+		// 煙と同じスクリーン空間のハーフトーンを重ねる。
+		// In.Pos.xy はピクセル座標なので模様は画面に貼り付いたまま＝車が動いても模様は動かない。
+		// 煙と同じ関数・同じ周期を使うので、発光した車体と煙の質感が揃う。
+		if (g_SmokePatStrength > 0.001f)
+		{
+			// 網点は45°に傾けるのが印刷の定石(格子が目立ちにくい)
+			float2 sp = float2(In.Pos.x * 0.7071f - In.Pos.y * 0.7071f,
+			                   In.Pos.x * 0.7071f + In.Pos.y * 0.7071f);
+			sp /= max(g_SmokePatScale, 1.0f);
+
+			float2 c = frac(sp) - 0.5f;
+			float  d = length(c) * 2.0f;                  // 0(セル中心)〜1
+			float  dotMask = smoothstep(0.95f, 0.30f, d); // 中心ほど1
+
+			// 網点の隙間はアクセントカラーを暗く落とす(＝塗りが点で抜ける)
+			tint *= 1.0f - g_SmokePatStrength * (1.0f - dotMask);
+		}
+
+		baseColor.rgb = lerp(baseColor.rgb, tint, g_TintAmount);
+		metallic      = lerp(metallic, 0.0f, g_TintAmount);
+	}
+
 	// F0: 非金属=0.04、金属=ベースカラー
 	float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), baseColor.rgb, metallic);
 	// 拡散アルベド: 金属は0

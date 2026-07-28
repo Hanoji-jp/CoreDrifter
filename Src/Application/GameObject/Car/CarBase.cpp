@@ -18,6 +18,8 @@ void CarBase::Init()
 
 	// ドリフトスモーク初期化
 	m_smoke.Init();
+	m_neon.Init();
+	m_skid.Init();
 
 	// 当たり判定の可視化用ワイヤフレーム(F1でトグル)
 	m_pDebugWire = std::make_unique<KdDebugWireFrame>();
@@ -79,6 +81,12 @@ void CarBase::Update()
 		pp.SetSmokeOutlineEnabled(!pp.IsSmokeOutlineEnabled());
 	}
 	m_prevOutlineKey = outlineKey;
+
+	// F4：ブースト(ニトロ)演出を発動。車体に一瞬だけ色が乗り、同時に線画が弾ける。
+	// ※ニトロ機能が入るまでのデバッグ用トリガー
+	const bool tintKey = (GetAsyncKeyState(VK_F4) & 0x8000) != 0;
+	if (tintKey && !m_prevTintKey) { TriggerBoost(); }
+	m_prevTintKey = tintKey;
 
 	// F3：文字エフェクトのスタイルを切り替え(0=グラデ 1=虹スモ 2=炎 3=ドット 4=縞 5=色収差 6=3D 7=ワープ)
 	const bool styleKey = (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
@@ -484,25 +492,20 @@ void CarBase::Update()
 		m_pitchVel += acc * dt; m_pitchAngle += m_pitchVel * dt;
 	}
 
-	//===== 位置更新(XZ平面を移動 → 地形へ接地) =====
-	// 水平方向は物理どおり進める。上下(Y)は地形コリジョンへ下方レイを飛ばして決める。
-	m_pos += m_vel * dt;
-
-	//----- 壁(TypeBump)：車体を複数の球で近似して押し戻す＋壁に沿って滑る(物理応答) -----
-	// 実車ゲームはボディを凸包/カプセルで壁に当てる。ここは箱vsメッシュが未対応なので、
-	// 車体を6個の球(四隅＋前後端)で近似＝カプセル/凸包相当にして車の形・向き・角を拾う。
-	// 「面法線がほぼ垂直＝壁」のヒットだけ採用し(水平な床は無視)、壁向きの速度成分だけ殺す
-	// →垂直な崖・ガードレールで止まり、接線方向へは滑る(擦りドリフト可)。
+	//===== 位置更新＋壁判定：サブステップCCD＋リラクゼーション(車ゲー的に堅牢) =====
+	// 1フレームの水平移動を球半径以下に小刻み分割して進め、毎ステップ壁へ押し戻す。
+	// ・すり抜け防止：ステップ毎に判定するので高速でも薄い壁を飛び越えない。
+	// ・角/複数壁のめり込み：1ステップ内で数回リラクゼーションして収束させる。
+	// ・擦り滑り：現在速度で刻むので、壁で殺した速度が次ステップに反映されて壁沿いに滑る。
+	// 上下(Y)は下方の接地レイで別途決める(この後)。
 	{
-		// 地形の傾き(ピッチ/ロール)込みの回転。プローブ配置を車体の傾きに沿わせる＝
-		// 坂で前側の球が車の傾きどおり持ち上がり、登り坂の地面へめり込む誤ヒットを防ぐ。
-		// 回転順は DrawLit の carWorld と一致させる。
+		// 車体近似プローブ(車体ローカル：px=右, pz=前)。四隅＋前後端の6点。
+		// 傾き(ピッチ/ロール/ヨー)込みで配置＝坂で誤って床に当たらない。DrawLitのcarWorldと同順。
 		const Math::Matrix tiltRot =
 			Math::Matrix::CreateRotationX(-m_terrainPitch) *
 			Math::Matrix::CreateRotationZ(-m_terrainRoll) *
 			Math::Matrix::CreateRotationY(m_yaw);
 
-		// 車体近似プローブ(車体ローカル：px=右, pz=前)。四隅＋前後端の6点。
 		struct Probe { float px; float pz; };
 		const float tip = m_base * CarConst::WallProbeTip;
 		const Probe probes[6] =
@@ -512,43 +515,63 @@ void CarBase::Update()
 			{  0.0f,     tip    }, {  0.0f,    -tip    },  // 前端・後端(中央)
 		};
 
-		// 1個の球で壁を押し戻すヘルパ(法線フィルタ＋接線滑り)
-		auto resolveSphere = [&](const Math::Vector3& center)
+		// 全プローブで壁を1回押し戻す。押し戻しが起きたら true(反復継続の判断用)。
+		auto resolvePass = [&]() -> bool
 		{
-			KdCollider::SphereInfo sph;
-			sph.m_sphere.Center = center;
-			sph.m_sphere.Radius = CarConst::WallProbeRadius;
-			sph.m_type = KdCollider::TypeBump;
-
-			for (auto& wp : m_wpHitList)
+			bool hitAny = false;
+			for (const Probe& p : probes)
 			{
-				std::shared_ptr<KdGameObject> obj = wp.lock();
-				if (!obj) { continue; }
-				std::list<KdCollider::CollisionResult> results;
-				if (!obj->Intersects(sph, &results)) { continue; }
-				for (const auto& r : results)
+				const Math::Vector3 localOff(p.px, CarConst::WallSphereHeight, p.pz);
+				const Math::Vector3 center = m_pos + Math::Vector3::TransformNormal(localOff, tiltRot);
+
+				KdCollider::SphereInfo sph;
+				sph.m_sphere.Center = center;
+				sph.m_sphere.Radius = CarConst::WallProbeRadius;
+				sph.m_type = KdCollider::TypeBump;
+
+				for (auto& wp : m_wpHitList)
 				{
-					// 面法線が水平に近い(=垂直な壁)ものだけ採用。床(法線が上向き)は無視。
-					if (fabsf(r.m_hitNDir.y) > CarConst::WallNormalMaxY) { continue; }
+					std::shared_ptr<KdGameObject> obj = wp.lock();
+					if (!obj) { continue; }
+					std::list<KdCollider::CollisionResult> results;
+					if (!obj->Intersects(sph, &results)) { continue; }
+					for (const auto& r : results)
+					{
+						// 垂直な壁(法線が水平)だけ採用。床(上向き法線)は接地側で処理。
+						if (fabsf(r.m_hitNDir.y) > CarConst::WallNormalMaxY) { continue; }
+						Math::Vector3 n = r.m_hitDir; n.y = 0.0f;   // 水平の押し戻し方向
+						if (n.LengthSquared() < 1e-6f) { continue; }
+						n.Normalize();
 
-					Math::Vector3 n = r.m_hitDir; n.y = 0.0f;   // 水平の押し戻し方向
-					if (n.LengthSquared() < 1e-6f) { continue; }
-					n.Normalize();
+						// めり込みぶん押し出す(1回の暴発を防ぐため上限クランプ)
+						const float push = std::min(r.m_overlapDistance, CarConst::WallMaxPush);
+						m_pos += n * push;
 
-					m_pos += n * r.m_overlapDistance;           // めり込みぶん押し出す
-
-					const float into = m_vel.Dot(n);            // 壁へ食い込む速度を除去
-					if (into < 0.0f) { m_vel -= n * into * (1.0f + CarConst::WallSlideBounce); }
+						// 壁へ食い込む速度成分だけ除去＝接線方向へ滑る
+						const float into = m_vel.Dot(n);
+						if (into < 0.0f) { m_vel -= n * into * (1.0f + CarConst::WallSlideBounce); }
+						hitAny = true;
+					}
 				}
 			}
+			return hitAny;
 		};
 
-		for (const Probe& p : probes)
+		// 移動量を球半径の一定割合以下に分割(すり抜け防止のCCD相当)
+		const Math::Vector3 disp0 = m_vel * dt;
+		const float dist = sqrtf(disp0.x * disp0.x + disp0.z * disp0.z);
+		const float maxStep = CarConst::WallProbeRadius * CarConst::WallSubStepFactor;
+		const int steps = std::clamp(
+			static_cast<int>(ceilf(dist / std::max(maxStep, 0.001f))), 1, CarConst::WallMaxSubSteps);
+		const float subDt = dt / static_cast<float>(steps);
+
+		for (int s = 0; s < steps; ++s)
 		{
-			// 傾いた車体ローカル配置(px=右, WallSphereHeight=上, pz=前)を回転してワールドへ
-			const Math::Vector3 localOff(p.px, CarConst::WallSphereHeight, p.pz);
-			const Math::Vector3 center = m_pos + Math::Vector3::TransformNormal(localOff, tiltRot);
-			resolveSphere(center);
+			m_pos += m_vel * subDt;   // 現在速度で刻む(壁で殺した速度が次ステップに効く)
+			for (int it = 0; it < CarConst::WallRelaxIters; ++it)
+			{
+				if (!resolvePass()) { break; }
+			}
 		}
 	}
 
@@ -608,112 +631,66 @@ void CarBase::Update()
 
 		const float k = std::min(CarConst::GroundFollowSmooth * dt, 1.0f);
 
-		//----- 垂直ダイナミクス(重力＋接地拘束)：これでジャンプ→滞空→着地ができる -----
-		// 毎フレーム重力で落とし、支持面(接地面)より上なら滞空、下(=めり込む)なら接地。
-		// ランプを駆け上がる支持面の"上昇速度"を車の垂直速度として持たせ、クレスト(頂点)で
-		// 地面が離れた瞬間その勢いで自然に打ち上がる＝エビス風のジャンプになる。
+		//----- 垂直ダイナミクス：地面に吸着(ジャンプ/打ち上げ/壁での浮き 無し・既存の車ゲー的) -----
+		// 真下に地形がある間は常に接地。ランプ・クレスト・壁ズレでも打ち上がらない。
+		// 坂のピッチ/ロール(車体が地形に沿って傾く)は残す。地面が無い時だけ重力で落下(崖)。
 		const float gY = CarConst::Gravity * m_airGravityMul;
 		m_velY -= gY * dt;
 		const float yBallistic = m_pos.y + m_velY * dt;
 
-		// 空中の車体姿勢は剛体の角運動量で回す(物理)。ランプで付いた回転(m_pitchRate/m_rollRate)を
-		// そのまま保持しつつ、空力(矢羽根効果)で機首を進行方向=弾道へ揃える復元トルク＋角速度減衰を掛ける。
-		// →離陸で付いた回転が残りつつ、だんだん弾道に沿って収束＝がっつり物理っぽい弧になる。
-		auto applyAirAttitude = [&]()
-		{
-			const float hSpeed    = sqrtf(m_vel.x * m_vel.x + m_vel.z * m_vel.z);
-			const float trajPitch = std::clamp(atan2f(m_velY, std::max(hSpeed, 1.0f)),
-			                                   -CarConst::AirMaxPitch, CarConst::AirMaxPitch);
-			// ピッチ：弾道角への復元トルク＋空気減衰(角運動量は保存されつつ収束)
-			m_pitchRate += (trajPitch - m_terrainPitch) * CarConst::AirAeroAlign * dt;
-			m_pitchRate -= m_pitchRate * std::min(CarConst::AirAeroDamp * dt, 1.0f);
-			m_terrainPitch += m_pitchRate * dt;
-			m_terrainPitch  = std::clamp(m_terrainPitch, -CarConst::AirMaxPitch, CarConst::AirMaxPitch);
-			// ロール：水平(0)への復元トルク＋空気減衰
-			m_rollRate += (0.0f - m_terrainRoll) * CarConst::AirAeroAlign * dt;
-			m_rollRate -= m_rollRate * std::min(CarConst::AirAeroDamp * dt, 1.0f);
-			m_terrainRoll += m_rollRate * dt;
-		};
-
 		if (hitCount > 0)
 		{
-			// 車体高さ＝接地タイヤの平均(支持面の生の高さ)
+			// 接地面の高さ(接地タイヤ平均)＋ライドハイト
 			float sum = 0.0f;
 			for (int i = 0; i < 4; ++i) { if (contactHit[i]) { sum += contactY[i]; } }
 			const float avgY    = sum / static_cast<float>(hitCount);
 			const float groundY = avgY + CarConst::RideHeight;
 
-			// 支持面高さを低域通過(メッシュ継ぎ目のガタつき除去)。
-			// 上昇速度は"生の高さ差"から取り、速度側で平滑化＝ランプの勢いを正確に拾いつつ
-			// 一瞬のメッシュ暴れは弾く(その暴れで勝手にジャンプしないように)。
-			if (!m_prevGroundValid) { m_groundYFilt = groundY; m_prevGroundY = groundY; m_supportVelY = 0.0f; }
+			// 支持面高さを低域通過(メッシュ継ぎ目のガタつき除去)
+			if (!m_prevGroundValid) { m_groundYFilt = groundY; }
 			m_groundYFilt += (groundY - m_groundYFilt) * k;
-			const float rawSupportVelY = (groundY - m_prevGroundY) / std::max(dt, 1e-4f);
-			m_supportVelY += (rawSupportVelY - m_supportVelY) * std::min(CarConst::SupportVelSmooth * dt, 1.0f);
-			m_prevGroundY     = groundY;
 			m_prevGroundValid = true;
 
-			if (yBallistic > m_groundYFilt + CarConst::AirLaunchEps)
+			// 坂のピッチ(登降)・ロール(バンク)へ追従＝車体が地形に沿って傾く(これは残す)
+			float terrainPitchTarget = m_terrainPitch;
+			float terrainRollTarget  = m_terrainRoll;
+			if ((contactHit[0] || contactHit[1]) && (contactHit[2] || contactHit[3]))
 			{
-				// 支持面より上＝滞空(ランプの勢いで飛んだ or まだ落下中)。姿勢は弾道へ沿わせる。
-				m_airborne = true;
-				m_onGround = false;
-				m_pos.y    = yBallistic;
-				applyAirAttitude();
+				const float frontY = pairAvg(0, 1);
+				const float rearY  = pairAvg(2, 3);
+				terrainPitchTarget = atan2f(frontY - rearY, 2.0f * std::max(m_base, 0.05f));  // 前が高い=登り
 			}
-			else
+			if ((contactHit[0] || contactHit[2]) && (contactHit[1] || contactHit[3]))
 			{
-				// 接地。ピッチ(坂)・ロール(バンク)を計算して追従。
-				float terrainPitchTarget = m_terrainPitch;
-				float terrainRollTarget  = m_terrainRoll;
-				if ((contactHit[0] || contactHit[1]) && (contactHit[2] || contactHit[3]))
-				{
-					const float frontY = pairAvg(0, 1);
-					const float rearY  = pairAvg(2, 3);
-					terrainPitchTarget = atan2f(frontY - rearY, 2.0f * std::max(m_base, 0.05f));  // 前が高い=登り
-				}
-				if ((contactHit[0] || contactHit[2]) && (contactHit[1] || contactHit[3]))
-				{
-					const float leftY  = pairAvg(0, 2);
-					const float rightY = pairAvg(1, 3);
-					terrainRollTarget = atan2f(leftY - rightY, 2.0f * std::max(m_track, 0.05f));   // 左が高い=右下がり
-				}
-				terrainPitchTarget = std::clamp(terrainPitchTarget, -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
-				terrainRollTarget  = std::clamp(terrainRollTarget,  -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
-				const float prevPitch = m_terrainPitch;
-				const float prevRoll  = m_terrainRoll;
-				m_terrainPitch += (terrainPitchTarget - m_terrainPitch) * k;
-				m_terrainRoll  += (terrainRollTarget  - m_terrainRoll ) * k;
-				// 接地中も回転角速度を追従の微分から更新＝離陸した瞬間その角運動量で回り出す(物理)
-				m_pitchRate = (m_terrainPitch - prevPitch) / std::max(dt, 1e-4f) * CarConst::AirLaunchSpin;
-				m_rollRate  = (m_terrainRoll  - prevRoll ) / std::max(dt, 1e-4f) * CarConst::AirLaunchSpin;
+				const float leftY  = pairAvg(0, 2);
+				const float rightY = pairAvg(1, 3);
+				terrainRollTarget = atan2f(leftY - rightY, 2.0f * std::max(m_track, 0.05f));   // 左が高い=右下がり
+			}
+			terrainPitchTarget = std::clamp(terrainPitchTarget, -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+			terrainRollTarget  = std::clamp(terrainRollTarget,  -CarConst::MaxTerrainTilt, CarConst::MaxTerrainTilt);
+			m_terrainPitch += (terrainPitchTarget - m_terrainPitch) * k;
+			m_terrainRoll  += (terrainRollTarget  - m_terrainRoll ) * k;
 
-				if (m_airborne)
-				{
-					// 着地：垂直の衝撃を吸収(小さくバウンド)。水平速度・ヨーは保持＝横向き着地でドリフト継続。
-					m_pos.y = groundY;
-					m_velY  = -m_velY * m_landBounce;
-				}
-				else
-				{
-					// 接地走行：高さは平滑化した支持面へ吸着。ランプの上昇速度を垂直速度として保持
-					// →クレストで地面が離れた瞬間、この勢いでジャンプする。
-					m_pos.y = m_groundYFilt;
-					m_velY  = std::clamp(m_supportVelY * m_jumpLaunch, -CarConst::MaxLandVelY, CarConst::MaxLaunchVelY);
-				}
-				m_onGround = true;
-				m_airborne = false;
-			}
+			// 常に地面へ吸着＝ジャンプ/打ち上げ/壁での浮き 無し。垂直速度・角速度はゼロ。
+			m_pos.y     = m_groundYFilt;
+			m_velY      = 0.0f;
+			m_pitchRate = 0.0f;
+			m_rollRate  = 0.0f;
+			m_onGround  = true;
+			m_airborne  = false;
 		}
 		else
 		{
-			// 4輪とも真下に地形なし＝完全に空中(崖から飛び出し等)。落下しつつ姿勢を弾道へ沿わせる。
-			m_airborne = true;
-			m_onGround = false;
-			m_prevGroundValid = false;
-			m_supportVelY = 0.0f;
+			// 真下に地形なし＝崖から落下。重力で落ちつつ、車体は水平へ戻す(派手な回転はしない)。
 			m_pos.y = yBallistic;
-			applyAirAttitude();
+			m_prevGroundValid = false;
+			const float lv = std::min(CarConst::AirLevelSmooth * dt, 1.0f);
+			m_terrainPitch += (0.0f - m_terrainPitch) * lv;
+			m_terrainRoll  += (0.0f - m_terrainRoll ) * lv;
+			m_pitchRate = 0.0f;
+			m_rollRate  = 0.0f;
+			m_onGround  = false;
+			m_airborne  = true;
 		}
 	}
 
@@ -746,11 +723,87 @@ void CarBase::Update()
 			(rearSlip - SmokeConst::SlipThreshold) /
 			(SmokeConst::SlipFull - SmokeConst::SlipThreshold), 0.0f, 1.0f);
 
+		// タイヤ痕：煙と同じ後輪接地点に毎フレーム点を渡す。
+		// (実際に点が増えるのは前の点から一定距離離れた時だけなので、低速でも密集しない)
+		// 滞空中・ほぼ停止中は痕を切り、次に接地した時は新しい痕として始める。
+		{
+			const Math::Vector3 fwdS(sinf(m_yaw), 0.0f, cosf(m_yaw));
+			const bool canMark = (carSpeed > SmokeConst::MinSpeed) && m_onGround;
+
+			// 前輪の摩擦：舵を切った向きに対してどれだけ横へ滑っているか(スクラブ)。
+			// 前輪の位置ではヨー回転ぶんの横速度が加わるので、それを足してから
+			// 操舵角ぶん回してタイヤ座標系に直す。前輪は駆動しないので空転は考えない。
+			const float vLatFront  = vLatEnd + m_yawRate * m_base;
+			const float frontScrub = fabsf(vLatFront * cosf(m_steer) - vLongEnd * sinf(m_steer));
+			const float frontSlip01 = std::clamp(
+				(frontScrub - SkidMarkConst::FrontSlipThreshold) /
+				std::max(SkidMarkConst::FrontSlipFull - SkidMarkConst::FrontSlipThreshold, 1e-4f),
+				0.0f, 1.0f) * SkidMarkConst::FrontAlphaMul;
+
+			// 前輪の幅方向は操舵で向きが変わる＝車の右方向を舵角ぶん回したもの
+			const Math::Vector3 rightF(cosf(m_yaw + m_steer), 0.0f, -sinf(m_yaw + m_steer));
+
+			for (int side = -1; side <= 1; side += 2)
+			{
+				const int rearIdx  = (side < 0) ? 0 : 1;
+				const int frontIdx = (side < 0) ? 2 : 3;
+				if (!canMark) { m_skid.Cut(rearIdx); m_skid.Cut(frontIdx); continue; }
+
+				const Math::Vector3 lat = rightV * (static_cast<float>(side) * m_track);
+
+				// 後輪：幅方向はタイヤの回転軸＝車の右方向
+				Math::Vector3 wpR = m_pos + lat - fwdS * m_base;
+				wpR.y = m_pos.y + SmokeConst::WheelGroundY;
+				m_skid.Emit(rearIdx, wpR, rightV, slip01);
+
+				// 前輪
+				Math::Vector3 wpF = m_pos + lat + fwdS * m_base;
+				wpF.y = m_pos.y + SmokeConst::WheelGroundY;
+				m_skid.Emit(frontIdx, wpF, rightF, frontSlip01);
+			}
+
+			// 前輪が擦れているときは、痕と同じ判定でごく少量だけ煙も出す。
+			// 後輪と同じ計算式に前輪ぶんの倍率を掛けるだけなので、
+			// 速度が上がっても路面に対する煙の密度は後輪と揃う。
+			if (canMark && frontSlip01 > 0.0f)
+			{
+				const float rateF = (SmokeConst::MeshSpawnPerSec
+				                   + SmokeConst::MeshSpawnPerMeter * carSpeed)
+				                  * SmokeConst::FrontSpawnMul;
+				m_smokeCarryFront += rateF * frontSlip01 * dt;
+				const int nf = static_cast<int>(m_smokeCarryFront);
+				m_smokeCarryFront -= static_cast<float>(nf);
+
+				if (nf > 0)
+				{
+					const Math::Vector3 trailF = -m_vel * SmokeConst::TrailFactor;
+					for (int side = -1; side <= 1; side += 2)
+					{
+						Math::Vector3 wp = m_pos
+						                 + rightV * (static_cast<float>(side) * m_track)
+						                 + fwdS   * m_base;
+						wp.y = m_pos.y + SmokeConst::WheelGroundY;
+						const Math::Vector3 outward = rightV * static_cast<float>(side);
+						// 大きさを大幅に落として、砂埃のような小さな粒にする
+						m_smoke.Emit(wp, trailF, outward, nf, SmokeConst::FrontSizeMul);
+					}
+				}
+			}
+			else
+			{
+				m_smokeCarryFront = 0.0f;
+			}
+		}
+
 		// 車速ガード：ほぼ停止しているときは一切煙を出さない。滞空中もタイヤ非接地なので出さない。
 		if (slip01 > 0.0f && carSpeed > SmokeConst::MinSpeed && m_onGround)
 		{
 			// 端数を蓄積して整数枚に(1輪あたりの枚数)
-			m_smokeCarry += SmokeConst::SpawnPerSec * slip01 * dt;
+			// 毎秒ぶん＋進んだ距離ぶん。距離ぶんを足すことで、速度が上がっても
+			// 路面に並ぶ粒の間隔が広がらず、煙の帯が途切れなくなる。
+			const float rate = SmokeConst::MeshSpawnPerSec
+			                 + SmokeConst::MeshSpawnPerMeter * carSpeed;
+			m_smokeCarry += rate * slip01 * dt;
 			const int n = static_cast<int>(m_smokeCarry);
 			m_smokeCarry -= static_cast<float>(n);
 
@@ -767,14 +820,94 @@ void CarBase::Update()
 					// 地形追従する車のY(m_pos.y)基準に接地点のわずかな浮きを足す。
 					// (固定値で上書きすると坂を登っても煙が原点高さに取り残される)
 					wp.y = m_pos.y + SmokeConst::WheelGroundY;
-					m_smoke.Emit(wp, trail, n);
+					// 外向き＝その後輪から見て車体の外側(左輪なら左、右輪なら右)
+					const Math::Vector3 outward = rightV * static_cast<float>(side);
+					m_smoke.Emit(wp, trail, outward, n);
+				}
+			}
+
+			// ネオン線画(リング＋スパーク)も同じスリップ量で後輪から放出
+			m_neonRingCarry  += NeonFxConst::RingPerSec  * slip01 * dt;
+			m_neonSparkCarry += NeonFxConst::SparkPerSec * slip01 * dt;
+			const int nRing  = static_cast<int>(m_neonRingCarry);
+			const int nSpark = static_cast<int>(m_neonSparkCarry);
+			m_neonRingCarry  -= static_cast<float>(nRing);
+			m_neonSparkCarry -= static_cast<float>(nSpark);
+
+			if (nRing > 0 || nSpark > 0)
+			{
+				const Math::Vector3 fwdN(sinf(m_yaw), 0.0f, cosf(m_yaw));
+				for (int side = -1; side <= 1; side += 2)
+				{
+					Math::Vector3 wp = m_pos
+					                 + rightV * (static_cast<float>(side) * m_track)
+					                 - fwdN   * m_base;
+					wp.y = m_pos.y + SmokeConst::WheelGroundY;
+					// axis=タイヤの回転軸(車の右方向)＝リングがホイール面に沿う
+					m_neon.Emit(wp, rightV, m_vel, nRing, nSpark);
 				}
 			}
 		}
 	}
 
+	// ブースト演出：フェードさせず、パッと色が乗ってパッと戻す(本家の切り替わり方)
+	if (m_boostFlash >= 0.0f)
+	{
+		m_boostFlash += dt;
+		if (m_boostFlash < NeonFxConst::BoostFlashHold)
+		{
+			m_driftTint = 1.0f;
+		}
+		else
+		{
+			m_driftTint  = 0.0f;
+			m_boostFlash = -1.0f;   // 終了
+		}
+	}
+	else
+	{
+		m_driftTint = 0.0f;
+	}
+
 	// スモーク粒の更新(寿命・移動)
 	m_smoke.Update(dt);
+	m_neon.Update(dt);
+	m_skid.Update(dt);
+}
+
+//----------------------------------------------------------
+// ネオン線画の描画（煙の合成が済んだ後にシーンへ直接重ねる）
+//   DrawEffectに置くと煙専用RTへ入ってシルエット輪郭が乗り、
+//   細い線が輪郭に塗り潰されて中身が見えなくなる。
+//----------------------------------------------------------
+void CarBase::DrawOverlayEffect()
+{
+	m_neon.SetColors(m_neonColorA, m_neonColorB);
+	m_neon.DrawEffect();
+}
+
+//----------------------------------------------------------
+// 輝度パス：ネオンのグローを輝度RTへ描く。
+// ポストプロセス(LightBloom)が4段階のガウスぼかしを掛けて画面へ加算するので、
+// 光が周囲へ本当に滲み、レーザー光線のような見た目になる。
+//----------------------------------------------------------
+void CarBase::DrawBright()
+{
+	m_neon.SetColors(m_neonColorA, m_neonColorB);
+	m_neon.DrawBrightPass();
+}
+
+//----------------------------------------------------------
+// ブースト(ニトロ)演出を発動
+//   車体に一瞬だけアクセントカラーが乗り、同時にネオンの線画が全方向へ弾ける。
+//----------------------------------------------------------
+void CarBase::TriggerBoost()
+{
+	m_boostFlash = 0.0f;   // フラッシュ開始
+
+	// 線画は地面に沿って走らせるので、足元寄りの高さから湧かせる
+	const Math::Vector3 burstPos = m_pos + Math::Vector3(0.0f, NeonFxConst::BoostSpawnY, 0.0f);
+	m_neon.Burst(burstPos, m_vel);
 }
 
 //----------------------------------------------------------
@@ -783,6 +916,9 @@ void CarBase::Update()
 void CarBase::DrawEffect()
 {
 	m_smoke.SetTint(m_smokeColor);
+	m_smoke.SetTintB(m_smokeColorB);
+	m_smoke.SetGradDist(m_smokeGradDist);
+	m_smoke.SetHighlight(m_smokeHiColor);
 	m_smoke.DrawEffect();
 }
 
@@ -834,6 +970,11 @@ void CarBase::DrawDebug()
 
 void CarBase::DrawLit()
 {
+	// タイヤ痕は路面の一部なので、車体より先にLitパスで描いて路面の光を受けさせる。
+	// 深度書き込みをしないので、この後のシーン輪郭抽出に拾われて線が引かれることもない。
+	m_skid.SetColor(m_skidColor);
+	m_skid.DrawEffect();
+
 	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);
 	auto& shader = KdShaderManager::Instance().m_StandardShader;
 	// 車体全体(本体＋4輪)を地形の傾きへ合わせる＝坂・バンクで車ごと傾く(CarX風の床判定)
@@ -899,16 +1040,31 @@ void CarBase::DrawLit()
 	// ※裏面は法線が逆向きなので、Litシェーダー側で SV_IsFrontFace により法線を反転して
 	//   正しく陰影を付けている(そうしないと裏面が真っ黒になる)。
 
+	// ドリフト中は車体をアクセントカラーで塗り潰す(陰影・輪郭は残る)。
+	// DrawModelは描画後に定数バッファを既定へ戻すので、描画のたびに設定し直す。
+	// 塗りには煙と同じ網点マスクを重ねて質感を揃える(周期・濃さも煙の値をそのまま使う)。
+	const float tintAmt = m_driftTint * m_driftTintMax;
+	shader.SetTint(tintAmt, m_driftTintColor,
+	               SmokeConst::SmokePatScale, SmokeConst::SmokePatStrength);
 	shader.DrawModel(m_body, bodyW);
-	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m); }
+	for (const auto& m : wheelMat)
+	{
+		shader.SetTint(tintAmt, m_driftTintColor,
+		               SmokeConst::SmokePatScale, SmokeConst::SmokePatStrength);
+		shader.DrawModel(m_wheel, m);
+	}
 	KdShaderManager::Instance().UndoRasterizerState();
 
 	//===== アウトライン(原神式：背面押し出し。本体の"後"に描く) =====
 	if (m_outlineEnabled)
 	{
-		const Math::Color oc(m_outlineColor.x, m_outlineColor.y, m_outlineColor.z, 1.0f);
+		// ブースト中は輪郭もアクセントカラーへ寄せて太らせる＝縁が発光して見える
+		// (本家は車体の塗りだけでなく、シルエットの縁が強く光る)
+		// 寄せる先は車体の塗りとは別指定。縁だけ違う色で光らせられる
+		const Math::Vector3 ocv = Math::Vector3::Lerp(m_outlineColor, m_boostOutlineColor, tintAmt);
+		const Math::Color oc(ocv.x, ocv.y, ocv.z, 1.0f);
 		shader.BeginOutline();
-		shader.SetOutlineWidth(m_outlineWidth);
+		shader.SetOutlineWidth(m_outlineWidth * (1.0f + tintAmt * 1.6f));
 		shader.DrawModel(m_body, bodyW, oc);
 		for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, oc); }
 		shader.EndOutline();
@@ -1036,7 +1192,23 @@ void CarBase::DrawTuningImGui()
 	ImGui::ColorEdit3(U8("色"), &m_outlineColor.x);
 
 	ImGui::SeparatorText(U8("ドリフトスモーク"));
-	ImGui::ColorEdit3(U8("煙の色"), &m_smokeColor.x);
+	// 煙のグラデーション：発生源から離れるほど 色A → 色B へ滑らかに変わる
+	ImGui::ColorEdit3(U8("煙の色A(手前)"), &m_smokeColor.x);
+	ImGui::ColorEdit3(U8("煙の色B(奥)"),   &m_smokeColorB.x);
+	ImGui::SliderFloat(U8("グラデ距離(m)"), &m_smokeGradDist, 0.5f, 30.0f);
+	ImGui::ColorEdit3(U8("煙のハイライト色"), &m_smokeHiColor.x);
+
+	// ブースト(ニトロ)発動時：一瞬だけ車体に色が乗り、線画が弾ける
+	ImGui::SeparatorText(U8("ブースト演出(ニトロ)"));
+	ImGui::ColorEdit3(U8("アクセントカラー"), &m_driftTintColor.x);
+	ImGui::ColorEdit3(U8("発光中の輪郭色"), &m_boostOutlineColor.x);
+	ImGui::SliderFloat(U8("塗り具合(最大)"), &m_driftTintMax, 0.0f, 1.0f);
+	// パーティクル(線・丸)の色。粒ごとにAとBを混色して散らす
+	ImGui::ColorEdit3(U8("パーティクル色A"), &m_neonColorA.x);
+	ImGui::ColorEdit3(U8("パーティクル色B"), &m_neonColorB.x);
+	if (ImGui::Button(U8("発動テスト(F4)"))) { TriggerBoost(); }
+	ImGui::SameLine();
+	ImGui::Text(U8("現在の塗り %.2f"), m_driftTint * m_driftTintMax);
 
 	// 画面全体のエッジ検出アウトライン(トゥーン輪郭・ポストプロセス)
 	ImGui::SeparatorText(U8("画面アウトライン(トゥーン)"));
@@ -1049,6 +1221,17 @@ void CarBase::DrawTuningImGui()
 		ImGui::DragFloat(U8("法線しきい値(角)"), &pp.WorkOutlineNormalThreshold(), 0.01f, 0.01f, 1.0f);
 		ImGui::DragFloat(U8("濃さ##sceneOutline"), &pp.WorkOutlineEdgeStrength(), 0.02f, 0.0f, 1.0f);
 		ImGui::ColorEdit3(U8("色##sceneOutline"), &pp.WorkOutlineColor().x);
+	}
+
+	// 画面全体のハーフトーン(印刷風の網点)
+	ImGui::SeparatorText(U8("ハーフトーン(印刷風)"));
+	{
+		auto& pp = KdShaderManager::Instance().m_postProcessShader;
+		bool halftone = pp.IsHalftoneEnabled();
+		if (ImGui::Checkbox(U8("有効##halftone"), &halftone)) { pp.SetHalftoneEnabled(halftone); }
+		ImGui::DragFloat(U8("網点の周期(px)"), &pp.WorkHalftoneScale(), 0.1f, 2.0f, 40.0f);
+		ImGui::DragFloat(U8("濃さ##halftone"), &pp.WorkHalftoneStrength(), 0.01f, 0.0f, 1.0f);
+		ImGui::DragFloat(U8("暗部に寄せる量"), &pp.WorkHalftoneDarkBias(), 0.02f, 0.0f, 1.0f);
 	}
 
 	ImGui::SeparatorText(U8("動力"));
@@ -1176,6 +1359,17 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 		{ "outlineColR", &m_outlineColor.x }, { "outlineColG", &m_outlineColor.y }, { "outlineColB", &m_outlineColor.z },
 		// ドリフトスモーク色
 		{ "smokeColR", &m_smokeColor.x }, { "smokeColG", &m_smokeColor.y }, { "smokeColB", &m_smokeColor.z },
+		// 色B(奥側)。旧キー smokeColB は色Aの青成分なので、区別できる名前にする。
+		{ "smokeCol2R", &m_smokeColorB.x }, { "smokeCol2G", &m_smokeColorB.y }, { "smokeCol2B", &m_smokeColorB.z },
+		{ "smokeGradDist", &m_smokeGradDist },
+		{ "smokeHiR", &m_smokeHiColor.x }, { "smokeHiG", &m_smokeHiColor.y }, { "smokeHiB", &m_smokeHiColor.z },
+		{ "tintR", &m_driftTintColor.x }, { "tintG", &m_driftTintColor.y }, { "tintB", &m_driftTintColor.z },
+		{ "tintMax", &m_driftTintMax }, { "tintSlipDeg", &m_driftTintSlipDeg },
+		// 発光中の輪郭色(車体の塗りとは独立)
+		{ "boostOutR", &m_boostOutlineColor.x }, { "boostOutG", &m_boostOutlineColor.y },
+		{ "boostOutB", &m_boostOutlineColor.z },
+		{ "neonAR", &m_neonColorA.x }, { "neonAG", &m_neonColorA.y }, { "neonAB", &m_neonColorA.z },
+		{ "neonBR", &m_neonColorB.x }, { "neonBG", &m_neonColorB.y }, { "neonBB", &m_neonColorB.z },
 	};
 }
 

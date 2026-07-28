@@ -56,16 +56,62 @@ public:
 		float			GrassEdgeTexScale = 0.15f;// エッジテクスチャのスケール
 		float			FullEdgeStrength  = 0.0f; // 全面エッジブレンド強度（0=無効 1=フル）
 
-		// スモーク専用ライティング＋ディゾルブ（板ポリを球ドーム法線でトゥーン陰影＋溶けて消す）
+		// メッシュ煙のトゥーン陰影（3段：ハイライト(白) / 標準色 / 暗い色）
 		int				SmokeLit    = 0;          // 有効フラグ
-		float			SmokeSplitX = 1.0f;       // アトラス分割数X（タイル内ローカルUV復元用）
-		float			SmokeSplitY = 1.0f;       // アトラス分割数Y
-		float			SmokePeak   = 1.0f;       // 最大不透明度
+		float			ToonDark    = 0.35f;      // 暗い面：基準色に掛ける倍率
+		float			ToonWhite   = 0.75f;      // 明るい面：白へ寄せる量(0=色のまま 1=真っ白)
+		float			ToonMidThr  = 0.30f;      // これ以上の受光で「標準色」
 
-		float			SmokeErode  = 1.0f;       // エロージョン(ディゾルブ)強さ
-		float			SmokeEdge   = 0.25f;      // 溶けの縁の柔らかさ
-		float			_smokepad2  = 0.0f;       // パディング
-		float			_smokepad3  = 0.0f;       // パディング
+		float			ToonHiThr   = 0.72f;      // これ以上の受光で「ハイライト(白)」
+		float			ToonUpBias  = 0.80f;      // 光を真上へ寄せる量(1=完全に真上から)
+		// 重なった粒を1つの塊に見せるための「共有の陰影」
+		//   粒ごとの法線だけで陰影を出すと、重なるほど明るい頭が並んでボコボコに見える。
+		//   全粒共通のワールド高さから求めた明るさを混ぜると、同じ高さは同じ色になり一体化する。
+		float			SmokeMerge  = 0.55f;      // 共有の陰影を混ぜる割合(0=粒ごと 1=高さのみ)
+		float			SmokeBaseY  = 0.0f;       // 煙の根元のワールド高さ
+
+		float			SmokePlumeH = 2.2f;       // 根元から上端までの高さ(m)
+		// スクリーン空間のハーフトーン模様（印刷物っぽい質感。煙が動いても模様は画面に固定）
+		float			SmokePatScale    = 6.0f;  // 模様の周期(px)。小さいほど細かい
+		float			SmokePatStrength = 0.35f; // 模様の濃さ(0=無効)
+		float			SmokePatDarkBias = 0.7f;  // 暗い面ほど模様を強く出す量(0=一律)
+
+		// 明暗の境界のうねり（水平一直線に切れて見えるのを防ぐ。位置だけの関数なので全粒で共有）
+		float			SmokeWobAmp  = 0.35f;     // 境界の揺れ幅(m)
+		float			SmokeWobFreq = 0.9f;      // 揺れの細かさ(1/m)
+		// 発生源から離れるほど色を変える「後方グラデーション」
+		//   ワールド位置だけで決まるので全粒で共有され、粒の境目が出ずに滑らかに繋がる。
+		//   (粒ごとに色を変えると、少しずつ違う色の塊が並んでパッチワークになる)
+		float			SmokeOriginX = 0.0f;      // 発生源のワールドX
+		float			SmokeOriginZ = 0.0f;      // 発生源のワールドZ
+
+		float			SmokeGradDist = 6.0f;     // この距離(m)で色Bになりきる
+		float			SmokeColorBR  = 1.0f;     // 遠方の色
+		float			SmokeColorBG  = 1.0f;
+		float			SmokeColorBB  = 1.0f;
+
+		// 陰影の決め方の配合。粒ごとの「その粒の中での高さ」で影を出すと、
+		// 各粒に水平な明暗の切れ目が入って手描きのセル画っぽくなる(法線だと曲率に沿って曲がる)。
+		float			SmokeLocalY = 0.0f;       // 粒ローカル高さの割合(0=法線 1=ローカル高さ)
+		// ディゾルブ：消え際に穴が広がって崩れる
+		float			SmokeDissolve      = 0.0f;  // 進行度(0=無傷 1=完全消滅)
+		float			SmokeDissolveScale = 14.0f; // 崩れる粒の細かさ(セル/m)
+		// ハイライトの色（白固定ではなく好きな色にできる）
+		float			SmokeHiR = 1.0f;
+
+		float			SmokeHiG = 1.0f;
+		float			SmokeHiB = 1.0f;
+		// アクセントカラー塗り（車体などを指定色1色で塗り潰す。陰影はそのまま残る）
+		float			TintAmount = 0.0f;          // 0=元の色 1=完全にアクセントカラー
+		float			TintR = 1.0f;
+
+		float			TintG = 1.0f;
+		float			TintB = 1.0f;
+		// 煙の光をカメラ基準にする割合。1=カメラを回すとハイライトの位置も一緒に回る
+		// (イラストで常に画面の決まった方向から光を当てるのと同じ考え方)。
+		float			SmokeViewLight = 0.0f;
+		// 2つ目の光(横から)の強さ。0=無効。横向きの面にもハイライトを乗せる。
+		float			SmokeFillLight = 0.0f;
 	};
 
 	// 定数バッファ(メッシュ単位更新)
@@ -189,16 +235,72 @@ public:
 	// peak     … 最大不透明度
 	// erode    … エロージョン強さ（消え際に縁からちぎれる）
 	// edge     … 溶けの縁の柔らかさ
-	void SetSmokeLit(bool enable, float splitX = 1.0f, float splitY = 1.0f,
-	                 float peak = 1.0f, float erode = 1.0f, float edge = 0.25f)
+	// メッシュ煙のトゥーン陰影（3段）
+	//   dark   … 暗い面の倍率 / white … 明るい面を白へ寄せる量
+	//   midThr … 標準色になる受光量 / hiThr … ハイライトになる受光量
+	//   upBias … 光を真上へ寄せる量(上が明るく下が暗い絵作りにする)
+	//   merge  … 重なった粒を1つの塊に見せる「共有の陰影」の割合
+	//   baseY  … 煙の根元のワールド高さ / plumeH … 根元から上端までの高さ
+	//   patScale/patStrength/patDarkBias … スクリーン空間ハーフトーン模様
+	void SetSmokeLit(bool enable, float dark = 0.35f, float white = 0.75f,
+	                 float midThr = 0.30f, float hiThr = 0.72f, float upBias = 0.80f,
+	                 float merge = 0.55f, float baseY = 0.0f, float plumeH = 2.2f,
+	                 float patScale = 6.0f, float patStrength = 0.35f, float patDarkBias = 0.7f,
+	                 float wobAmp = 0.35f, float wobFreq = 0.9f,
+	                 float originX = 0.0f, float originZ = 0.0f, float gradDist = 6.0f,
+	                 const Math::Vector3& farColor = Math::Vector3(1.0f, 1.0f, 1.0f),
+	                 float localY = 0.0f,
+	                 float dissolve = 0.0f, float dissolveScale = 14.0f,
+	                 const Math::Vector3& hiColor = Math::Vector3(1.0f, 1.0f, 1.0f),
+	                 float viewLight = 0.0f, float fillLight = 0.0f)
 	{
 		auto& cb = m_cb0_Obj.Work();
 		cb.SmokeLit    = enable ? 1 : 0;
-		cb.SmokeSplitX = splitX;
-		cb.SmokeSplitY = splitY;
-		cb.SmokePeak   = peak;
-		cb.SmokeErode  = erode;
-		cb.SmokeEdge   = edge;
+		cb.ToonDark    = dark;
+		cb.ToonWhite   = white;
+		cb.ToonMidThr  = midThr;
+		cb.ToonHiThr   = hiThr;
+		cb.ToonUpBias  = upBias;
+		cb.SmokeMerge  = merge;
+		cb.SmokeBaseY  = baseY;
+		cb.SmokePlumeH = plumeH;
+		cb.SmokePatScale    = patScale;
+		cb.SmokePatStrength = patStrength;
+		cb.SmokePatDarkBias = patDarkBias;
+		cb.SmokeWobAmp      = wobAmp;
+		cb.SmokeWobFreq     = wobFreq;
+		cb.SmokeOriginX     = originX;
+		cb.SmokeOriginZ     = originZ;
+		cb.SmokeGradDist    = gradDist;
+		cb.SmokeColorBR     = farColor.x;
+		cb.SmokeColorBG     = farColor.y;
+		cb.SmokeColorBB     = farColor.z;
+		cb.SmokeLocalY         = localY;
+		cb.SmokeDissolve       = dissolve;
+		cb.SmokeDissolveScale  = dissolveScale;
+		cb.SmokeHiR            = hiColor.x;
+		cb.SmokeHiG            = hiColor.y;
+		cb.SmokeHiB            = hiColor.z;
+		cb.SmokeViewLight      = viewLight;
+		cb.SmokeFillLight      = fillLight;
+		m_dirtyCBObj = true;
+	}
+
+	// アクセントカラー塗り：モデルを指定色1色で塗り潰す(陰影・輪郭はそのまま残る)。
+	//   amount 0=元の色 / 1=完全にアクセントカラー
+	//   ※描画のたびに ResetCBObject() で既定へ戻るので、描画直前に毎回呼ぶこと
+	//   patScale/patStrength はアクセントカラーに重ねる網点模様(煙と同じ関数)。
+	//   煙と同じ値を渡すと、発光した車体と煙の質感が揃う。patStrength=0で模様なし
+	void SetTint(float amount, const Math::Vector3& color,
+	             float patScale = 16.0f, float patStrength = 0.0f)
+	{
+		auto& cb = m_cb0_Obj.Work();
+		cb.TintAmount = amount;
+		cb.TintR = color.x;
+		cb.TintG = color.y;
+		cb.TintB = color.z;
+		cb.SmokePatScale    = patScale;
+		cb.SmokePatStrength = patStrength;
 		m_dirtyCBObj = true;
 	}
 

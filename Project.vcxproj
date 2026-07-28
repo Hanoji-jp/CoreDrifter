@@ -282,6 +282,14 @@
     <ClInclude Include="Src\Application\GameObject\Car\Silvia.h" />
     <ClInclude Include="Src\Application\GameObject\UI\UIConst.h" />
     <ClInclude Include="Src\Application\GameObject\UI\TitleMenuUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\HjUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\ElementsUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\SettingsUI.h" />
+    <ClInclude Include="Src\Application\Scene\SettingsScene\SettingsScene.h" />
+    <ClInclude Include="Src\Application\Scene\ElementsScene\ElementsScene.h" />
+    <ClInclude Include="Src\Application\Scene\PlayModeScene\PlayModeScene.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\PlayModeUI.h" />
+    <ClInclude Include="Src\Application\Scene\HjTransition.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\Ground.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\Stage.h" />
     <ClInclude Include="Src\Application\Const\StageConst.h" />
@@ -291,6 +299,14 @@
     <ClInclude Include="Src\Application\Const\PadConst.h" />
     <ClInclude Include="Src\Application\Input\HjGamePad.h" />
     <ClInclude Include="Src\Application\GameObject\Effect\DriftSmoke.h" />
+    <ClInclude Include="Src\Application\GameObject\Effect\DriftNeon.h" />
+    <ClInclude Include="Src\Application\GameObject\Effect\SkidMark.h" />
+    <ClInclude Include="Src\Application\Const\SkidMarkConst.h" />
+    <ClInclude Include="Src\Application\Const\CullingConst.h" />
+    <ClInclude Include="Src\Application\GameObject\Effect\HjCullView.h" />
+    <ClInclude Include="Src\Application\Const\NeonFxConst.h" />
+    <ClInclude Include="Src\Application\GameObject\Score\DriftScore.h" />
+    <ClInclude Include="Src\Application\Const\DriftScoreConst.h" />
     <ClInclude Include="Src\Application\GameObject\Camera\ChaseCamera.h" />
     <ClInclude Include="Src\Application\Util\AssetVault.h" />
     <ClInclude Include="Src\Application\Util\AssetCrypt.h" />
@@ -358,7 +374,18 @@
     <ClCompile Include="Src\Application\GameObject\Camera\CameraBase.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\CarBase.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\TitleMenuUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\HjUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\ElementsUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\SettingsUI.cpp" />
+    <ClCompile Include="Src\Application\Scene\SettingsScene\SettingsScene.cpp" />
+    <ClCompile Include="Src\Application\Scene\ElementsScene\ElementsScene.cpp" />
+    <ClCompile Include="Src\Application\Scene\PlayModeScene\PlayModeScene.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\PlayModeUI.cpp" />
+    <ClCompile Include="Src\Application\Scene\HjTransition.cpp" />
     <ClCompile Include="Src\Application\GameObject\Effect\DriftSmoke.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Effect\DriftNeon.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Effect\SkidMark.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Score\DriftScore.cpp" />
     <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\Ground.cpp" />
@@ -440,6 +467,18 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Src\Framework\Shader\PostProcessShader\KdPostProcessShader_PS_DoF.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Src\Framework\Shader\PostProcessShader\KdPostProcessShader_PS_Desaturate.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Src\Framework\Shader\PostProcessShader\KdPostProcessShader_PS_Halftone.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>

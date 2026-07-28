@@ -74,6 +74,10 @@ void KdStandardShader::BeginUnLit()
 	if (KdShaderManager::Instance().SetPixelShader(m_PS_UnLit))
 	{
 		KdShaderManager::Instance().SetPSConstantBuffer(0, m_cb0_Obj.GetAddress());
+		// ワールド行列(g_mWorld)はメッシュ単位の定数バッファにある。
+		// メッシュ煙はピクセル側で法線をワールドへ変換するため、PSにも渡す必要がある
+		// (渡さないとPSのb1には無関係なデータが残り、視点で陰影が変わる不具合になる)。
+		KdShaderManager::Instance().SetPSConstantBuffer(1, m_cb1_Mesh.GetAddress());
 		KdShaderManager::Instance().SetPSConstantBuffer(2, m_cb2_Material.GetAddress());
 	}
 
@@ -421,9 +425,9 @@ void KdStandardShader::DrawVertices(const std::vector<KdPolygon::Vertex>& vertic
 		KdShaderManager::Instance().ChangeSamplerState(KdSamplerState::Anisotropic_Clamp);
 	}
 
-	ID3D11VertexShader* pNowVS = nullptr;
-	KdDirect3D::Instance().WorkDevContext()->VSGetShader(&pNowVS, nullptr, nullptr);
-	KdSafeRelease(pNowVS);
+	// ※ここで VSGetShader による現在のシェーダー取得を行っていたが、結果を使っておらず
+	//   GPUドライバへの問い合わせ(場合により同期待ち)が1ドローごとに発生していたため削除。
+	//   煙のように何百回もDrawVerticesを呼ぶ処理では、これだけで大きな負荷になっていた。
 
 	// 頂点配列を描画（トポロジーを引数から使用）
 	KdDirect3D::Instance().DrawVertices(topology, (signed)vertices.size(), &vertices[0], sizeof(KdPolygon::Vertex));

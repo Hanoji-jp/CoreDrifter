@@ -36,11 +36,21 @@ namespace UIConst
 	const int   FontNpArt = 9;   // Archivo 10/600    (NOW PLAYINGアーティスト)
 	const int   FontSlash = 10;  // Archivo 17/900    ("///")
 	const int   FontTiny  = 11;  // Archivo 10/700    (極小)
+	const int   FontBtn   = 12;  // Archivo 15/800    (ボタン/トグル)
+	const int   FontRow   = 13;  // Archivo 14/700    (設定行/バー)
+	const int   FontTab   = 14;  // Archivo 17/800    (タブ/見出し)
+	const int   FontHead  = 15;  // Archivo 47/900    (画面見出し)
+	const int   FontCard  = 16;  // Archivo 34/900    (カード見出し・中サイズ)
 
 	// ── 追加パレット ──
 	const Math::Color ACID_HL = { 0.756f, 0.831f, 0.098f, 1.0f }; // 枠のアシッド(#cfe021濃色)
 	const Math::Color NPBG    = { 0.984f, 0.984f, 0.976f, 1.0f }; // NOW PLAYING背景 #fbfbf9
 	const Math::Color GREY9   = { 0.604f, 0.604f, 0.596f, 1.0f }; // #9a9a98
+	const Math::Color MUTE    = { 0.541f, 0.541f, 0.533f, 1.0f }; // 無効ラベル #8a8a88
+	// モーダルヘッダーのアクセント色
+	const Math::Color PINK    = { 0.906f, 0.620f, 0.753f, 1.0f }; // #e79ec0
+	const Math::Color BLUE    = { 0.290f, 0.592f, 0.722f, 1.0f }; // #4a97b8
+	const Math::Color SAND    = { 0.788f, 0.761f, 0.706f, 1.0f }; // #c9c2b4
 
 	// ── メニュー ──
 	const int   MenuCount   = 5;

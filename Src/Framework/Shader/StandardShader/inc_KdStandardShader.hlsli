@@ -32,15 +32,53 @@ cbuffer cbObject : register(b0)
 	float g_FullEdgeStrength;	// 全面エッジテクスチャブレンド強度（0=無効 1=フル上書き）
 
 	// スモーク専用ライティング＋ディゾルブ（板ポリを球ドーム法線でトゥーン陰影＋溶けて消す）
+	// メッシュ煙のトゥーン陰影(3段：ハイライト(白) / 標準色 / 暗い色)
 	int   g_SmokeLit;			// 有効フラグ
-	float g_SmokeSplitX;		// アトラス分割数X（タイル内ローカルUV復元用）
-	float g_SmokeSplitY;		// アトラス分割数Y
-	float g_SmokePeak;			// 最大不透明度
+	float g_ToonDark;			// 暗い面：基準色に掛ける倍率
+	float g_ToonWhite;			// 明るい面：白へ寄せる量
+	float g_ToonMidThr;			// これ以上の受光で「標準色」
 
-	float g_SmokeErode;			// エロージョン(ディゾルブ)強さ。消え際に縁からちぎれる
-	float g_SmokeEdge;			// 溶けの縁の柔らかさ
-	float g__smokepad2;			// パディング
-	float g__smokepad3;			// パディング
+	float g_ToonHiThr;			// これ以上の受光で「ハイライト(白)」
+	float g_ToonUpBias;			// 光を真上へ寄せる量(1=完全に真上から)
+	float g_SmokeMerge;			// 共有の陰影を混ぜる割合(0=粒ごと 1=高さのみ)
+	float g_SmokeBaseY;			// 煙の根元のワールド高さ
+
+	float g_SmokePlumeH;		// 根元から上端までの高さ(m)
+	// スクリーン空間のハーフトーン模様（印刷物っぽい質感）
+	float g_SmokePatScale;		// 模様の周期(px)
+	float g_SmokePatStrength;	// 模様の濃さ(0=無効)
+	float g_SmokePatDarkBias;	// 暗い面ほど模様を強く出す量
+
+	// 明暗の境界のうねり（水平一直線に切れて見えるのを防ぐ）
+	float g_SmokeWobAmp;		// 境界の揺れ幅(m)
+	float g_SmokeWobFreq;		// 揺れの細かさ(1/m)
+	// 発生源から離れるほど色を変える「後方グラデーション」(全粒で共有＝境目が出ない)
+	float g_SmokeOriginX;		// 発生源のワールドX
+	float g_SmokeOriginZ;		// 発生源のワールドZ
+
+	float g_SmokeGradDist;		// この距離(m)で色Bになりきる
+	float g_SmokeColorBR;		// 遠方の色
+	float g_SmokeColorBG;
+	float g_SmokeColorBB;
+
+	// 陰影の決め方の配合(0=法線 1=粒ローカル高さ)
+	float g_SmokeLocalY;
+	// ディゾルブ：消え際に穴が広がって崩れる
+	float g_SmokeDissolve;		// 進行度(0=無傷 1=完全消滅)
+	float g_SmokeDissolveScale;	// 崩れる粒の細かさ(セル/m)
+	// ハイライトの色（白固定ではなく好きな色にできる）
+	float g_SmokeHiR;
+
+	float g_SmokeHiG;
+	float g_SmokeHiB;
+	// アクセントカラー塗り（車体などを指定色1色で塗り潰す。陰影はそのまま残る）
+	float g_TintAmount;			// 0=元の色 1=完全にアクセントカラー
+	float g_TintR;
+
+	float g_TintG;
+	float g_TintB;
+	float g_SmokeViewLight;		// 煙の光をカメラ基準にする割合(1=カメラを回すと影も回る)
+	float g_SmokeFillLight;		// 2つ目の光(横上から)の強さ。横向きの面にもハイライトを乗せる
 };
 
 // 定数バッファ(メッシュ単位)

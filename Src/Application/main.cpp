@@ -238,6 +238,11 @@ bool Application::Init(int w, int h)
 	KdFontManager::Instance().AddFont(9,  "Archivo SemiBold",  -10,  600, LAT);  // NOW PLAYINGアーティスト (11/600)
 	KdFontManager::Instance().AddFont(10, "Archivo Black",     -17,  900, LAT);  // "///" (20/900)
 	KdFontManager::Instance().AddFont(11, "Archivo",           -10,  700, LAT);  // 極小ラベル (12/700)
+	KdFontManager::Instance().AddFont(12, "Archivo ExtraBold", -15,  800, LAT);  // ボタン/トグル (15/800)
+	KdFontManager::Instance().AddFont(13, "Archivo",           -14,  700, LAT);  // 設定行/バー (16/700)
+	KdFontManager::Instance().AddFont(14, "Archivo ExtraBold", -17,  800, LAT);  // タブ/見出し (20/800)
+	KdFontManager::Instance().AddFont(15, "Archivo Black",     -47,  900, LAT);  // 画面見出し (56/900)
+	KdFontManager::Instance().AddFont(16, "Archivo Black",     -30,  900, LAT);  // カード見出し (中サイズ)
 
 	//===================================================================
 	// ゲーム固有の初期化
@@ -288,8 +293,12 @@ void Application::Execute()
 		//
 		//=========================================
 
-		// ウィンドウのメッセージを処理する
-		m_window.ProcessMessage();
+		// ウィンドウのメッセージを処理する。WM_QUIT(メニューのQUIT=PostQuitMessage等)で
+		// falseが返るのでループ終了。
+		if (m_window.ProcessMessage() == false)
+		{
+			break;
+		}
 
 		// ウィンドウが破棄されてるならループ終了
 		if (m_window.IsCreated() == false)
@@ -297,14 +306,8 @@ void Application::Execute()
 			break;
 		}
 
-		if (GetAsyncKeyState(VK_ESCAPE))
-		{
-//			if (MessageBoxA(m_window.GetWndHandle(), "本当にゲームを終了しますか？",
-//				"終了確認", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES)
-			{
-				End();
-			}
-		}
+		// ※ESCでアプリ終了はしない（ESCはUIの「戻る」に使うため）。
+		//   ゲーム終了はタイトルの QUIT メニュー（PostQuitMessage）で行う。
 
 		//=========================================
 		//

@@ -27,6 +27,11 @@ private:
 	// ドリフトカメラ：進行方向へ追従する基準ヨー
 	float m_followYaw  = 0.0f;
 	bool  m_followInit = false;
+	// 動的カメラ(速度でFOVが開く・ドリフトで寄る)。平滑化した実値。
+	float m_dynFov  = 0.0f;
+	float m_dynDist = 0.0f;
+	float m_dynRoll = 0.0f;   // ドリフト方向へのカメラの傾き(rad)
+	bool  m_dynInit = false;
 	Math::Vector3 m_lookAt = Math::Vector3::Zero;  // 注視点(車)を滑らかに追う
 	POINT m_prevMouse = { 0, 0 };
 	bool  m_dragging  = false;

@@ -11,6 +11,9 @@ public :
 	{
 		Title,
 		Game,
+		Settings,
+		Elements,
+		PlayMode,
 	};
 
 	void PreUpdate();
@@ -27,6 +30,9 @@ public :
 	{
 		m_nextSceneType = _nextScene;
 	}
+
+	// 現在のシーン種別(トランジションが遷移先と比較するのに使う)
+	SceneType GetCurrentType() const { return m_currentSceneType; }
 
 	// 現在のシーンのオブジェクトリストを取得
 	const std::list<std::shared_ptr<KdGameObject>>& GetObjList();

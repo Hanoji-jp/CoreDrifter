@@ -3,6 +3,8 @@
 #include "../../Const/CarConst.h"        // 既定値(規約上constヘッダはinclude可)
 #include "../../Const/AlignmentConst.h"  // アライメント/サスセッティング既定値
 #include "../Effect/DriftSmoke.h"        // ドリフトスモーク(後輪の煙)
+#include "../Effect/DriftNeon.h"         // タイヤ周りのネオン線画(Unbound風)
+#include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
 
 //==========================================================
@@ -20,7 +22,15 @@ public:
 	void Init()    override;
 	void Update()  override;
 	void DrawLit() override;
-	void DrawEffect() override;   // ドリフトスモーク(UnLitパス)
+	void DrawEffect() override;        // ドリフトスモーク(UnLitパス)
+	void DrawOverlayEffect() override; // ネオン線画(煙の輪郭処理を通さず加算合成で重ねる)
+	void DrawBright() override;   // ネオンのグロー(ポストプロセスでぼかされて光が滲む)
+
+	// 車はオブジェクト単位の視錐台カリングの対象外。
+	// 車体そのものは小さいが、煙・タイヤ痕・ネオンは車から遠く離れた位置まで
+	// 広がっており、車が画面外に出た瞬間にそれらが丸ごと消えてしまう。
+	// (これらは各エフェクト側で粒・区間ごとにカリングしている)
+	bool CheckInScreen(const DirectX::BoundingFrustum&) const override { return true; }
 	void DrawSprite() override;   // HUD(スピード/RPM/ステア)
 	void DrawDebug()  override;   // 当たり判定の可視化(F1でトグル)
 
@@ -41,6 +51,10 @@ public:
 
 	// 調整パネルを外部(シーン)から描画するための公開窓口
 	void DrawImGui() { DrawTuningImGui(); }
+
+	// ブースト(ニトロ)演出を発動：車体に一瞬だけアクセントカラーが乗り、
+	// 同時にネオンの線画が全方向へ弾ける。将来ニトロ機能から呼ぶ。
+	void TriggerBoost();
 
 protected:
 	void DrawTuningImGui();
@@ -155,7 +169,22 @@ protected:
 	Math::Vector3 m_outlineColor    = Math::Vector3(0.0f, 0.0f, 0.0f); // 黒
 
 	// ドリフトスモークの色味(白=通常。NFS Unbound風のカラー煙にもできる)
-	Math::Vector3 m_smokeColor = Math::Vector3(1.0f, 1.0f, 1.0f);
+	// 発生源から離れるほど 色A → 色B へ滑らかにグラデーションする
+	Math::Vector3 m_smokeColor    = Math::Vector3(1.0f, 1.0f, 1.0f);  // 手前の色
+	Math::Vector3 m_smokeColorB   = Math::Vector3(1.0f, 1.0f, 1.0f);  // 奥の色
+	float         m_smokeGradDist = SmokeConst::SmokeGradDist;        // 色Bになりきる距離(m)
+	Math::Vector3 m_smokeHiColor  = Math::Vector3(1.0f, 1.0f, 1.0f);  // ハイライトの色
+
+	// ドリフト中に車体をアクセントカラーで塗る演出(NFS Unboundのドライビングエフェクト風)
+	Math::Vector3 m_driftTintColor = Math::Vector3(0.78f, 1.0f, 0.16f); // 塗る色
+	// 発光中の輪郭の色。車体の塗りとは別に指定できる
+	// (縁だけ違う色で光らせたい場合があるため、アクセントカラーとは分ける)
+	Math::Vector3 m_boostOutlineColor = Math::Vector3(1.0f, 1.0f, 1.0f);
+	float         m_driftTintMax   = 1.0f;   // 最大の塗り具合(0=無効 1=完全に塗り潰す)
+	float         m_driftTintSlipDeg = 35.0f;// この横滑り角(度)で塗りが最大になる
+	// ネオン線画・粒の色(2色。粒ごとにAとBを混色して散らす)
+	Math::Vector3 m_neonColorA = Math::Vector3(NeonFxConst::ColorAR, NeonFxConst::ColorAG, NeonFxConst::ColorAB);
+	Math::Vector3 m_neonColorB = Math::Vector3(NeonFxConst::ColorBR, NeonFxConst::ColorBG, NeonFxConst::ColorBB);
 
 
 private:
@@ -196,6 +225,19 @@ private:
 	// ドリフトスモーク(後輪の煙)
 	DriftSmoke    m_smoke;
 	float         m_smokeCarry = 0.0f;   // 放出数の端数を蓄積(毎秒レート→整数枚)
+	float         m_smokeCarryFront = 0.0f;   // 同・前輪ぶん(こちらはごく少量)
+	float         m_driftTint  = 0.0f;   // 車体のアクセントカラー塗り(0〜1, 平滑化済み)
+
+	// タイヤ周りのネオン線画(Unbound風。リング＋スパーク)
+	DriftNeon     m_neon;
+	float         m_neonRingCarry  = 0.0f;   // 放出数の端数(リング)
+	float         m_neonSparkCarry = 0.0f;   // 放出数の端数(スパーク)
+
+	// 路面に残るタイヤ痕(後輪の接地点を追って帯を伸ばす)
+	SkidMark      m_skid;
+	Math::Vector3 m_skidColor = Math::Vector3(SkidMarkConst::ColorR,
+	                                          SkidMarkConst::ColorG,
+	                                          SkidMarkConst::ColorB);
 
 	// コントローラー入力(接続時のみアナログ操作を反映)
 	HjGamePad     m_pad;
@@ -231,5 +273,7 @@ private:
 	bool          m_debugDraw    = false;
 	bool          m_prevDebugKey = false;              // F1のエッジ検出
 	bool          m_prevOutlineKey = false;            // F2(煙輪郭トグル)のエッジ検出
+	float         m_boostFlash    = -1.0f;            // ブースト演出の経過秒(負=発動していない)
+	bool          m_prevTintKey   = false;            // F4のエッジ検出
 	bool          m_prevStyleKey   = false;            // F3(文字エフェクト切替)のエッジ検出
 };

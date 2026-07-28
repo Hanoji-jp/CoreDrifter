@@ -1,4 +1,5 @@
 ﻿#include "BaseScene.h"
+#include "../../Const/CullingConst.h"
 
 void BaseScene::PreUpdate()
 {
@@ -57,6 +58,20 @@ void BaseScene::PreDraw()
 
 void BaseScene::Draw()
 {
+	// 視錐台カリング用。画面に映らないオブジェクトは色を描く各パスで飛ばす。
+	// ただし影の生成パスには使わない。画面外の物も画面内へ影を落とすため、
+	// カメラの視錐台で弾くと影だけが消えて不自然になる。
+	DirectX::BoundingFrustum frustum;
+	{
+		const auto& cam = KdShaderManager::Instance().GetCameraCB();
+		DirectX::BoundingFrustum local;
+		DirectX::BoundingFrustum::CreateFromMatrix(local, cam.mProj);
+		local.Transform(frustum, cam.mView.Invert());
+	}
+	auto visible = [&](const std::shared_ptr<KdGameObject>& o)
+	{
+		return !CullingConst::ObjectFrustumCull || o->CheckInScreen(frustum);
+	};
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
 	// 光を遮るオブジェクト(影を生み出す要因となるオブジェクト)をBeginとEndの間にまとめてDrawする
 	KdShaderManager::Instance().m_StandardShader.BeginGenerateDepthMapFromLight();
@@ -74,6 +89,7 @@ void BaseScene::Draw()
 	{
 		for (auto& obj : m_objList)
 		{
+			if (!visible(obj)) { continue; }
 			obj->DrawUnLit();
 		}
 	}
@@ -85,6 +101,7 @@ void BaseScene::Draw()
 	{
 		for (auto& obj : m_objList)
 		{
+			if (!visible(obj)) { continue; }
 			obj->DrawLit();
 		}
 	}
@@ -105,6 +122,7 @@ void BaseScene::Draw()
 	{
 		for (auto& obj : m_objList)
 		{
+			if (!visible(obj)) { continue; }
 			obj->DrawEffect();
 		}
 	}
@@ -112,14 +130,30 @@ void BaseScene::Draw()
 	KdShaderManager::Instance().m_postProcessShader.EndSmokeAndComposite();
 
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
-	// 光源オブジェクト(自ら光るオブジェクトやエフェクト)はBeginとEndの間にまとめてDrawする
-	KdShaderManager::Instance().m_postProcessShader.BeginBright();
+	// 煙の合成が済んだ後、シーンへ直接重ねるエフェクト(ネオンの線画など)。
+	// 煙専用RTを通さないので、シルエット輪郭に塗り潰されず加算合成の光がそのまま出る。
+	KdShaderManager::Instance().m_StandardShader.BeginUnLit();
 	{
 		for (auto& obj : m_objList)
 		{
+			if (!visible(obj)) { continue; }
+			obj->DrawOverlayEffect();
+		}
+	}
+	KdShaderManager::Instance().m_StandardShader.EndUnLit();
+
+	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
+	// 光源オブジェクト(自ら光るオブジェクトやエフェクト)はBeginとEndの間にまとめてDrawする
+	KdShaderManager::Instance().m_postProcessShader.BeginBright();
+	KdShaderManager::Instance().m_StandardShader.BeginUnLit();
+	{
+		for (auto& obj : m_objList)
+		{
+			if (!visible(obj)) { continue; }
 			obj->DrawBright();
 		}
 	}
+	KdShaderManager::Instance().m_StandardShader.EndUnLit();
 	KdShaderManager::Instance().m_postProcessShader.EndBright();
 }
 

@@ -20,5 +20,8 @@ namespace PostProcessConst
 	// ---- 被ダメ赤フラッシュ ----
 	constexpr float DamageFlashDuration  = 0.4f;   // フラッシュ継続時間（秒）
 	constexpr float DamageFlashIntensity = 0.55f;  // ビネット最大強度 (0〜1)
+
+	// ---- グレースケール→フルカラー復帰演出 ----
+	constexpr float ColorRestoreDuration = 2.6f;   // 彩度0→1へ戻す時間（秒）
 }
 

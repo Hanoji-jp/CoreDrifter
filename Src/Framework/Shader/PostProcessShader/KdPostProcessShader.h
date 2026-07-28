@@ -80,6 +80,18 @@ public:
 	// 被ダメ赤フラッシュをトリガー
 	void TriggerDamageFlash() { m_damageFlashTimer = 1.0f; }
 
+	// グレースケール→フルカラー復帰演出をトリガー(0から時間で1へ)
+	void TriggerColorRestore() { m_colorRestoreTimer = 0.0f; m_colorRestoreActive = true; }
+	// 彩度を直接指定(0=グレースケール, 1=フルカラー)
+	void SetSaturation(float sat) { m_cb0_DesaturateInfo.Work().Saturation = sat; }
+
+	// 画面全体のハーフトーン(印刷風)の ON/OFF と調整用アクセサ
+	void SetHalftoneEnabled(bool enable) { m_halftoneEnabled = enable; }
+	bool IsHalftoneEnabled() const { return m_halftoneEnabled; }
+	float& WorkHalftoneScale()    { return m_cb0_Halftone.Work().Scale; }
+	float& WorkHalftoneStrength() { return m_cb0_Halftone.Work().Strength; }
+	float& WorkHalftoneDarkBias() { return m_cb0_Halftone.Work().DarkBias; }
+
 	// DrawSprite内から呼ぶ：赤フラッシュビネットを描画（Begin〜End内で呼ぶこと）
 	void DrawDamageFlash();
 
@@ -107,6 +119,10 @@ private:
 	void OutlineProcess(const std::shared_ptr<KdTexture>& srcColor);
 	// 煙シルエット輪郭のPS＋定数バッファをデバイスへセット
 	void SetSmokeOutlineToDevice();
+	// 彩度(グレースケール)PS＋定数バッファをデバイスへセット
+	void SetDesaturateToDevice();
+	// ハーフトーンPS＋定数バッファをデバイスへセット
+	void SetHalftoneToDevice();
 
 	ID3D11VertexShader* m_VS = nullptr;
 	ID3D11InputLayout* m_inputLayout = nullptr;
@@ -117,6 +133,8 @@ private:
 	ID3D11PixelShader* m_PS_Outline = nullptr;
 	ID3D11PixelShader* m_PS_SmokeOutline = nullptr;   // 煙シルエット輪郭
 	ID3D11PixelShader* m_PS_TextFluid    = nullptr;   // 文字流体化
+	ID3D11PixelShader* m_PS_Desaturate   = nullptr;   // 彩度(グレースケール)
+	ID3D11PixelShader* m_PS_Halftone     = nullptr;   // 画面全体のハーフトーン(印刷風)
 
 	static const int kBlurSamplingRadius = 8;
 	static const int kLightBloomSamplingRadius = 4;
@@ -149,6 +167,27 @@ private:
 		int _blank[3] = { 0, 0, 0 };
 	};
 	KdConstantBuffer<cbBrightFilter>	m_cb0_BrightInfo;
+
+	// 彩度(グレースケール)パラメータ
+	struct cbDesaturate
+	{
+		float Saturation = 1.0f;   // 0=グレースケール, 1=フルカラー
+		int _blank[3] = { 0, 0, 0 };
+	};
+	KdConstantBuffer<cbDesaturate>		m_cb0_DesaturateInfo;
+
+	// 画面全体のハーフトーン(印刷風)パラメータ
+	struct cbHalftone
+	{
+		float ScreenW  = 1280.0f;  // 画面サイズ(px)
+		float ScreenH  = 720.0f;
+		float Scale    = 5.0f;     // 網点の周期(px)。小さいほど細かい
+		float Strength = 0.30f;    // 網点の濃さ(0=無効)
+
+		float DarkBias = 0.75f;    // 暗い所ほど強く出す量(0=一律)
+		float _pad[3]  = { 0.0f, 0.0f, 0.0f };
+	};
+	KdConstantBuffer<cbHalftone>		m_cb0_Halftone;
 
 	// アウトライン（画面エッジ検出）パラメータ
 	struct cbOutlineInfo
@@ -239,6 +278,10 @@ private:
 	KdRenderTargetPack	m_postEffectRTPack;
 
 	KdRenderTargetPack	m_blurRTPack;
+	// GenerateBlurTextureの作業用RT。サイズをキーに使い回す
+	// (毎回生成するとリソース作成が1フレームに何度も走って極端に重い)
+	std::unordered_map<uint64_t, KdRenderTargetPack> m_tmpBlurRTCache;
+
 	KdRenderTargetPack	m_strongBlurRTPack;
 	KdRenderTargetPack	m_motionBlurRTPack;   // モーションブラー合成用
 
@@ -247,12 +290,20 @@ private:
 	Math::Vector3 m_currentCamPos  = { 0.0f, 0.0f, 0.0f };
 	bool          m_prevCamPosValid = false;
 	bool          m_motionBlurEnabled = true;   // モーションブラーON/OFF
+	// 被写界深度。焦点を設定する箇所が無く既定値では素通しなので既定でOFF。
+	// ONにすると下準備のBlurProcess(全画面4パス)＋DoF合成(1パス)が走る。
+	bool          m_dofEnabled = false;
 	bool          m_camPosSet       = false;
 	bool          m_sceneOutlineEnabled = true; // 画面エッジ検出アウトライン(トゥーン輪郭)ON/OFF
 	bool          m_smokeOutlineEnabled = true; // 煙シルエット輪郭 ON/OFF
+	bool          m_halftoneEnabled     = true; // 画面全体のハーフトーン ON/OFF
 
 	// 被ダメ赤フラッシュ（0=消灯 〜 1=最大）
 	float         m_damageFlashTimer = 0.0f;
+
+	// グレースケール→フルカラー復帰演出（0=開始/グレー 〜 1=フルカラー）
+	float         m_colorRestoreTimer  = 1.0f;   // 既定はフルカラー(演出なし)
+	bool          m_colorRestoreActive = false;
 
 	KdRenderTargetPack	m_depthOfFieldRTPack;
 	KdRenderTargetPack	m_outlineRTPack;   // アウトライン合成結果

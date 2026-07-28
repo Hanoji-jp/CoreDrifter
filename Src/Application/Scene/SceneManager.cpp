@@ -3,6 +3,11 @@
 #include "BaseScene/BaseScene.h"
 #include "TitleScene/TitleScene.h"
 #include "GameScene/GameScene.h"
+#include "SettingsScene/SettingsScene.h"
+#include "ElementsScene/ElementsScene.h"
+#include "PlayModeScene/PlayModeScene.h"
+#include "HjTransition.h"
+#include "../GameObject/UI/HjUI.h"
 
 void SceneManager::PreUpdate()
 {
@@ -12,16 +17,25 @@ void SceneManager::PreUpdate()
 		ChangeScene(m_nextSceneType);
 	}
 
+	// モーフ遷移中はシーンを止める(遷移後に動きが二重になるのを防ぐ)
+	if (HjTransition::Instance().FreezesScene()) { return; }
 	m_currentScene->PreUpdate();
 }
 
 void SceneManager::Update()
 {
-	m_currentScene->Update();
+	// UIアニメの共有クロックを進める(全シーン共通)
+	HjUI::Tick(KdFPSController::GetDt());
+
+	// モーフ遷移中はシーン更新を止める(遷移中に動くゲームと遷移後の動きが二重に見えるのを防ぐ)
+	if (!HjTransition::Instance().FreezesScene()) { m_currentScene->Update(); }
+	// パネルワイプ遷移を進める(カバー完了時に自動でシーン切替を予約)
+	HjTransition::Instance().Update(KdFPSController::GetDt());
 }
 
 void SceneManager::PostUpdate()
 {
+	if (HjTransition::Instance().FreezesScene()) { return; }
 	m_currentScene->PostUpdate();
 }
 
@@ -38,6 +52,8 @@ void SceneManager::Draw()
 void SceneManager::DrawSprite()
 {
 	m_currentScene->DrawSprite();
+	// パネルワイプ遷移のオーバーレイを最前面に
+	HjTransition::Instance().Draw();
 }
 
 void SceneManager::DrawDebug()
@@ -65,6 +81,15 @@ void SceneManager::ChangeScene(SceneType _sceneType)
 		break;
 	case SceneType::Game:
 		m_currentScene = std::make_shared<GameScene>();
+		break;
+	case SceneType::Settings:
+		m_currentScene = std::make_shared<SettingsScene>();
+		break;
+	case SceneType::Elements:
+		m_currentScene = std::make_shared<ElementsScene>();
+		break;
+	case SceneType::PlayMode:
+		m_currentScene = std::make_shared<PlayModeScene>();
 		break;
 	}
 

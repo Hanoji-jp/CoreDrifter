@@ -35,6 +35,10 @@ public:
 	virtual void DrawOutline() {}   // 原神式アウトライン（背面押し出し）パス用
 	virtual void DrawUnLit() {}
 	virtual void DrawEffect() {}
+	// 煙の輪郭処理を通さず、シーンへ直接重ねるエフェクト用(ネオンの線画など)。
+	// DrawEffectは煙専用RTへ描かれてシルエット輪郭が乗るため、細い線が輪郭に
+	// 塗り潰されてしまう。加算合成で光らせたいものはこちらへ。
+	virtual void DrawOverlayEffect() {}
 	virtual void DrawBright() {}
 	virtual void DrawSprite() {}
 	virtual void DrawDebug();
