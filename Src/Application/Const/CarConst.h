@@ -18,6 +18,63 @@ namespace CarConst
 	//===== ステアリング =====
 	constexpr float MaxSteerAngle = 0.55f;   // 前輪の最大切れ角(rad)
 	constexpr float SteerSpeed    = 8.0f;    // ステア入力の追従速度
+	// 舵を戻す/反対側へ振る時の追従速度の倍率。1.0で切り込みと同じ＝無効。
+	constexpr float SteerReturnMul = 1.0f;
+
+	//===== タイヤの実挙動(CarX系の切り返しはこの3つで決まる) =====
+
+	// ① 荷重感度：実タイヤは荷重が増えるほど摩擦係数が下がる。
+	//    これが無いと、荷重が左右へ移っても軸全体のグリップ合計が変わらないため、
+	//    荷重移動が挙動にほとんど効かない＝振っても抜けない。
+	//    0=無効(荷重に比例、従来通り) / 大きいほど荷重移動でグリップを失う。
+	constexpr float TireLoadSens = 0.30f;
+
+	// ② リラクゼーション長(m)：横力は舵を切った瞬間には立ち上がらず、
+	//    タイヤがこの距離ぶん転がって初めて定常値に達する。
+	//    この遅れが「振ってから食うまでの間」を作り、その隙に車が回る。
+	//    実車のタイヤで0.3〜0.8m程度。小さいほど反応が鋭い。
+	constexpr float TireRelaxLength = 0.55f;
+
+	// ③ ロールのばね-ダンパ特性。1次遅れだと目標へ滑らかに寄るだけだが、
+	//    実車は切り返しで反対側へ勢いよく倒れ込み、行き過ぎてから戻る。
+	//    この行き過ぎ(オーバーシュート)が「振った瞬間に荷重が抜けて出る」感触になる。
+	constexpr float RollFreq      = 9.0f;   // 固有角周波数(rad/s)。大きいほど機敏
+	// 減衰比。1未満で行き過ぎる。低すぎると切り返しの後もロールが揺れ続け、
+	// 荷重＝グリップが小刻みに変わってドリフト角が定まらなくなる。
+	// 「振った時は行き過ぎるが、すぐ収まる」あたりが扱いやすい。
+	constexpr float RollDampRatio = 0.78f;
+
+	//===== 路面の傾き・空力・駆動系 =====
+
+	// ④ 斜面の重力成分の倍率(1=物理どおり, 0=無効)。
+	//    路面の傾きに沿って車を引く力。これが無いと下り坂で加速せず、
+	//    登りで失速せず、バンクを使ったコーナリングも成立しない。
+	//    峠が舞台なら挙動への影響が最も大きい要素。
+	constexpr float SlopeGravity = 1.0f;
+
+	// ⑤ ダウンフォース係数。荷重の増加量 = この値 × 速度^2。
+	//    0.00035 なら 180km/h(50m/s)で荷重が約1.9倍。
+	//    高速ほどグリップが増す＝速度域で手触りが変わる。
+	constexpr float DownforceCoef = 0.00035f;
+	// 前後配分(0.5=前後均等, 大きいほど後ろ寄り)。後ろ寄りだと高速で安定する
+	constexpr float DownforceRearBias = 0.58f;
+
+	// ⑥ デフ(LSD)のロック強さ(1/s)。左右の駆動輪の回転差を戻す速さ。
+	//    大きいほど溶接デフ(左右直結)に近く、リアが一体で流れる＝ドリフト向き。
+	//    小さいとオープンデフで、内輪が空転して前へ進まなくなる。
+	constexpr float LsdLock = 12.0f;
+
+	// ⑦ 段差による荷重変化の強さ。各輪の路面高さのばらつきをサスの縮みとみなす。
+	//    解析的な荷重移動だけだと、縁石や轍を踏んでも荷重が一切動かない。
+	//    ただし路面はメッシュなので、輪ごとにレイが当たる三角形が切り替わるたび
+	//    接地高さが小刻みに動く。それをそのまま荷重にすると、グリップが常時
+	//    揺れてドリフト角が定まらず、微調整が効かなくなる。
+	//    ・不感帯でメッシュ由来の細かいガタつきを捨てる
+	//    ・追従を遅くして本物の段差(縁石・轍)だけが残るようにする
+	constexpr float BumpLoadGain   = 0.12f;  // 0=無効
+	constexpr float SuspTravel     = 0.12f;  // サスのストローク(m)。これで割って正規化
+	constexpr float BumpLoadSmooth = 6.0f;   // 荷重変化の追従速度(1/s)。小さいほど滑らか
+	constexpr float BumpDeadzone   = 0.20f;  // これ未満のばらつきは路面ノイズとして無視(0〜1)
 	constexpr float TurnRate      = 2.6f;    // 車体ヨー角速度(rad/s, 最大切れ角時)
 	constexpr float TurnRefSpeed  = 8.0f;    // フル操舵が効き始める速度
 	constexpr float YawResponse   = 7.0f;    // ヨー角速度が目標に追従する速さ
@@ -65,6 +122,8 @@ namespace CarConst
 
 	//===== オートカウンター(CarX風ステアリングアシスト) =====
 	constexpr float CounterAssist   = 0.85f; // 横滑り角を前輪で打ち消す割合(1=完全カウンター)
+	// カウンターと逆へ舵を入れた時、アシストを緩める量(0=緩めない, 1=完全に抜く)
+	constexpr float CounterRelease  = 0.0f;
 	constexpr float CounterMinSpeed = 3.0f;  // これ未満の速度ではアシストを効かせない
 
 	//===== スピン防止アシスト(スタビリティコントロール) =====
@@ -83,6 +142,11 @@ namespace CarConst
 
 	//===== トランジション補助(振り返し) =====
 	constexpr float TransitionAssist = 2.5f; // ドリフト中に切った方向へヨーを後押し(0=OFF, 振り返しのキレ)
+	// 今の回転と逆へ振った時だけ掛ける追加倍率。1.0で無効。
+	constexpr float TransitionFlickMul = 1.0f;
+	// 補助が効き始める横滑り角(rad)と、効き切るまでの幅
+	constexpr float TransitionSlipMin  = 0.15f;
+	constexpr float TransitionSlipBand = 0.01f;
 
 	//===== 車両モデル(silvia_body) =====
 	constexpr float CarModelScale     = 1.0f;               // ボディの表示スケール(要調整)

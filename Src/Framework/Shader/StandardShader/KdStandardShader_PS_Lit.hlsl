@@ -9,6 +9,7 @@ Texture2D g_normalTex     : register(t3);   // 法線マップ
 Texture2D g_grassTex       : register(t4);   // 芝生テクスチャ（トリプレーナー）
 Texture2D g_grassNormalTex : register(t5);   // 芝生法線マップ（盛り上がり表現）
 Texture2D g_grassEdgeTex   : register(t6);   // 草エッジ（境目）テクスチャ
+Texture2D g_markMapTex     : register(t7);   // タイヤ痕の焼き付けマップ（コースを真上から見た1枚）
 
 // 特殊処理用テクスチャ
 Texture2D g_dirShadowMap  : register(t10);  // 平行光シャドウマップ
@@ -421,6 +422,32 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	float  metallic  = saturate(mr.b * g_Metallic);
 	float  roughness = saturate(mr.g * g_Roughness);
 	roughness = max(roughness, 0.04f); // 完全鏡面防止
+
+	// タイヤ痕の焼き付けマップ。コースを真上から見た1枚に痕が書き溜めてあるので、
+	// ワールドXZから引いて路面の色を暗くする。痕をポリゴンとして描かないため、
+	// 痕が何本あっても路面の描画コストは変わらない。
+	if (g_MarkMapEnable > 0.5f)
+	{
+		float2 mapUV = float2((In.wPos.x - g_MarkMapOriginX) * g_MarkMapInvSize,
+		                      (In.wPos.z - g_MarkMapOriginZ) * g_MarkMapInvSize);
+		// 覆う範囲の外は痕なし(端のドットが引き伸ばされて筋にならないように)
+		if (mapUV.x >= 0.0f && mapUV.x <= 1.0f && mapUV.y >= 0.0f && mapUV.y <= 1.0f)
+		{
+			// テクスチャは上下が逆(真上から見た+Zが画面の下)なのでVを反転
+			mapUV.y = 1.0f - mapUV.y;
+			float mark = saturate(g_markMapTex.Sample(g_ss, mapUV).r);
+			// 縁を立てすぎるとドットの階段が露わになるので、浅く整える程度に留める
+			mark = smoothstep(0.04f, 0.70f, mark);
+
+			// マップはカメラの周りだけを覆って一緒に動くので、そのままだと
+			// 覆う範囲の境界で痕がぶつ切りになる。手前から薄くして境目を隠す。
+			float2 edge = abs(mapUV - 0.5f) * 2.0f;              // 中心0〜端1
+			mark *= 1.0f - smoothstep(0.80f, 0.99f, max(edge.x, edge.y));
+			baseColor.rgb *= 1.0f - g_MarkMapDarken * mark;
+			// 擦れた路面はざらついて反射が鈍る
+			roughness = lerp(roughness, 1.0f, mark * 0.6f);
+		}
+	}
 
 	// アクセントカラー塗り：車体を指定色1色で塗り潰す(ドリフト演出など)。
 	// 陰影・輪郭・ハイライトはそのまま残るので、フラットな1色になっても立体感は保たれる。

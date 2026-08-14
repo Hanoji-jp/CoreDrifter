@@ -1,4 +1,5 @@
 ﻿#include "Stage.h"
+#include "../Effect/SkidMark.h"   // 路面へタイヤ痕の焼き付けマップを適用する
 
 void Stage::Init()
 {
@@ -39,6 +40,13 @@ void Stage::RebuildMatrix()
 void Stage::DrawLit()
 {
 	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);   // 裏面カリング有効
+
+	// タイヤ痕の焼き付けマップを路面へ適用する。
+	// 痕はポリゴンとして描かず、ここでワールドXZから引いて色を暗くするだけなので、
+	// 痕が何本あっても、どれだけ長く残っても路面の描画コストは変わらない。
+	// DrawModelは描画後に定数バッファを既定へ戻すため、描画の直前に呼ぶこと。
+	SkidMark::Instance().ApplyToShader();
+
 	KdShaderManager::Instance().m_StandardShader.DrawModel(m_model, m_mWorld);
 	KdShaderManager::Instance().UndoRasterizerState();
 }

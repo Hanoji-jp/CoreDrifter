@@ -6,6 +6,7 @@
 #include "../Effect/DriftNeon.h"         // タイヤ周りのネオン線画(Unbound風)
 #include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
+#include "../../Audio/HjEngineAudio.h"   // エンジン音(点火グレインの合成)
 
 //==========================================================
 // CarBase
@@ -21,6 +22,9 @@ class CarBase : public KdGameObject
 public:
 	void Init()    override;
 	void Update()  override;
+	// 増えたタイヤ痕を焼き付けマップへ書き込む。
+	// レンダーターゲットを差し替えるので、シーンの描画パスに入る前に行う必要がある。
+	void PreDraw() override;
 	void DrawLit() override;
 	void DrawEffect() override;        // ドリフトスモーク(UnLitパス)
 	void DrawOverlayEffect() override; // ネオン線画(煙の輪郭処理を通さず加算合成で重ねる)
@@ -57,6 +61,47 @@ public:
 	void TriggerBoost();
 
 protected:
+	//===== Update() の分割 =====
+	// 1フレームの運転操作。キーボードとコントローラーを合成した結果。
+	struct DriveInput
+	{
+		float throttle  = 0.0f;   // -1(ブレーキ/後退) 〜 +1(アクセル)
+		float steer     = 0.0f;   // -1(左) 〜 +1(右)
+		bool  handbrake = false;
+		bool  clutch    = false;
+		bool  shiftUp   = false;  // 押した瞬間のみ
+		bool  shiftDown = false;
+	};
+
+	DriveInput ReadInput();        // 運転操作の読み取り(キーボード＋パッド)
+	void UpdateDebugKeys();        // F1〜F4のデバッグトグル(運転とは無関係)
+
+	// 車体アライン：アクセルオフで車体を進行方向へ寄せるアシスト。
+	// 物理の積分結果(m_yaw)を直接書き換えるので、アシスト群として切り離してある。
+	void UpdateBodyAlignAssist(float dt, float vLong0, bool handbrake);
+
+	// サスペンションのロール/ピッチ。見た目だけで挙動には影響しない。
+	void UpdateSuspensionVisual(float dt);
+
+	// エンジン・ギア・クラッチ。結果は m_engineRPM / m_gear / m_clutch /
+	// m_driveSpeed / m_driveAccel に入る。
+	void UpdateDriveline(float dt, float throttle, bool handbrake,
+	                     bool clutchPressed, bool shiftUp, bool shiftDown, float vLong0);
+
+	// 4輪シミュレーション。各輪の荷重・スリップ角・摩擦円からタイヤ力を求め、
+	// 車体の速度とヨーへ積分する。挙動の本体。
+	void StepTireForces(float dt, float throttle, float steerInput, bool handbrake,
+	                    bool clutchPressed, bool accelPressed);
+
+	// 水平移動と壁の押し戻し(サブステップCCD＋リラクゼーション)
+	void ResolveWallCollision(float dt);
+	// 接地判定と車体の高さ・地形の傾きへの追従
+	void UpdateGroundContact(float dt);
+
+	// 物理の結果を見た目へ反映する。タイヤの回転と、走行状態に応じた
+	// エフェクト(煙・ネオン・タイヤ痕)の放出。挙動には影響しない。
+	void UpdateMotionFeedback(float dt, bool handbrake);
+
 	void DrawTuningImGui();
 
 	// 調整値の保存/読込（車種ごとのファイルへ）
@@ -80,6 +125,8 @@ protected:
 	float m_scrubDrag       = CarConst::ScrubDrag;   // 横滑りスクラブ抵抗(ドリフト速度の抑制)
 	float m_maxSteerAngle   = CarConst::MaxSteerAngle;
 	float m_steerSpeed      = CarConst::SteerSpeed;
+	float m_steerReturnMul  = CarConst::SteerReturnMul;   // 戻す/逆へ振る時の速さ倍率
+	float m_counterRelease  = CarConst::CounterRelease;   // 逆に切った時カウンターを緩める量
 	float m_turnRate        = CarConst::TurnRate;
 	float m_turnRefSpeed    = CarConst::TurnRefSpeed;
 	float m_yawResponse     = CarConst::YawResponse;
@@ -98,13 +145,21 @@ protected:
 	float m_rearGripThrottleLoss = CarConst::RearGripThrottleLoss;
 	float m_handbrakeGripMul     = CarConst::HandbrakeGripMul;
 	float m_slipEps   = CarConst::SlipSpeedEps;
-	float m_lowSpeedGrip = CarConst::LowSpeedGrip;   // 停止付近でタイヤ横力をフェード
-	float m_latSettle    = CarConst::LowLatSettle;   // 低速で横滑り速度を吸収
-	float m_handbrakeBrake = CarConst::HandbrakeBrake; // サイド中の常時制動
-	float m_handbrakeYawDamp = CarConst::HandbrakeYawDamp; // サイド中のヨー減衰(回りすぎ防止)
-	float m_spinRecover  = CarConst::SpinRecover;    // 横向き移動(スピン)の収束
-	float m_driftRetain  = CarConst::DriftRetain;    // ドリフト中の速度維持(スクラブ還元)
-	float m_handbrakeSlipEps = CarConst::HandbrakeSlipEps;
+	// CarX系の切り返しを決める3要素
+	float m_tireLoadSens  = CarConst::TireLoadSens;      // 荷重感度(荷重が増えるほどμが下がる)
+	float m_tireRelaxLen  = CarConst::TireRelaxLength;   // リラクゼーション長(m)
+	float m_rollFreq      = CarConst::RollFreq;          // ロールの固有角周波数
+	float m_rollDampRatio = CarConst::RollDampRatio;     // ロールの減衰比(1未満で行き過ぎる)
+	// 路面の傾き・空力・駆動系
+	float m_slopeGravity      = CarConst::SlopeGravity;       // 斜面の重力成分の倍率
+	float m_downforceCoef     = CarConst::DownforceCoef;      // ダウンフォース係数
+	float m_downforceRearBias = CarConst::DownforceRearBias;  // ダウンフォースの後ろ寄り配分
+	float m_lsdLock           = CarConst::LsdLock;            // デフのロック強さ
+	float m_bumpLoadGain      = CarConst::BumpLoadGain;       // 段差による荷重変化の強さ
+	// ※ここにあった lowSpeedGrip / latSettle / handbrakeBrake / handbrakeYawDamp /
+	//   spinRecover / driftRetain / handbrakeSlipEps は、ImGuiと保存には出ていたが
+	//   物理側で一度も参照されていなかった(触っても何も起きない)ため削除した。
+	//   必要になったら実装と一緒に追加すること。
 	float m_yawDamp   = CarConst::YawDamp;
 
 	// 駆動輪の縦スリップ(摩擦円：空転すると横グリップが減って流れる)
@@ -120,6 +175,14 @@ protected:
 	float m_suspMax   = CarConst::SuspMaxAngle;
 	float m_accelSmooth = CarConst::SuspAccelSmooth;
 
+	//===== 運転アシスト =====
+	// CarXにも同種の設定はあるが、あちらは「切っても物理が成立する」前提で
+	// プレイヤーが自由にON/OFFできる。こちらも同じように個別に切れるようにする。
+	// すべて切ると、タイヤと荷重だけで走る素の挙動になる。
+	bool  m_transitionEnabled = true;   // 振り返しのヨー後押し(物理を経由しない外力)
+	bool  m_bodyAlignEnabled  = true;   // アクセルオフで車体を進行方向へ回頭
+	bool  m_scrubDragEnabled  = true;   // 横滑り速度の直接減衰(タイヤ力とは別口)
+
 	// オートカウンター(CarX風ステアリングアシスト)
 	bool  m_counterSteerEnabled = true;
 	float m_counterAssist  = CarConst::CounterAssist;   // 横滑り角を打ち消す割合(0-1+)
@@ -130,10 +193,8 @@ protected:
 	float m_spinAssist = CarConst::SpinAssistStrength;
 	float m_handbrakeCounterMul = CarConst::HandbrakeCounterMul; // サイド中のカウンター倍率(1=通常)
 
-	// タイヤ・リラクゼーション(グリップ変化の平滑化)
-	float m_gripRelax = CarConst::GripRelax;
-	// グリップキャッチ(アクセルオフで入力方向へグリップ復帰)
-	float m_gripCatch = CarConst::GripCatch;
+	// ※gripRelax(グリップ変化の平滑化)と gripCatch(アクセルオフでグリップ復帰)も
+	//   物理側で未参照だったため削除。前者の役割は m_tireRelaxLen が担っている。
 	// 車体アライン(アクセルオフで車体を進行方向へ回頭＝角度を抜く。カニ歩き防止)
 	float m_bodyAlign = CarConst::BodyAlign;
 	// トランジション補助(振り返し。ドリフト中に切った方向へヨーを後押し)
@@ -221,6 +282,10 @@ private:
 	float         m_accelLong  = 0.0f, m_accelLat = 0.0f;   // 直近の車体座標加速度
 	float         m_accelLongF = 0.0f, m_accelLatF = 0.0f;  // 平滑化した加速度(サス入力)
 	float         m_dLongF = 0.0f, m_dLatF = 0.0f;          // 平滑化した荷重移動(急なリフトオフ防止)
+	float         m_rollV = 0.0f;        // ロール(横荷重移動)の速度。ばね-ダンパの状態
+	float         m_wheelFy[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; // 各輪の横力(リラクゼーションで遅らせた値)
+	float         m_bumpLoad[4] = { 0.0f, 0.0f, 0.0f, 0.0f };// 段差による各輪の荷重の偏り(-1〜1)
+	float         m_driveDiff = 0.0f;    // 左右の駆動輪の回転差の半分(デフ)
 
 	// ドリフトスモーク(後輪の煙)
 	DriftSmoke    m_smoke;
@@ -233,14 +298,15 @@ private:
 	float         m_neonRingCarry  = 0.0f;   // 放出数の端数(リング)
 	float         m_neonSparkCarry = 0.0f;   // 放出数の端数(スパーク)
 
-	// 路面に残るタイヤ痕(後輪の接地点を追って帯を伸ばす)
-	SkidMark      m_skid;
-	Math::Vector3 m_skidColor = Math::Vector3(SkidMarkConst::ColorR,
-	                                          SkidMarkConst::ColorG,
-	                                          SkidMarkConst::ColorB);
+	// 路面に残るタイヤ痕。マップはコースに1枚の共有(SkidMark::Instance)で、
+	// ここに持つのは自車ぶんの枠の先頭番号だけ。
+	int m_skidBase = -1;
 
 	// コントローラー入力(接続時のみアナログ操作を反映)
 	HjGamePad     m_pad;
+
+	// エンジン音。RPMとアクセル開度から波形を組み立てて鳴らす
+	HjEngineAudio m_engineAudio;
 
 	// マニュアルシフトのキーボード用エッジ検出(押した瞬間だけ1段送る)
 	bool          m_prevKeyShiftUp   = false;

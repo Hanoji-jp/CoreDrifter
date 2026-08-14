@@ -303,6 +303,14 @@
     <ClInclude Include="Src\Application\GameObject\Effect\SkidMark.h" />
     <ClInclude Include="Src\Application\Const\SkidMarkConst.h" />
     <ClInclude Include="Src\Application\Const\CullingConst.h" />
+    <ClInclude Include="Src\Application\Const\EngineAudioConst.h" />
+    <ClInclude Include="Src\Application\Audio\HjEngineAudio.h" />
+    <ClInclude Include="Src\Application\Audio\HjEngineSim.h" />
+    <ClInclude Include="Src\Application\Audio\HjEngineSampler.h" />
+    <ClInclude Include="Src\Application\Audio\HjExhaustResonator.h" />
+    <ClInclude Include="Src\Application\Const\ExhaustConst.h" />
+    <ClInclude Include="Src\Application\Const\EngineSamplerConst.h" />
+    <ClInclude Include="Src\Application\Const\EngineSimConst.h" />
     <ClInclude Include="Src\Application\GameObject\Effect\HjCullView.h" />
     <ClInclude Include="Src\Application\Const\NeonFxConst.h" />
     <ClInclude Include="Src\Application\GameObject\Score\DriftScore.h" />
@@ -385,6 +393,10 @@
     <ClCompile Include="Src\Application\GameObject\Effect\DriftSmoke.cpp" />
     <ClCompile Include="Src\Application\GameObject\Effect\DriftNeon.cpp" />
     <ClCompile Include="Src\Application\GameObject\Effect\SkidMark.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjEngineAudio.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjEngineSim.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjEngineSampler.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjExhaustResonator.cpp" />
     <ClCompile Include="Src\Application\GameObject\Score\DriftScore.cpp" />
     <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />

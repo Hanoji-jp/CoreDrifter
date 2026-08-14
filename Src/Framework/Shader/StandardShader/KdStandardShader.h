@@ -112,6 +112,19 @@ public:
 		float			SmokeViewLight = 0.0f;
 		// 2つ目の光(横から)の強さ。0=無効。横向きの面にもハイライトを乗せる。
 		float			SmokeFillLight = 0.0f;
+
+		// タイヤ痕の焼き付けマップ(コースを真上から見た1枚に痕を書き溜めたもの)。
+		// 路面がワールドXZから引いて色を暗くする。痕そのものは描かないので
+		// 何本走っても路面の描画コストは変わらない。
+		float			MarkMapEnable  = 0.0f;   // 0=無効
+		float			MarkMapOriginX = 0.0f;   // 覆う範囲の隅(ワールドX)
+		float			MarkMapOriginZ = 0.0f;   // 覆う範囲の隅(ワールドZ)
+		float			MarkMapInvSize = 0.0f;   // 1÷覆う一辺(m)
+
+		float			MarkMapDarken  = 0.0f;   // 最大でどこまで暗くするか
+		float			MarkPad0 = 0.0f;
+		float			MarkPad1 = 0.0f;
+		float			MarkPad2 = 0.0f;
 	};
 
 	// 定数バッファ(メッシュ単位更新)
@@ -156,6 +169,28 @@ public:
 		auto& cb = m_cb0_Obj.Work();
 		cb.UseTriplanar   = enable ? 1 : 0;
 		cb.TriplanarScale = scale;
+		m_dirtyCBObj = true;
+	}
+
+	// タイヤ痕の焼き付けマップを設定（t7スロットに即セット）。
+	//   tex      … コースを真上から見た痕の蓄積テクスチャ(赤成分を濃さとして使う)
+	//   originX/Z… 覆う範囲の隅(ワールド座標)
+	//   size     … 覆う一辺(m)
+	//   darken   … 最大でどこまで暗くするか(1=真っ黒)
+	// ※ ResetCBObject() で既定へ戻るので、路面を描く直前に毎回呼ぶこと
+	void SetMarkMap(std::shared_ptr<KdTexture> tex,
+	                float originX, float originZ, float size, float darken)
+	{
+		// 未設定なら何も割り当てない。サンプル結果は0＝痕なしになる
+		ID3D11ShaderResourceView* srv = tex ? tex->WorkSRView() : nullptr;
+		KdDirect3D::Instance().WorkDevContext()->PSSetShaderResources(7, 1, &srv);
+
+		auto& cb = m_cb0_Obj.Work();
+		cb.MarkMapEnable  = tex ? 1.0f : 0.0f;
+		cb.MarkMapOriginX = originX;
+		cb.MarkMapOriginZ = originZ;
+		cb.MarkMapInvSize = (size > 1e-4f) ? (1.0f / size) : 0.0f;
+		cb.MarkMapDarken  = darken;
 		m_dirtyCBObj = true;
 	}
 

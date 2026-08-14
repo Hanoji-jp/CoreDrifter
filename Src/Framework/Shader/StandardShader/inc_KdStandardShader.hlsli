@@ -79,6 +79,18 @@ cbuffer cbObject : register(b0)
 	float g_TintB;
 	float g_SmokeViewLight;		// 煙の光をカメラ基準にする割合(1=カメラを回すと影も回る)
 	float g_SmokeFillLight;		// 2つ目の光(横上から)の強さ。横向きの面にもハイライトを乗せる
+
+	// タイヤ痕の焼き付けマップ。コースを真上から見た1枚に痕を書き溜めてあり、
+	// 路面はワールドXZから引いて色を暗くする(痕そのものは描かない＝何本あっても軽い)
+	float g_MarkMapEnable;		// 0=無効
+	float g_MarkMapOriginX;		// 覆う範囲の隅(ワールドX)
+	float g_MarkMapOriginZ;		// 覆う範囲の隅(ワールドZ)
+	float g_MarkMapInvSize;		// 1÷覆う一辺(m)
+
+	float g_MarkMapDarken;		// 最大でどこまで暗くするか(1=真っ黒)
+	float g_MarkPad0;
+	float g_MarkPad1;
+	float g_MarkPad2;
 };
 
 // 定数バッファ(メッシュ単位)
