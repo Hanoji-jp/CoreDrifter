@@ -20,6 +20,7 @@ void CarBase::Init()
 	m_smoke.Init();
 	m_neon.Init();
 	m_engineAudio.Init();
+	m_tireAudio.Init();
 	// タイヤ痕のマップはコースに1枚の共有。自車ぶんの枠だけ確保する
 	SkidMark::Instance().Init();
 	m_skidBase = SkidMark::Instance().AllocTrails();
@@ -451,20 +452,33 @@ for (int s = 0; s < sub; ++s)
 
 		// 縦力：後輪=駆動スリップ、全輪=ブレーキ
 		float Fx = brakeEach;
-		float rearFxTraction = 0.0f;
+		float slipLong = 0.0f;   // 駆動輪の接地面と路面の速度差(空転/引きずり)
 		if (!w.front)
 		{
 			// デフ：左右の駆動輪はそれぞれ違う速さで回る。
 			// m_driveSpeed が左右の平均、m_driveDiff がその差の半分。
 			// 旋回中は外輪が速く回る必要があり、その差をデフが許す。
 			const float wheelDrive = m_driveSpeed + (left ? -m_driveDiff : +m_driveDiff);
-			rearFxTraction = m_longStiff * (wheelDrive - wLong);   // 駆動/空転
-			Fx += rearFxTraction;
+			slipLong = wheelDrive - wLong;
+			Fx += m_longStiff * slipLong;   // 駆動/空転
 		}
 
 		// 摩擦円：縦横合力を Dmax で頭打ち(空転で横が食われて流れる)
 		const float mag = sqrtf(Fx * Fx + Fy * Fy);
 		if (mag > Dmax && mag > 1e-4f) { const float scl = Dmax / mag; Fx *= scl; Fy *= scl; }
+
+		// タイヤ音へ渡す滑り具合。物理は読むだけで、音のために挙動は変えない。
+		//   横滑り＋駆動スリップ ＝ 接地面が路面に対して滑っている速さ。
+		// これに「摩擦円で切り落とされたぶん」を足す。要求した力が上限を超えて
+		// いる＝タイヤが掴みきれずに流れている状態で、ブレーキロックのように
+		// 速度差として現れない滑りはここで拾う。
+		// 完全に掴めていない時(超過率1.0)は路面速度そのままで滑っていることになる。
+		{
+			const float over = std::clamp(mag / std::max(Dmax, 1e-4f) - 1.0f, 0.0f, 1.0f);
+			m_wheelSlip[i].slipSpeed = sqrtf(wLat * wLat + slipLong * slipLong)
+			                         + over * fabsf(wLong);
+			m_wheelSlip[i].load = load;
+		}
 
 		// ホイール座標→車体座標(各輪の実舵角ぶん回す。後輪もトーの分だけ回る)
 		const float FcarLong = Fx * wcs - Fy * wsn;
@@ -1094,6 +1108,11 @@ void CarBase::Update()
 	UpdateGroundContact(dt);
 
 	UpdateMotionFeedback(dt, handbrake);
+
+	// タイヤの鳴き。StepTireForcesが書いた各輪の滑り具合を読むだけ。
+	// 滞空中はタイヤが路面に触れていないので鳴らさない
+	// (この間 m_wheelSlip は更新されず、前の値が残っているため)。
+	m_tireAudio.Update(m_wheelSlip, m_onGround && !m_airborne);
 }
 
 //----------------------------------------------------------
@@ -1520,6 +1539,7 @@ void CarBase::DrawTuningImGui()
 
 	// エンジン音は鳴らしながら詰めるものなので、走行中に触れる位置に出す
 	m_engineAudio.DrawImGui();
+	m_tireAudio.DrawImGui();
 
 	// アシストの一括操作。すべて切ると、タイヤと荷重だけで走る素の挙動になる。
 	// CarXも同種の設定を持つが、あちらは「切っても物理が成立する」前提なので、
@@ -1648,6 +1668,7 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 	// エンジン音の調整値は音側が持っているので、そこから受け取って足す。
 	// ここへ手書きで並べると、パラメータを増やすたびに追加漏れが起きる。
 	m_engineAudio.CollectTuneParams(list);
+	m_tireAudio.CollectTuneParams(list);
 
 	return list;
 }

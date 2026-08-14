@@ -7,6 +7,7 @@
 #include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
 #include "../../Audio/HjEngineAudio.h"   // エンジン音(点火グレインの合成)
+#include "../../Audio/HjTireAudio.h"     // タイヤの鳴き(スキール音)
 
 //==========================================================
 // CarBase
@@ -307,6 +308,12 @@ private:
 
 	// エンジン音。RPMとアクセル開度から波形を組み立てて鳴らす
 	HjEngineAudio m_engineAudio;
+
+	// タイヤの鳴き。各輪の滑り具合から音量と音の荒さが決まる
+	HjTireAudio m_tireAudio;
+	// 各輪の滑り具合。StepTireForcesが書き、タイヤ音が読む。
+	// 並びは wheelDef と同じ(前左/前右/後左/後右)。
+	HjTireSlipState m_wheelSlip[TireAudioConst::WheelNum];
 
 	// マニュアルシフトのキーボード用エッジ検出(押した瞬間だけ1段送る)
 	bool          m_prevKeyShiftUp   = false;

@@ -308,6 +308,8 @@
     <ClInclude Include="Src\Application\Audio\HjEngineSim.h" />
     <ClInclude Include="Src\Application\Audio\HjEngineSampler.h" />
     <ClInclude Include="Src\Application\Audio\HjExhaustResonator.h" />
+    <ClInclude Include="Src\Application\Audio\HjTireAudio.h" />
+    <ClInclude Include="Src\Application\Const\TireAudioConst.h" />
     <ClInclude Include="Src\Application\Const\ExhaustConst.h" />
     <ClInclude Include="Src\Application\Const\EngineSamplerConst.h" />
     <ClInclude Include="Src\Application\Const\EngineSimConst.h" />
@@ -397,6 +399,7 @@
     <ClCompile Include="Src\Application\Audio\HjEngineSim.cpp" />
     <ClCompile Include="Src\Application\Audio\HjEngineSampler.cpp" />
     <ClCompile Include="Src\Application\Audio\HjExhaustResonator.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjTireAudio.cpp" />
     <ClCompile Include="Src\Application\GameObject\Score\DriftScore.cpp" />
     <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />
