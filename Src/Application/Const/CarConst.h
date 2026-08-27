@@ -11,13 +11,38 @@ namespace CarConst
 	//===== 後退(バックギア) =====
 	constexpr float ReversePower       = 9.0f;   // 後退の駆動加速(前進より弱く)
 	constexpr float MaxReverseSpeed    = 10.0f;  // 後退の最高速(m/s)
-	constexpr float ReverseEngageSpeed = 1.5f;   // この前進速度(m/s)未満でSを踏むと後退ギアへ入る
+	// この「実際の速さ」(m/s)未満でSを踏み続けると後退ギアへ入る。
+	//
+	// ※車体前方の速度で見てはいけない。ドリフト中は車体が横を向くので
+	//   前方成分だけが小さくなり、実際には高速で滑っているのに
+	//   「止まっている」と誤判定する。そうなるとブレーキが後退駆動へ
+	//   置き換わって、踏んでも止まらなくなる。
+	constexpr float ReverseEngageSpeed = 1.5f;
+	// 後退へ入るまでSを踏み続ける時間(秒)。
+	// 一瞬でも条件を満たしたら入る作りだと、停止寸前のブレーキ中に
+	// ギアが勝手に切り替わって制動が抜ける
+	constexpr float ReverseEngageHold  = 0.30f;
+	// 後退中にこの前進速度(m/s)を超えたら後退を解除する。
+	// 入る条件と同じ値にすると、境目で行ったり来たりする
+	constexpr float ReverseExitSpeed   = 2.0f;
+
+	// ブレーキがこの速度(m/s)以下で弱まり始める。
+	// 一定の力をかけ続けると、止まったあとに車が後ろへ這い出す
+	constexpr float BrakeFadeSpeed     = 0.9f;
 	constexpr float Drag          = 0.12f;   // 転がり/空気抵抗(速度比例の減速係数 1/s)
 	constexpr float ScrubDrag     = 0.5f;    // 横滑りスクラブ抵抗(小=ツルツル滑る/ダート感。大=路面を削る/アスファルト感)
 
 	//===== ステアリング =====
 	constexpr float MaxSteerAngle = 0.55f;   // 前輪の最大切れ角(rad)
-	constexpr float SteerSpeed    = 8.0f;    // ステア入力の追従速度
+	// 舵が動く速さ。「最大切れ角の何倍を1秒で動けるか」。
+	// 8なら端から端(最大切れ角の2倍)まで約0.25秒。
+	//
+	// ※1次遅れ(指数)で寄せてはいけない。
+	//   最初だけ速くて後はじわじわ近づき、いつまでも目標に届かない。
+	//   ゴムで引っ張られるような手ごたえになり、今どこまで切れているかが
+	//   分からなくなる。実際のステアリングは一定の速さで動いて、
+	//   目標に着いたらそこで止まる。
+	constexpr float SteerSpeed    = 8.0f;
 	// 舵を戻す/反対側へ振る時の追従速度の倍率。1.0で切り込みと同じ＝無効。
 	constexpr float SteerReturnMul = 1.0f;
 
@@ -126,9 +151,24 @@ namespace CarConst
 	constexpr float CounterRelease  = 0.0f;
 	constexpr float CounterMinSpeed = 3.0f;  // これ未満の速度ではアシストを効かせない
 
+	// オートカウンターが動ける速さ(最大切れ角の何倍/秒)。
+	//
+	// カウンターの元になる横滑り角は、速度から毎フレーム計算した生の値。
+	// 段差・タイヤの緩和・摩擦円の頭打ちで細かく震えるので、
+	// そのまま舵へ入れると見た目のタイヤがカクカク動く。
+	// プレイヤーの舵と同じく動ける量に上限を付けて、震えを均す。
+	//
+	// プレイヤーより速く設定すること。アシストの役目はスライドを
+	// 素早く捕まえることなので、遅くすると当て舵が間に合わなくなる。
+	constexpr float CounterRate = 14.0f;
+
 	//===== スピン防止アシスト(スタビリティコントロール) =====
 	constexpr float SpinAssistThreshold = 0.45f; // この横滑り角(rad,約26度)を超えたらヨーを抑える
 	constexpr float SpinAssistStrength  = 5.0f;  // 抑える強さ(大=スピンしにくい)
+	// 回っている向きへこれ以上舵を当てていたら「意図した回転」とみなす。
+	// ドリフト中はカウンター(回転と逆)を当てているので誤検出しない。
+	// ドーナツや360度は回転と同じ向きへ舵を入れ続けるので、そこで区別できる。
+	constexpr float SpinIntentSteer = 0.25f;
 	constexpr float HandbrakeCounterMul = 0.5f;  // サイド中のオートカウンター倍率(1=通常, 小=サイドで流しやすい)
 
 	//===== タイヤ・リラクゼーション(グリップ変化を滑らかに) =====
@@ -174,10 +214,20 @@ namespace CarConst
 	constexpr float WheelOffsetY = 0.1f;   // タイヤの高さ
 
 	//===== オービットカメラ(車の周りをマウスで回転) =====
-	constexpr float CamDistance      = 8.0f;   // 初期の距離
+	// 初期の距離。近いほど速度感が出て、車の姿勢の変化も読み取りやすい。
+	// FOVが速度とドリフトで開く(下のGain)ぶん、映る範囲は走行中さらに広がる。
+	// そのぶんも見込んで基準は控えめに取る。
+	constexpr float CamDistance      = 5.8f;
 	constexpr float CamLookAtOffsetY = 1.0f;   // 注視点の高さ
 	constexpr float CamFollow        = 8.0f;   // 注視点(車)追従の滑らかさ
 	constexpr float CamFov           = 60.0f;  // 視野角(度)
+	// 近クリップ距離。既定の0.01は近すぎて、遠クリップ2000との比が20万:1になり、
+	// 深度バッファ(24bit・非線形)の精度がほとんど近距離側へ食われてしまう。
+	// 結果、空のような遠景でDoF/フォグが深度を読むと、量子化の段差が
+	// 同心円状の縞(バンディング)として見える。
+	// 車のカメラは数m以内に何かが描かれることが無いので、近クリップを
+	// 大きく取っても支障が無く、遠距離側の精度を大きく稼げる。
+	constexpr float CamNearClip      = 0.5f;
 	constexpr float CamOrbitSensitivity = 0.006f; // マウス回転感度
 	constexpr float CamZoomSpeed     = 1.2f;   // ホイールズーム速度
 	constexpr float CamMinDistance   = 2.5f;   // 最小距離
@@ -191,7 +241,9 @@ namespace CarConst
 	constexpr float CamYawFollow     = 4.0f;   // カメラ向きの追従速度(1/s)
 	constexpr float CamMinTravelSpeed = 2.0f;  // この速度以上で進行方向を採用(低速は車の向き)
 	// 動的カメラ(演出④：速度でFOVが開く・ドリフトで寄る)
-	constexpr float CamFovSpeedGain  = 16.0f;  // 最高速で開くFOV量(度)
+	// FOVを開くと視野が広がる＝車が小さく遠くに見える。
+	// 距離を詰めてもここが大きいと引いた印象が戻ってしまう。
+	constexpr float CamFovSpeedGain  = 12.0f;  // 最高速で開くFOV量(度)
 	constexpr float CamFovDriftGain  = 10.0f;  // ドリフト最大で開くFOV量(度)
 	constexpr float CamDriftPull     = 1.3f;   // ドリフト時に寄る距離(m)
 	constexpr float CamDynSmooth     = 5.0f;   // FOV/距離の追従速度(1/s)
@@ -203,16 +255,78 @@ namespace CarConst
 	// 進行方向が見えづらいので、行き先寄りに画面を振る。速度に比例して伸ばす。
 	constexpr float CamLookAhead = 3.5f;
 
+	//===== 被写界深度(DoF) =====
+	// 手前(車・路面)は常にくっきり、遠くの背景だけ柔らかくぼかして奥行きを出す。
+	// ぼかしすぎるとコース先が読めなくなり、ドリフトゲームとしては致命的なので、
+	// 「効いているのが分かる程度」に留める。
+	//
+	// ※ForeRange/BackRangeは「そこまで届けば急にぼける」幅であって、
+	//   「そこまでは絶対に鮮明」という意味ではない。ぼけの強さは
+	//   1-(焦点との距離÷Range)^2 で決まり、距離がRangeに近づくほど
+	//   なだらかにぼけていく。だからForeRangeを焦点距離と同じくらいの
+	//   大きさにすると、焦点よりずっと手前にある車まで一緒にぼける
+	//   (焦点との差がほぼForeRange幅いっぱいになるため)。
+	//   手前側は絶対にぼかしたくないので、ForeRangeは焦点距離よりも
+	//   一桁以上大きく取り、近距離側のぼけを事実上無効化する。
+	//
+	//   FocusDistance … ここが最も鮮明になる基準距離(m)
+	//   ForeRange     … 手前側のぼけやすさ。大きいほど手前はぼけない
+	//   BackRange     … 焦点より奥。この値ぶん奥から徐々にぼけ始め、
+	//                    FocusDistance+BackRange×2あたりで最大にぼける
+	constexpr float CamDofFocusDistance = 150.0f;
+	constexpr float CamDofForeRange     = 100000.0f;  // 手前側は実質常に鮮明
+	constexpr float CamDofBackRange     = 120.0f;      // 150m〜奥が徐々にぼける
+
 	//===== エンジン / ギア / クラッチ =====
 	constexpr float IdleRPM      = 900.0f;    // アイドル回転
 	constexpr float MaxRPM       = 8000.0f;   // レブリミット
 	constexpr float ShiftUpRPM   = 7000.0f;   // オートシフトアップ回転
 	constexpr float ShiftDownRPM = 3000.0f;   // オートシフトダウン回転
 	constexpr float ClutchSpeed  = 6.0f;      // クラッチ断続の速さ(1/s)
-	constexpr float RevUp        = 7000.0f;   // クラッチ切断時アクセルで上がる回転(RPM/s)
-	constexpr float RevDown      = 4500.0f;   // クラッチ切断時アクセルオフで下がる回転(RPM/s)
+	// クラッチ切断時の空ぶかし。
+	// ※一定の割合で上げ下げすると回転計が直線的に動き、機械仕掛けに見える。
+	//   実機はクランクの角加速度が (トルク − 摩擦) ÷ 慣性 で決まり、
+	//   摩擦は回転数の2乗におおむね比例する(ポンプ損失・かき混ぜ抵抗・油の粘性)。
+	//   だから低回転では一気に吹け上がり、レッド手前で急激に鈍る。
+	constexpr float RevUp        = 11000.0f;  // 全開・最大トルク時の上昇率(RPM/s)
+	constexpr float RevDown      = 9000.0f;   // 摩擦による下降率の係数(RPM/s)
+	// 摩擦。回転が上がるほど強くなる＝上は伸びず、下は速く落ちる
+	constexpr float RevFrictionBase = 0.10f;  // アイドル付近でも掛かる分
+	constexpr float RevFrictionRpm  = 1.15f;  // 回転の2乗で増える分
 	constexpr float FinalDrive   = 3.9f;      // ファイナル(最終減速比)
+	// ── 空転によるグリップ低下(滑り比の下り坂) ──
+	// 摩擦円は「縦横をどう配分するか」しか決めない。
+	// つまり空転しても、その輪が出せる力の総量は変わらないままになる。
+	// 実タイヤは滑り比がピークを超えると摩擦係数そのものが落ちていくので、
+	// 踏むほど後輪が失われ、旋回に使える力が減って半径が広がる。
+	// これがドリフト中にアクセルで外へ膨らませる操作の正体で、
+	// これが無いと踏んでも角度が変わるだけで線が広がらない。
+	constexpr float SpinPeakSlip  = 0.18f;   // この滑り比までは摩擦が最大
+	constexpr float SpinFallSlip  = 1.30f;   // ここまで滑ると落ち切る
+	// 落ち切ったときに失う割合。大きすぎるとドリフト中に前へ進まなくなる
+	constexpr float SpinGripFall  = 0.28f;
+
+	// ── 空転の上限 ──
+	// 完全に滑り切ったタイヤは、それ以上速く回しても駆動力が増えない。
+	// 余った出力は熱とタイヤの摩耗になり、回転として蓄えられるわけではない。
+	//
+	// 上限が無いと、摩擦円で頭打ちになった時点で回転を止めるものが無くなり、
+	// 駆動輪がはずみ車のように回転を溜め込む。そしてグリップが戻った瞬間に
+	// それを一気に放出して、不自然な加速になる。
+	constexpr float MaxSlipRatio = 0.55f;   // 路面速に対して何割まで多く回れるか
+	constexpr float MaxSlipBase  = 4.0f;    // 停止からの発進ぶん(m/s)
+
 	constexpr float RpmLinkSpeed = 9.0f;      // クラッチ接続時にエンジン回転が駆動系へ追従する速さ
+
+	// クラッチが繋がる瞬間、回転差はクラッチが滑って埋める。
+	// このとき「速い側が遅い側を引っ張る」向きを守ること。
+	// エンジンの方が速ければエンジンが駆動輪を回す(＝ホイールスピン)。
+	// 向きを取り違えると、サイドを離した瞬間に回転がアイドルまで落ちる。
+	// サイド中は駆動輪をロックしていて、しかもドリフト中は車が横を向いていて
+	// 前後速度が小さいので、駆動輪側の回転はほぼアイドル扱いになるため。
+	constexpr float ClutchGrabSpeed = 7.0f;   // エンジンが駆動輪を引き上げる速さ(1/s)
+	// エンジンが勝っているときの落ち方。滑っている間は少ししか落ちない
+	constexpr float ClutchSlipDrop  = 0.22f;
 	constexpr float RpmPerRadSec = 9.5493f;   // rad/s → RPM (60/2π)
 	constexpr int   GearCount    = 5;         // 前進ギア段数
 	// ギア比(index0は未使用。1速が一番大きい=トルク大/低速)

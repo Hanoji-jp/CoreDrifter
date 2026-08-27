@@ -83,13 +83,13 @@
 			"name":"Material_145",
 			"pbrMetallicRoughness":{
 				"baseColorFactor":[
-					1,
-					0.9490196108818054,
-					0.9490196108818054,
+					0.08989609032869339,
+					0,
+					0.003871646011248231,
 					1
 				],
-				"metallicFactor":0.75,
-				"roughnessFactor":0
+				"metallicFactor":0.2767857313156128,
+				"roughnessFactor":0.0982142835855484
 			}
 		},
 		{
@@ -116,8 +116,7 @@
 					0,
 					1
 				],
-				"metallicFactor":0,
-				"roughnessFactor":0
+				"metallicFactor":0
 			}
 		},
 		{
@@ -130,8 +129,7 @@
 					0.9490196108818054,
 					1
 				],
-				"metallicFactor":0.75,
-				"roughnessFactor":0
+				"roughnessFactor":0.196428582072258
 			}
 		}
 	],

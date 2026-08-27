@@ -653,7 +653,52 @@ bool KdBoxCollision::Intersects(const KdCollider::RayInfo& target, const Math::M
 // モデルvs球の当たり判定
 // 判定回数は メッシュの個数 x 各メッシュのポリゴン数 計算回数がモデルのデータ依存のため処理効率は不安定
 // 単純に計算回数が多くなる可能性があるため重くなりがち
-// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
+// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////----------------------------------------------------------
+// 荒い判定用のワールド境界ボックスを作り直す。
+//
+// 地形のように動かないモデルでは、この結果は毎回同じになる。
+// 行列が変わったときだけ計算し、あとは使い回す。
+//----------------------------------------------------------
+void KdModelCollision::RebuildWorldBounds(const Math::Matrix& world)
+{
+	// 同じ行列なら作り直さない。
+	// 動く物に使った場合はここで毎回作り直されるだけで、
+	// 結果は変わらない(遅くなることもない)
+	if (m_boundsValid && m_boundsMatrix == world) { return; }
+
+	m_boundsNodes.clear();
+	m_worldBounds.clear();
+
+	const std::shared_ptr<KdModelData>& spModelData = m_shape->GetData();
+	if (!spModelData) { return; }
+
+	const std::vector<KdModelData::Node>& dataNodes = spModelData->GetOriginalNodes();
+	const std::vector<KdModelWork::Node>& workNodes = m_shape->GetNodes();
+
+	const std::vector<int>& targetIndices = m_nodeFilter.empty()
+		? spModelData->GetCollisionMeshNodeIndices() : m_nodeFilter;
+
+	m_boundsNodes.reserve(targetIndices.size());
+	m_worldBounds.reserve(targetIndices.size());
+
+	for (int index : targetIndices)
+	{
+		const KdModelData::Node& dataNode = dataNodes[index];
+		if (!dataNode.m_spMesh) { continue; }
+
+		DirectX::BoundingBox aabb;
+		dataNode.m_spMesh->GetBoundingBox().Transform(
+			aabb, workNodes[index].m_worldTransform * world);
+
+		m_boundsNodes.push_back(index);
+		m_worldBounds.push_back(aabb);
+	}
+
+	m_boundsMatrix = world;
+	m_boundsValid  = true;
+}
+
+// ///// /////
 bool KdModelCollision::Intersects(const DirectX::BoundingSphere& target, const Math::Matrix& world, KdCollider::CollisionResult* pRes)
 {
 	// 当たり判定が無効 or 形状が解放済みなら判定せず返る
@@ -676,18 +721,25 @@ bool KdModelCollision::Intersects(const DirectX::BoundingSphere& target, const M
 
 	Math::Vector3 hitPos;
 	Math::Vector3 hitNDir;
+	int hitNodeIndex = -1;
 
 	// 当たり判定ノードとのみ当たり判定
 	const std::vector<int>& targetIndices = m_nodeFilter.empty()
 		? spModelData->GetCollisionMeshNodeIndices() : m_nodeFilter;
 
-	for (int index : targetIndices)
+	// 荒い判定。ワールド境界ボックスと重ならないノードは、
+	// 三角形を1枚も調べずに捨てる。
+	// ボックスは行列が変わったときだけ作り直すので、
+	// 動かない地形では最初の1回で済む
+	RebuildWorldBounds(world);
+
+	for (size_t bi = 0; bi < m_boundsNodes.size(); ++bi)
 	{
+		if (!m_worldBounds[bi].Intersects(pushedSphere)) { continue; }
+
+		const int index = m_boundsNodes[bi];
 		const KdModelData::Node& dataNode = dataNodes[index];
 		const KdModelWork::Node& workNode = workNodes[index];
-
-		// あり得ないはずだが一応チェック
-		if (!dataNode.m_spMesh) { continue; }
 
 		CollisionMeshResult tmpResult;
 		CollisionMeshResult* pTmpResult = pRes ? &tmpResult : nullptr;
@@ -713,12 +765,17 @@ bool KdModelCollision::Intersects(const DirectX::BoundingSphere& target, const M
 
 		// 最後に当たった面の法線情報を記憶しておく
 		hitNDir = tmpResult.m_hitNDir;
+
+		// どのノードに当たったかも覚えておく。
+		// 調整時に「今ぶつかっている物」を名指しで外すために使う
+		hitNodeIndex = index;
 	}
 
 	if (pRes && isHit)
 	{
 		// 最後に当たった座標が使用される
 		pRes->m_hitPos = hitPos;
+		pRes->m_hitNodeIndex = hitNodeIndex;
 
 		// 複数のメッシュに押された最終的な位置 - 移動前の位置 = 押し出しベクトル
 		const Math::Vector3 pushVec = DirectX::XMVectorSubtract(
@@ -789,8 +846,22 @@ bool KdModelCollision::Intersects(const KdCollider::RayInfo& target, const Math:
 	const std::vector<KdModelData::Node>& dataNodes = spModelData->GetOriginalNodes();
 	const std::vector<KdModelWork::Node>& workNodes = m_shape->GetNodes();
 
-	for (int index : (m_nodeFilter.empty() ? spModelData->GetCollisionMeshNodeIndices() : m_nodeFilter))
+	int nearestNodeIndex = -1;
+
+	// 荒い判定。レイが通らないノードは三角形を調べずに捨てる
+	RebuildWorldBounds(world);
+
+	// レイの向きは正規化されている前提。長さは m_range で持つ
+	const DirectX::XMVECTOR rayPos = target.m_pos;
+	const DirectX::XMVECTOR rayDir = DirectX::XMVector3Normalize(target.m_dir);
+
+	for (size_t bi = 0; bi < m_boundsNodes.size(); ++bi)
 	{
+		float boxDist = 0.0f;
+		if (!m_worldBounds[bi].Intersects(rayPos, rayDir, boxDist)) { continue; }
+		if (boxDist > target.m_range) { continue; }
+
+		const int index = m_boundsNodes[bi];
 		const KdModelData::Node& dataNode = dataNodes[index];
 		const KdModelWork::Node& workNode = workNodes[index];
 
@@ -813,6 +884,7 @@ bool KdModelCollision::Intersects(const KdCollider::RayInfo& target, const Math:
 		if (tmpResult.m_overlapDistance > nearestResult.m_overlapDistance)
 		{
 			nearestResult = tmpResult;
+			nearestNodeIndex = index;   // どのノードに当たったか
 		}
 	}
 
@@ -827,6 +899,8 @@ bool KdModelCollision::Intersects(const KdCollider::RayInfo& target, const Math:
 
 		// 最も近くで当たった面の法線が使用される
 		pRes->m_hitNDir = nearestResult.m_hitNDir;
+
+		pRes->m_hitNodeIndex = nearestNodeIndex;
 	}
 
 	return isHit;

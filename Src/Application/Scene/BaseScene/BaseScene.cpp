@@ -1,4 +1,5 @@
 ﻿#include "BaseScene.h"
+#include "../../Util/HjProfiler.h"
 #include "../../Const/CullingConst.h"
 
 void BaseScene::PreUpdate()
@@ -34,8 +35,12 @@ void BaseScene::Update()
 	Event();
 
 	// KdGameObjectを継承した全てのオブジェクトの更新 (ポリモーフィズム)
+	// 止めている間は、動き続けると名乗ったものだけ回す。
+	// 車や採点を止めても、メニューや通知が動かないと操作できないため。
+	const bool frozen = IsFrozen();
 	for (auto& obj : m_objList)
 	{
+		if (frozen && !obj->UpdatesWhileFrozen()) { continue; }
 		obj->Update();
 	}
 }
@@ -58,6 +63,8 @@ void BaseScene::PreDraw()
 
 void BaseScene::Draw()
 {
+	HjScopedTimer _t(U8("3D描画"));
+
 	// 視錐台カリング用。画面に映らないオブジェクトは色を描く各パスで飛ばす。
 	// ただし影の生成パスには使わない。画面外の物も画面内へ影を落とすため、
 	// カメラの視錐台で弾くと影だけが消えて不自然になる。
@@ -159,6 +166,8 @@ void BaseScene::Draw()
 
 void BaseScene::DrawSprite()
 {
+	HjScopedTimer _t(U8("UI描画"));
+
 	// ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== ===== =====
 	// 2Dの描画はこの間で行う
 	KdShaderManager::Instance().m_spriteShader.Begin();
@@ -170,12 +179,25 @@ void BaseScene::DrawSprite()
 	}
 	KdShaderManager::Instance().m_spriteShader.End();
 
-	// 文字流体化(ドリフト演出)：スプライトEndの後にバックバッファへ合成＝最前面に出す。
+	// 文字流体化(ドリフト演出)：スプライトEndの後にバックバッファへ合成する。
 	// ゲーム中のスコア演出なので、それを使うシーンだけで描く(タイトル等には出さない)。
 	if (UsesFluidText())
 	{
 		KdShaderManager::Instance().m_postProcessShader.DrawFluidText(KdFPSController::GetDt());
 	}
+
+	// 演出よりさらに手前へ描くもの(ポーズ画面など)。
+	// 文字流体化はスプライトより後に合成されるので、ポーズ画面を普通の
+	// DrawSprite で描くと判定文字がその上に残ってしまう。
+	// 「必ず被せたいUI」だけをここで最後に描く。
+	KdShaderManager::Instance().m_spriteShader.Begin();
+	{
+		for (auto& obj : m_objList)
+		{
+			obj->DrawSpriteOverlay();
+		}
+	}
+	KdShaderManager::Instance().m_spriteShader.End();
 }
 
 void BaseScene::DrawDebug()

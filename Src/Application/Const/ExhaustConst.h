@@ -42,6 +42,13 @@ namespace ExhaustConst
 	// 高いモードほど弱くする量。大きいほど丸くこもった音
 	constexpr float ModeRolloff = 0.85f;
 
+	// 最低次のモードを抑える強さ。
+	// 1/nで並べると1次(2.4mで約36Hz)が一番強くなるが、
+	// 実物の管では最低次ほど強く減衰する。そのまま鳴らすと
+	// 100〜180Hzが張り出して「ドコドコ」＝トラクターのような音になる。
+	constexpr float LowModeCut   = 0.75f;   // 0=抑えない
+	constexpr float LowModeCutHz = 260.0f;  // この周波数より下を抑える
+
 	// 共鳴音をどれだけ混ぜるか(0=素の圧力波形のまま)
 	constexpr float ResonanceMix = 0.80f;
 

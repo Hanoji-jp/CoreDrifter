@@ -1,4 +1,5 @@
 ﻿#include "Framework/KdFramework.h"
+#include "../../Application/Input/HjKeyInput.h"
 
 #include "KdWindow.h"
 
@@ -166,6 +167,51 @@ LRESULT CALLBACK KdWindow::callWindowProc(HWND hWnd, UINT message, WPARAM wParam
 // ウィンドウ関数
 LRESULT KdWindow::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	// 文字入力(IMEで確定した文字もここへ来る)。
+	//
+	// ※ImGuiへ渡す前に拾うこと。
+	//   ImGuiのハンドラはWM_CHARを処理して true を返すので、
+	//   後ろに置くと下のswitchまで到達せず、一切入力できない。
+	if (message == WM_CHAR)
+	{
+		// 非Unicodeウィンドウでは、ここへ来るのは1バイト文字だけ。
+		// 日本語などの確定文字は WM_IME_CHAR で届く。
+		HjKeyInput::Instance().PushChar(static_cast<wchar_t>(wParam));
+	}
+	else if (message == WM_IME_CHAR)
+	{
+		// このプロジェクトの Release 構成は MultiByte(非Unicode)なので、
+		// IMEで確定した日本語・中国語はこのメッセージで届く。
+		// wParam はその文字コード。2バイト文字は上位/下位が入れ替わって
+		// 渡されるため、並べ直してから変換する。
+		WPARAM code = wParam;
+		if (::IsDBCSLeadByte(HIBYTE(code)))
+		{
+			code = static_cast<WPARAM>(MAKEWORD(HIBYTE(code), LOBYTE(code)));
+		}
+
+		wchar_t wch = 0;
+		if (::MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED,
+		                          reinterpret_cast<const char*>(&code), 2, &wch, 1) > 0)
+		{
+			HjKeyInput::Instance().PushChar(wch);
+		}
+	}
+
+	// IMEの変換中かどうかを入力側へ知らせる。
+	// 変換中のENTER/ESCは変換の操作であって、画面の決定・キャンセルではない。
+	if (message == WM_IME_STARTCOMPOSITION)
+	{
+		HjKeyInput::Instance().SetImeComposing(true);
+	}
+	else if (message == WM_IME_ENDCOMPOSITION)
+	{
+		HjKeyInput::Instance().SetImeComposing(false);
+		// 変換を確定したENTERが、次のフレームで画面の決定として
+		// 拾われないよう消化しておく
+		HjKeyInput::Instance().ConsumeAll();
+	}
+
 	// ImGuiにイベント通知
 	if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam)) {
 		return true;

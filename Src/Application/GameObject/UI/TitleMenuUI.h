@@ -20,7 +20,25 @@ public:
 	// マウスクリックで決定されたか(1回読むとクリアされる)。TitleSceneが遷移に使う。
 	bool ConsumeActivated() { bool a = m_activated; m_activated = false; return a; }
 
+	// 右上のバッジが押されたか(1回読むとクリアされる)。
+	// 走行記録の詳細を開くのに使う。
+	bool ConsumeBadgeClicked() { bool a = m_badgeClicked; m_badgeClicked = false; return a; }
+
+	// 名前を編集中か。編集中はENTERを決定として使わせない
+	// (名前の確定に使うので、そのまま画面遷移してしまう)
+	bool IsNameEditing() const { return m_nameEditing; }
+
 private:
+	// 上部の銘板とバッジ。実データを出し、押せるものは押した反応を返す
+	void DrawPlate();   // 左上 BUILT TO SLIDE. / バージョン
+	void DrawBadge();   // 右上 名前 / レベル
+	// 名前の編集中に文字キーを拾う(英数字・記号のみ)
+	void UpdateNameEdit();
+	// UTF-8 の文字数(バイト数ではない)。上限の判定に使う
+	static int CountUtf8Chars(const std::string& s);
+	// 名前入力のダイアログ(画面中央)。編集中だけ最前面に描く
+	void DrawNameDialog();
+
 	// デザイン座標(1536x864, 左上原点)→画面座標(中心原点)へ変換
 	float MapX(float dx) const { return dx * UIConst::Scale - UIConst::HalfW; }
 	float MapY(float dy) const { return UIConst::HalfH - dy * UIConst::Scale; }
@@ -65,4 +83,12 @@ private:
 	bool m_prevUp    = false;  // 上キーの前フレーム状態
 	bool m_prevDn    = false;  // 下キーの前フレーム状態
 	bool m_activated = false;  // マウスクリックで決定された
+	// 走行記録を開いている間だけ真。レベル側を押すたびに入れ替わる
+	bool m_statsOpen    = false;
+	bool m_badgeClicked = false;
+
+	// 名前の編集中か。名前側を押すと始まり、ENTERで確定・ESCで取り消す。
+	// 編集中は入力を独占するので、メニューの上下移動は止める。
+	bool        m_nameEditing = false;
+	std::string m_nameBuf;
 };

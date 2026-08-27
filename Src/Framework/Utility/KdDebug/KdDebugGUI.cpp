@@ -54,6 +54,10 @@ void KdDebugGUI::GuiProcess()
 	// 初期化されてないなら動作させない
 	if (!m_uqLog) return;
 
+	// 「Game」ウィンドウ用に、UIまで描き終えたバックバッファを複製する。
+	// この時点(ImGuiが何か描く前)のバックバッファが、UI込みの最終画そのもの。
+	if (m_gameViewport) { CaptureGameView(); }
+
 	//===========================================================
 	// ImGui開始
 	//===========================================================
@@ -77,7 +81,10 @@ void KdDebugGUI::GuiProcess()
 
 	ImGui::NewFrame();
 
-	// 画面全体を覆う DockSpace を作成（エディタ画面ON時のみ。OFFは全ImGui非表示）
+	// 画面全体を覆う DockSpace を作成（エディタ表示中のみ）。
+	// DockSpace が無いとウィンドウ同士を結合する受け皿が存在しないので、
+	// 調整パネルを出すときは必ずこれも作る。
+	// 中央は透過なので、ゲーム画面の見た目は変わらない。
 	if (m_gameViewport)
 	{
 		const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -105,8 +112,10 @@ void KdDebugGUI::GuiProcess()
 		// 既定で中央ドックスペースに入れる（別ウィンドウ化して見失わないように）
 		ImGui::SetNextWindowDockID(ImGui::GetID("##MainDockSpace"), ImGuiCond_FirstUseEver);
 		ImGui::Begin("Game");
-		const auto& sceneRT = KdShaderManager::Instance().m_postProcessShader.GetSceneRT();
-		if (sceneRT && sceneRT->WorkSRView())
+		// UI込みの複製(m_gameCapture)を表示する。ポストプロセス直後のシーンRTだと、
+		// その後に描くHUD/UIが映らない。
+		const auto& gameTex = m_gameCapture;
+		if (gameTex && gameTex->WorkSRView())
 		{
 			ImVec2 avail = ImGui::GetContentRegionAvail();
 			const float texAspect = 16.0f / 9.0f;   // 16:9固定でレターボックス
@@ -114,7 +123,7 @@ void KdDebugGUI::GuiProcess()
 			if (h > avail.y) { h = avail.y; w = avail.y * texAspect; }
 			const ImVec2 cur = ImGui::GetCursorPos();
 			ImGui::SetCursorPos(ImVec2(cur.x + (avail.x - w) * 0.5f, cur.y + (avail.y - h) * 0.5f));
-			ImGui::Image((ImTextureID)(intptr_t)sceneRT->WorkSRView(), ImVec2(w, h));
+			ImGui::Image((ImTextureID)(intptr_t)gameTex->WorkSRView(), ImVec2(w, h));
 
 			// 描画したゲーム画像の矩形内マウス座標を正規化して保持（シーン側のピッキングに使う）
 			const ImVec2 rmin = ImGui::GetItemRectMin();
@@ -212,6 +221,50 @@ void KdDebugGUI::ClearLog()
 	if (!m_uqLog) return;
 
 	m_uqLog->Clear();
+}
+
+//----------------------------------------------------------
+// 「Game」ウィンドウ用にバックバッファを複製する。
+//
+// ポストプロセス直後のシーンRTを直接貼っていると、その後に描くHUD/UIが
+// 映らない(spriteShaderはポストプロセスの後、バックバッファへ直接描くため)。
+// UIまで含めた最終画像を見せるには、UIを描き終えた直後のバックバッファ
+// そのものを複製するしかない。
+//----------------------------------------------------------
+void KdDebugGUI::CaptureGameView()
+{
+	const auto& bb = KdDirect3D::Instance().GetBackBuffer();
+	if (!bb || !bb->WorkResource()) { return; }
+
+	D3D11_TEXTURE2D_DESC srcDesc = {};
+	bb->WorkResource()->GetDesc(&srcDesc);
+
+	// 初回、またはバックバッファの解像度が変わった(ウィンドウリサイズ等)ときだけ作り直す
+	if (!m_gameCapture || !m_gameCapture->WorkResource() ||
+	    m_gameCapture->GetInfo().Width  != srcDesc.Width ||
+	    m_gameCapture->GetInfo().Height != srcDesc.Height)
+	{
+		// ※バックバッファの記述子をそのまま流用する。
+		//   CopyResource は「フォーマット・サイズ・ミップ数・サンプル数が
+		//   完全一致」を要求するため、自前の設定で作ると条件を外して落ちる。
+		//   ImGui へ渡すのでシェーダーリソースとしても使えるようにする。
+		D3D11_TEXTURE2D_DESC desc = srcDesc;
+		desc.Usage          = D3D11_USAGE_DEFAULT;
+		desc.BindFlags      = D3D11_BIND_SHADER_RESOURCE;
+		desc.CPUAccessFlags = 0;
+		desc.MiscFlags      = 0;
+
+		m_gameCapture = std::make_shared<KdTexture>();
+		if (!m_gameCapture->Create(desc, nullptr))
+		{
+			m_gameCapture = nullptr;
+			return;
+		}
+	}
+
+	// GPU内コピー。条件は上で揃えてある
+	KdDirect3D::Instance().WorkDevContext()->CopyResource(
+		m_gameCapture->WorkResource(), bb->WorkResource());
 }
 
 void KdDebugGUI::GuiRelease()

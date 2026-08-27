@@ -16,6 +16,15 @@
 #pragma comment(lib,"winmm.lib")
 
 #define NOMINMAX
+
+// ネットワーク(マルチプレイ)で winsock2 を使う。
+// windows.h は既定で古い winsock.h(v1) を巻き込むので、後から winsock2.h を
+// 入れると同じ名前が二重定義されてビルドが通らない。
+// winsock2.h が先に入ると windows.h 側は winsock.h を飛ばすので、順序で回避する。
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
 #include <windows.h>
 #include <stdio.h>
 

@@ -83,8 +83,8 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;..\Library\steamworks_sdk\public;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;HJ_USE_STEAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -110,7 +110,8 @@
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>steam_api64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;..\Library\steamworks_sdk\redistributable_bin\win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderType>
@@ -129,8 +130,8 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;..\Library\steamworks_sdk\public;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;HJ_USE_STEAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
@@ -155,7 +156,8 @@
       <DataExecutionPrevention>
       </DataExecutionPrevention>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>steam_api64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;..\Library\steamworks_sdk\redistributable_bin\win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderType>
@@ -177,8 +179,8 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;..\Library\steamworks_sdk\public;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;HJ_USE_STEAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -200,7 +202,8 @@
       <DataExecutionPrevention>
       </DataExecutionPrevention>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>steam_api64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;..\Library\steamworks_sdk\redistributable_bin\win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderType>
@@ -221,8 +224,8 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
-      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>.\;src;..\Library;..\Library\DirectXTK\Inc;..\Library\DirectXTex\DirectXTex;..\Library\tinygltf;..\Library\imgui;..\Library\Effekseer\Inc;..\Library\steamworks_sdk\public;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;HJ_USE_STEAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -243,7 +246,8 @@
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
-      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>steam_api64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\Library\DirectXTK\Lib\$(Platform)\$(Configuration)\Audio;..\Library\DirectXTK\Lib\$(Platform)\$(Configuration);..\Library\DirectXTex\Lib\$(Platform)\$(Configuration);..\Library\Effekseer\Lib;..\Library\steamworks_sdk\redistributable_bin\win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderType>
@@ -283,6 +287,8 @@
     <ClInclude Include="Src\Application\GameObject\UI\UIConst.h" />
     <ClInclude Include="Src\Application\GameObject\UI\TitleMenuUI.h" />
     <ClInclude Include="Src\Application\GameObject\UI\HjUI.h" />
+    <ClInclude Include="Src\Application\Const\CursorConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\HjCursor.h" />
     <ClInclude Include="Src\Application\GameObject\UI\ElementsUI.h" />
     <ClInclude Include="Src\Application\GameObject\UI\SettingsUI.h" />
     <ClInclude Include="Src\Application\Scene\SettingsScene\SettingsScene.h" />
@@ -308,6 +314,45 @@
     <ClInclude Include="Src\Application\Audio\HjEngineSim.h" />
     <ClInclude Include="Src\Application\Audio\HjEngineSampler.h" />
     <ClInclude Include="Src\Application\Audio\HjExhaustResonator.h" />
+    <ClInclude Include="Src\Application\Audio\HjTireAudio.h" />
+    <ClInclude Include="Src\Application\Audio\HjAudioSpace.h" />
+    <ClInclude Include="Src\Application\Const\TireAudioConst.h" />
+    <ClInclude Include="Src\Application\Const\NetConst.h" />
+    <ClInclude Include="Src\Application\Const\NamePlateConst.h" />
+    <ClInclude Include="Src\Application\Const\FogConst.h" />
+    <ClInclude Include="Src\Application\Network\HjNetTransport.h" />
+    <ClInclude Include="Src\Application\Network\HjUdpTransport.h" />
+    <ClInclude Include="Src\Application\Network\HjSteamTransport.h" />
+    <ClInclude Include="Src\Application\Network\HjSteamLobby.h" />
+    <ClInclude Include="Src\Application\Network\HjNetProtocol.h" />
+    <ClInclude Include="Src\Application\Network\HjNetSession.h" />
+    <ClInclude Include="Src\Application\GameObject\Car\RemoteCar.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\RoomUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\RoomConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\RunHudUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\RunHudConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\HjUiVisibility.h" />
+    <ClInclude Include="Src\Application\Editor\HjHierarchy.h" />
+    <ClInclude Include="Src\Application\Input\HjKeyInput.h" />
+    <ClInclude Include="Src\Application\GameObject\Score\HjPlayerProfile.h" />
+    <ClInclude Include="Src\Application\Const\PlayerConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\MultiConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\MultiUIBase.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\LobbyUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\MatchmakingUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\ResultsUI.h" />
+    <ClInclude Include="Src\Application\GameObject\Score\HjRunResult.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\HjToastQueue.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\ToastConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\ToastUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\CountdownConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\CountdownUI.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\PauseConst.h" />
+    <ClInclude Include="Src\Application\GameObject\UI\PauseUI.h" />
+    <ClInclude Include="Src\Application\Scene\LobbyScene\LobbyScene.h" />
+    <ClInclude Include="Src\Application\Scene\MatchmakingScene\MatchmakingScene.h" />
+    <ClInclude Include="Src\Application\Scene\ResultsScene\ResultsScene.h" />
+    <ClInclude Include="Src\Application\Scene\RoomScene\RoomScene.h" />
     <ClInclude Include="Src\Application\Const\ExhaustConst.h" />
     <ClInclude Include="Src\Application\Const\EngineSamplerConst.h" />
     <ClInclude Include="Src\Application\Const\EngineSimConst.h" />
@@ -317,6 +362,8 @@
     <ClInclude Include="Src\Application\Const\DriftScoreConst.h" />
     <ClInclude Include="Src\Application\GameObject\Camera\ChaseCamera.h" />
     <ClInclude Include="Src\Application\Util\AssetVault.h" />
+    <ClInclude Include="Src\Application\Util\HjPostFxSettings.h" />
+    <ClInclude Include="Src\Application\Util\HjProfiler.h" />
     <ClInclude Include="Src\Application\Util\AssetCrypt.h" />
     <ClInclude Include="Src\Application\Util\BuildConfig.h" />
     <ClInclude Include="Src\resource.h" />
@@ -383,6 +430,7 @@
     <ClCompile Include="Src\Application\GameObject\Car\CarBase.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\TitleMenuUI.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\HjUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\HjCursor.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\ElementsUI.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\SettingsUI.cpp" />
     <ClCompile Include="Src\Application\Scene\SettingsScene\SettingsScene.cpp" />
@@ -397,6 +445,31 @@
     <ClCompile Include="Src\Application\Audio\HjEngineSim.cpp" />
     <ClCompile Include="Src\Application\Audio\HjEngineSampler.cpp" />
     <ClCompile Include="Src\Application\Audio\HjExhaustResonator.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjTireAudio.cpp" />
+    <ClCompile Include="Src\Application\Audio\HjAudioSpace.cpp" />
+    <ClCompile Include="Src\Application\Network\HjUdpTransport.cpp" />
+    <ClCompile Include="Src\Application\Network\HjSteamTransport.cpp" />
+    <ClCompile Include="Src\Application\Network\HjSteamLobby.cpp" />
+    <ClCompile Include="Src\Application\Network\HjNetSession.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Car\RemoteCar.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\RoomUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\RunHudUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\HjUiVisibility.cpp" />
+    <ClCompile Include="Src\Application\Editor\HjHierarchy.cpp" />
+    <ClCompile Include="Src\Application\Input\HjKeyInput.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Score\HjPlayerProfile.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\MultiUIBase.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\LobbyUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\MatchmakingUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\ResultsUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\HjToastQueue.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\ToastUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\CountdownUI.cpp" />
+    <ClCompile Include="Src\Application\GameObject\UI\PauseUI.cpp" />
+    <ClCompile Include="Src\Application\Scene\LobbyScene\LobbyScene.cpp" />
+    <ClCompile Include="Src\Application\Scene\MatchmakingScene\MatchmakingScene.cpp" />
+    <ClCompile Include="Src\Application\Scene\ResultsScene\ResultsScene.cpp" />
+    <ClCompile Include="Src\Application\Scene\RoomScene\RoomScene.cpp" />
     <ClCompile Include="Src\Application\GameObject\Score\DriftScore.cpp" />
     <ClCompile Include="Src\Application\Input\HjGamePad.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\Silvia.cpp" />
@@ -408,6 +481,8 @@
     <ClCompile Include="Src\Application\GameObject\Camera\TPSCamera\TPSCamera.cpp" />
     <ClCompile Include="Src\Application\main.cpp" />
     <ClCompile Include="Src\Application\Util\AssetVault.cpp" />
+    <ClCompile Include="Src\Application\Util\HjPostFxSettings.cpp" />
+    <ClCompile Include="Src\Application\Util\HjProfiler.cpp" />
     <ClCompile Include="Src\Application\Editor\HjEditorController.cpp" />
     <ClCompile Include="Src\Application\Editor\HjEditorHost.cpp" />
     <ClCompile Include="Src\Application\GameObject\Camera\HjEditorCamera.cpp" />

@@ -6,7 +6,8 @@
 #include "../Effect/DriftNeon.h"         // タイヤ周りのネオン線画(Unbound風)
 #include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
-#include "../../Audio/HjEngineAudio.h"   // エンジン音(点火グレインの合成)
+#include "../../Audio/HjEngineAudio.h"   // エンジン音
+#include "../../Audio/HjTireAudio.h"     // タイヤのスキール音・ブレーキ鳴き
 
 //==========================================================
 // CarBase
@@ -35,7 +36,6 @@ public:
 	// 広がっており、車が画面外に出た瞬間にそれらが丸ごと消えてしまう。
 	// (これらは各エフェクト側で粒・区間ごとにカリングしている)
 	bool CheckInScreen(const DirectX::BoundingFrustum&) const override { return true; }
-	void DrawSprite() override;   // HUD(スピード/RPM/ステア)
 	void DrawDebug()  override;   // 当たり判定の可視化(F1でトグル)
 
 	// 追従カメラ等から参照
@@ -43,6 +43,55 @@ public:
 	float         GetYaw()     const          { return m_yaw; }
 	Math::Vector3 GetForward() const          { return Math::Vector3(sinf(m_yaw), 0.0f, cosf(m_yaw)); }
 	Math::Vector3 GetVel()     const          { return m_vel; }   // ドリフトカメラ用(進行方向)
+
+	// HUDが読む値。計算はここで完結させて、表示側は並べるだけにする
+	float GetSpeedKmh() const { return m_vel.Length() * CarConst::HudMsToKmh; }
+	int   GetGear()     const { return m_reverse ? 0 : m_gear; }   // 0=リバース
+	float GetRpm()      const { return m_engineRPM; }
+	// 回転数の割合(0〜1)。回転計の目盛りを光らせる量に使う
+	float GetRpmRatio() const
+	{
+		return std::clamp(m_engineRPM / CarConst::MaxRPM, 0.0f, 1.0f);
+	}
+	// 横滑り角(度)。進行方向と車体前方のなす角＝ドリフトの深さ。
+	// 符号付き：正=右へ滑っている / 負=左へ滑っている。
+	// どちらへ滑っているかは切り返しの瞬間に一番知りたい情報なので、
+	// 絶対値だけを返すと表示側で作り直せなくなる。
+	float GetDriftAngleDegSigned() const
+	{
+		const Math::Vector3 fwd(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		const Math::Vector3 rgt(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+		const float vLong = m_vel.Dot(fwd);
+		const float vLat  = m_vel.Dot(rgt);
+		return atan2f(vLat, fabsf(vLong) + 1.0f) * 57.29578f;
+	}
+	float GetDriftAngleDeg() const { return fabsf(GetDriftAngleDegSigned()); }
+
+	//===== 通信で相手へ送る値 =====
+	// 前輪の切れ角(rad)。相手の画面でもタイヤが同じ向きを向くように送る
+	float GetSteerAngle() const { return m_steer; }
+	// サイドブレーキ中か。相手側で後輪の転がりを止めるのに使う
+	bool  IsHandbrake()   const { return m_handbrakeNow; }
+
+	// 車体の傾き(rad)。地形に沿った傾きと、サスによる傾きは別物なので分けて返す。
+	// 受け取り側では作れない値なので、そのまま送る
+	// 後輪/前輪の滑り量(0〜1)。煙とタイヤ痕の量を決めている値そのもの。
+	// 通信で相手へ送り、相手の画面でも同じ量の煙と痕が出るようにする
+	float GetSlipRear01()  const { return m_slipRear01; }
+	float GetSlipFront01() const { return m_slipFront01; }
+	bool  IsOnGround()     const { return m_onGround; }
+
+	// 直前に壁として当たった地形ノードの番号。-1=当たっていない。
+	//
+	// 地形の当たり判定を詰めるときに使う。名前が自動出力で
+	// 種類が読み取れないモデルでも、「今ぶつかっている物」が分かれば
+	// その場で名指しで外せる。
+	int   GetLastWallNode() const { return m_lastWallNode; }
+
+	float GetTerrainPitch() const { return m_terrainPitch; }
+	float GetTerrainRoll()  const { return m_terrainRoll; }
+	float GetBodyPitch()    const { return m_pitchAngle; }
+	float GetBodyRoll()     const { return m_rollAngle; }
 
 	// 当たり判定対象(地形など)を登録する。車はこれらへレイ/球判定を飛ばす。
 	void AddCollisionTarget(const std::weak_ptr<KdGameObject>& obj) { m_wpHitList.push_back(obj); }
@@ -55,6 +104,17 @@ public:
 
 	// 調整パネルを外部(シーン)から描画するための公開窓口
 	void DrawImGui() { DrawTuningImGui(); }
+	// Hierarchy に並べる名前(車種ごとに Silvia などを設定する)
+	const std::string& GetTuningName() const { return m_tuningName; }
+
+	// 見分け用の色を反映する(アウトラインと煙)。
+	// マルチで誰の車か一目で分かるようにするためのもの。
+	// 車種ごとの色ではなくプレイヤーごとの色なので、外から与える。
+	// 自分の車にもシーンから設定するので公開しておく
+	void ApplyPlayerColor(const Math::Vector3& color);
+	// 見分け用の色をやめて、調整パネルで設定した色へ戻す。
+	// 1人で走っているときまで見分け色にすると、車種ごとに詰めた色が消える
+	void ClearPlayerColor();
 
 	// ブースト(ニトロ)演出を発動：車体に一瞬だけアクセントカラーが乗り、
 	// 同時にネオンの線画が全方向へ弾ける。将来ニトロ機能から呼ぶ。
@@ -83,6 +143,43 @@ protected:
 	// サスペンションのロール/ピッチ。見た目だけで挙動には影響しない。
 	void UpdateSuspensionVisual(float dt);
 
+	// 通信で受け取った状態を、そのまま見た目へ反映する。
+	//
+	// 他人の車は自分のPCで物理を回さない。回してしまうと、
+	// 同じ操作をしていないので必ず本人の画面とずれていくうえ、
+	// 届いた位置で毎回引き戻すことになって car が震える。
+	// 位置と向きは「答え」として受け取り、それを描くだけにする。
+	//
+	// 運動状態(m_yawRate など)は書き換えない。物理を進めないので使われず、
+	// 中途半端に入れると「動いているように見える値」が残って読み違える。
+	void ApplyVisualState(const Math::Vector3& pos, float yaw, const Math::Vector3& vel,
+	                      float steer, float spinFront, float spinRear);
+
+	// 通信で受け取った傾きを反映する。
+	// 位置や向きとは別にしてあるのは、こちらは「見た目だけ」で、
+	// 当たり判定にも進行方向にも関わらないため。
+	void ApplyVisualTilt(float terrainPitch, float terrainRoll,
+	                     float bodyPitch, float bodyRoll);
+
+	// タイヤ痕と煙を出す。
+	//
+	// 入力は「どれだけ滑っているか」だけ。物理から出しても通信から
+	// 受け取っても同じ絵になるので、他人の車でもそのまま使える。
+	//
+	// ※自分の車は今のところ UpdateMotionFeedback の中で同じことをしている。
+	//   あちらは物理の途中の値を大量に使っており、切り出すと挙動側に
+	//   触ることになるので分けたままにしてある(まとめるのは今後の課題)。
+	void EmitTireFx(float dt, float speed, float slipRear01, float slipFront01,
+	                bool onGround);
+
+	// 煙の粒の寿命と移動を進める。放出とは別なので分けてある
+	void UpdateEffectParticles(float dt);
+
+	// 音を止める。
+	// 他人の車は音を鳴らさない(台数だけエンジンが増えると何を聞いているのか
+	// 分からなくなる)。音源そのものは基底が持っているので、入口だけ開ける。
+	void StopAudio();
+
 	// エンジン・ギア・クラッチ。結果は m_engineRPM / m_gear / m_clutch /
 	// m_driveSpeed / m_driveAccel に入る。
 	void UpdateDriveline(float dt, float throttle, bool handbrake,
@@ -100,7 +197,7 @@ protected:
 
 	// 物理の結果を見た目へ反映する。タイヤの回転と、走行状態に応じた
 	// エフェクト(煙・ネオン・タイヤ痕)の放出。挙動には影響しない。
-	void UpdateMotionFeedback(float dt, bool handbrake);
+	void UpdateMotionFeedback(float dt, bool handbrake, float throttle);
 
 	void DrawTuningImGui();
 
@@ -114,7 +211,7 @@ protected:
 	// モデル
 	std::string m_bodyPath  = "Asset/Data/Box.gltf";
 	std::string m_wheelPath = "Asset/Data/Box.gltf";
-	std::string m_tuningName = "Car Tuning";   // 調整パネルのタイトル
+	std::string m_tuningName = "Car Tuning";   // Hierarchy に並べるときの名前
 	std::string m_saveKey    = "Car";          // 保存ファイルのキー(車種ごと)
 
 	// 性能ステータス
@@ -176,17 +273,31 @@ protected:
 	float m_accelSmooth = CarConst::SuspAccelSmooth;
 
 	//===== 運転アシスト =====
-	// CarXにも同種の設定はあるが、あちらは「切っても物理が成立する」前提で
-	// プレイヤーが自由にON/OFFできる。こちらも同じように個別に切れるようにする。
-	// すべて切ると、タイヤと荷重だけで走る素の挙動になる。
+	// どれも「タイヤ力を経由せずに車体を動かす」処理。
+	// CarXもステアリングアシストや安定制御を既定でONにしているので、
+	// こちらも既定はONにしておく。個別に切って比較できる。
+	//
+	// ただしアシストは「プレイヤーがやろうとしていること」を邪魔してはいけない。
+	// 事故のスピンは助け、意図した回転(ドーナツ・360度)は邪魔しない、
+	// という区別が要る。区別が無いと、狙って回そうとしても止められる。
 	bool  m_transitionEnabled = true;   // 振り返しのヨー後押し(物理を経由しない外力)
 	bool  m_bodyAlignEnabled  = true;   // アクセルオフで車体を進行方向へ回頭
 	bool  m_scrubDragEnabled  = true;   // 横滑り速度の直接減衰(タイヤ力とは別口)
 
-	// オートカウンター(CarX風ステアリングアシスト)
+	// オートカウンター(ステアリングアシスト)
 	bool  m_counterSteerEnabled = true;
+	// アクセルを抜いたときにオートカウンターを抜くか。
+	//
+	// 抜くと、舵に触っていないのに前輪の角度が変わる。自分が握っている舵が
+	// 意図せず動くのが、手ごたえとして一番読めなくなる原因になる。
+	// そもそもアクセルを抜けば荷重が前へ移ってリアがグリップを取り戻すので、
+	// 挙動の変化は物理側だけで足りている。舵まで動かすと二重に効く。
+	bool  m_liftCounterEnabled = false;
 	float m_counterAssist  = CarConst::CounterAssist;   // 横滑り角を打ち消す割合(0-1+)
 	float m_counterMinSpeed = CarConst::CounterMinSpeed; // これ未満の速度では効かせない
+	// 今フレームのカウンター舵角。横滑り角の震えをそのまま舵へ出さないよう、
+	// 動ける量に上限を付けて追わせる(前フレームの値が要るので保持する)
+	float m_autoCounter = 0.0f;
 
 	// スピン防止アシスト(スタビリティコントロール)
 	bool  m_spinAssistEnabled = true;
@@ -228,6 +339,14 @@ protected:
 	bool          m_outlineEnabled = true;
 	float         m_outlineWidth   = 0.04f;
 	Math::Vector3 m_outlineColor    = Math::Vector3(0.0f, 0.0f, 0.0f); // 黒
+	// 調整パネルで設定した本来の色。
+	// マルチの見分け色を乗せる前に控えておき、抜けたときに戻す。
+	// 控えておかないと、一度でも見分け色を乗せた時点で
+	// 保存した色が失われる
+	Math::Vector3 m_tuneOutlineColor = Math::Vector3(0.0f, 0.0f, 0.0f);
+	Math::Vector3 m_tuneSmokeColor   = Math::Vector3(1.0f, 1.0f, 1.0f);
+	Math::Vector3 m_tuneSmokeColorB  = Math::Vector3(1.0f, 1.0f, 1.0f);
+	bool          m_tuneColorSaved   = false;
 
 	// ドリフトスモークの色味(白=通常。NFS Unbound風のカラー煙にもできる)
 	// 発生源から離れるほど 色A → 色B へ滑らかにグラデーションする
@@ -262,6 +381,17 @@ private:
 	float         m_yawRate = 0.0f;   // ヨー角速度(rad/s)
 	float         m_mzFilt  = 0.0f;   // 平滑化したヨーモーメント(タイヤリラクゼーション)
 	float         m_steer       = 0.0f;
+	// 今フレームのサイドブレーキ。操作の読み取りは局所変数なので、
+	// 外へ伝えるために覚えておく(通信で相手へ送る)
+	bool          m_handbrakeNow = false;
+	// 後退へ入るまでSを踏み続けている時間(秒)。
+	// 一瞬の誤判定でギアが切り替わらないようにするためのもの
+	float         m_reverseHold  = 0.0f;
+	// 直前に壁として当たった地形ノードの番号(調整用)
+	int           m_lastWallNode = -1;
+	// 今フレームの滑り量。演出の量を決めている値で、これも相手へ送る
+	float         m_slipRear01   = 0.0f;
+	float         m_slipFront01  = 0.0f;
 	float         m_playerSteer = 0.0f;   // プレイヤー入力ぶんの舵角(平滑化)
 	float         m_hbCounterFactor = 1.0f; // サイド中カウンター倍率の平滑化(段差カクつき防止)
 	float         m_liftCounterFactor = 1.0f; // アクセルオフ時カウンター減衰の平滑化(急スリップ防止)
@@ -307,6 +437,8 @@ private:
 
 	// エンジン音。RPMとアクセル開度から波形を組み立てて鳴らす
 	HjEngineAudio m_engineAudio;
+	// タイヤのスキール音とブレーキ鳴き。滑り量と制動力から合成する
+	HjTireAudio   m_tireAudio;
 
 	// マニュアルシフトのキーボード用エッジ検出(押した瞬間だけ1段送る)
 	bool          m_prevKeyShiftUp   = false;

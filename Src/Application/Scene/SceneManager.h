@@ -14,6 +14,10 @@ public :
 		Settings,
 		Elements,
 		PlayMode,
+		Room,      // マルチプレイのルーム
+		Lobby,       // 部屋の一覧
+		Matchmaking, // 相手を探している
+		Results,     // 走り終えた後の成績
 	};
 
 	void PreUpdate();
@@ -57,7 +61,11 @@ private :
 	std::shared_ptr<BaseScene> m_currentScene = nullptr;
 
 	// 現在のシーンの種類を保持している変数
-	SceneType m_currentSceneType = SceneType::Game;
+	// 起動時のシーン。
+	// 開発中は走行画面から始めたほうが早いが、製品としては
+	// タイトルから始まるのが当たり前なので、こちらを既定にする。
+	// 走行だけを繰り返し試したいときは、ここを Game に戻す。
+	SceneType m_currentSceneType = SceneType::Title;
 	
 	// 次のシーンの種類を保持している変数
 	SceneType m_nextSceneType = m_currentSceneType;

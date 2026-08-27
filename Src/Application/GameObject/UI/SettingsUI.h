@@ -17,7 +17,6 @@ public:
 private:
 	int  m_tab = 0;   // 選択中タブ
 	int  m_row = 0;   // 選択中の設定行
-	bool m_prevUp = false, m_prevDn = false, m_prevL = false, m_prevR = false;
 
 	// 設定値(トグル/選択肢インデックス)
 	bool m_toggles[5] = { true, true, true, true, true };  // TRACTION/STABILITY/ABS/STEERING/REWIND

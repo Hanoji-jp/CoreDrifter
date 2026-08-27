@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Editor object manipulation constants (mouse picking / drag / spawn / copy).
 namespace EditorPickConst
 {

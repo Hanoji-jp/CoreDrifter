@@ -40,6 +40,7 @@ public:
 	float m_bandwidthRise = ExhaustConst::ModeBandwidthRise;
 	float m_rolloff      = ExhaustConst::ModeRolloff;
 	float m_detune       = ExhaustConst::ModeDetune;
+	float m_lowCut       = ExhaustConst::LowModeCut;   // 最低次のモードを抑える強さ
 	float m_mix          = ExhaustConst::ResonanceMix;
 	float m_trim         = ExhaustConst::OutputTrim;
 

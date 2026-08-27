@@ -1,4 +1,6 @@
 ﻿#include "TitleMenuUI.h"
+#include "../Score/HjPlayerProfile.h"
+#include "../../Input/HjKeyInput.h"
 #include "HjUI.h"   // マウス入力(BeginInput/Hover/Clicked)
 
 namespace
@@ -23,15 +25,19 @@ void TitleMenuUI::Init()
 
 void TitleMenuUI::Update()
 {
+	// 名前の編集中はキー入力を独占する。
+	// そうしないと、名前に打った文字でメニューが動いてしまう。
+	if (m_nameEditing)
+	{
+		UpdateNameEdit();
+		HjUI::BeginInput();   // マウス位置は更新しておく(バッジのホバー判定に要る)
+		return;
+	}
+
 	// 上下キーで選択移動(押した瞬間だけ)
-	const bool up = (GetAsyncKeyState(VK_UP)   & 0x8000) != 0 || (GetAsyncKeyState('W') & 0x8000) != 0;
-	const bool dn = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0 || (GetAsyncKeyState('S') & 0x8000) != 0;
-
-	if (up && !m_prevUp) { m_sel = (m_sel + UIConst::MenuCount - 1) % UIConst::MenuCount; }
-	if (dn && !m_prevDn) { m_sel = (m_sel + 1) % UIConst::MenuCount; }
-
-	m_prevUp = up;
-	m_prevDn = dn;
+	auto& key = HjKeyInput::Instance();
+	if (key.Pressed(HjKeyInput::Key::Up))   { m_sel = (m_sel + UIConst::MenuCount - 1) % UIConst::MenuCount; }
+	if (key.Pressed(HjKeyInput::Key::Down)) { m_sel = (m_sel + 1) % UIConst::MenuCount; }
 
 	// マウス：行にホバーで選択、クリックで決定
 	HjUI::BeginInput();
@@ -347,15 +353,9 @@ void TitleMenuUI::DrawSprite()
 	// 左：◍ + スローガン
 	sp.DrawCircle(static_cast<int>(MapX(65.0f)), static_cast<int>(MapY(51.0f)), 9, &INK, false);
 	sp.DrawCircle(static_cast<int>(MapX(65.0f)), static_cast<int>(MapY(51.0f)), 3, &INK, true);
-	DrawText(FontStrip, 92.0f, 44.0f, 11.0f, "BUILT TO SLIDE.", INK);
-	DrawText(FontStrip, 92.0f, 62.0f, 11.0f, "EST. 2024", INK);
-	DrawLineD(92.0f, 84.0f, 235.0f, 84.0f, 2.0f, INK);
-	// 右：バッジ DRIVER01 / LV.23 / ///
-	DrawFrameTL(1262.0f, 40.0f, 118.0f, 34.0f, 2.0f, INK);
-	DrawText(FontSmall, 1276.0f, 49.0f, 12.0f, "DRIVER01", INK);
-	DrawRectTL(1380.0f, 40.0f, 70.0f, 34.0f, ACID, true);
-	DrawFrameTL(1380.0f, 40.0f, 70.0f, 34.0f, 2.0f, INK);
-	DrawText(FontSmall, 1394.0f, 49.0f, 12.0f, "LV.23", INK);
+	DrawPlate();
+	DrawBadge();
+	// ///(そのまま。上下フロート)
 	{
 		Math::Color slash = INK; slash.w = 0.85f;
 		const float fy = std::sin(HjUI::Time() * 1.6f) * 5.0f;   // 上下フロート
@@ -400,8 +400,8 @@ void TitleMenuUI::DrawSprite()
 
 	// ══ フッター(z3) CSS: menu下 margin-top:38 ══
 	DrawRectTL(54.0f, 673.0f, 12.0f, 12.0f, ACID, true);
-	DrawText(FontTiny, 74.0f, 672.0f, 10.0f, "Ver. 0.1.0", INK);
-	DrawText(FontTiny, 230.0f, 672.0f, 10.0f, "// WELCOME BACK, DRIVER.", SUBTXT);
+	// ※バージョンは左上へ集約した。2箇所に出すと更新漏れで食い違う。
+	DrawText(FontTiny, 74.0f, 672.0f, 10.0f, "// WELCOME BACK, DRIVER.", SUBTXT);
 
 	// ══ 縦レール(z3) 横書きを90°回転(vertical-rl)。右端・縦中央。letter-spacing .18em ══
 	DrawTextRotated(FontFoot, 1514.0f, 432.0f, "FOCUS // ADAPT // OVERCOME", INK, 0.18f * 13.0f);
@@ -469,4 +469,220 @@ void TitleMenuUI::DrawSprite()
 	}
 	// 下部の黒バー(右下)
 	DrawRectTL(960.0f, 838.0f, 576.0f, 26.0f, INK, true);
+
+	// 名前入力のダイアログ。最後に描く＝画面のどれよりも手前に出す
+	DrawNameDialog();
+}
+
+//----------------------------------------------------------
+// 左上の銘板。
+//
+// 走行記録が増えるほど内容が変わる。固定の飾りのままだと、
+// 遊んでも画面が何も変わらず「積み上がっている感じ」が出ない。
+//   走る前 … EST. 2024(創業表記のまま)
+//   走った後 … これまでの走行回数
+//----------------------------------------------------------
+void TitleMenuUI::DrawPlate()
+{
+	using namespace UIConst;
+
+	DrawText(FontStrip, 92.0f, 44.0f, 11.0f, "BUILT TO SLIDE.", INK);
+
+	// バージョン表記。走行記録は右上のバッジへ集約したので、ここは固定。
+	// 走行前後で内容が入れ替わると、この2行の役割が定まらない。
+	DrawText(FontStrip, 92.0f, 62.0f, 11.0f, GameVersion, INK);
+
+	DrawLineD(92.0f, 84.0f, 235.0f, 84.0f, 2.0f, INK);
+}
+
+//----------------------------------------------------------
+// 右上のバッジ(名前 / レベル)。
+//
+// 数字は累計スコアから求めた実データ。
+// 下辺に次のレベルまでの進み具合を細い帯で敷く。
+// 数字だけだと「あとどれくらいで上がるのか」が分からない。
+//----------------------------------------------------------
+void TitleMenuUI::DrawBadge()
+{
+	using namespace UIConst;
+	const auto& prof = HjPlayerProfile::Instance();
+
+	// 押し分ける。名前側は「名前を変える」、レベル側は「記録を見る」。
+	// バッジ全体で1つの操作にすると、どちらが起きるのか予想できない。
+	const bool nameHover = HjUI::Hover(TitleBadgeNameX, TitleBadgeY, TitleBadgeNameW, TitleBadgeH);
+	const bool lvHover   = HjUI::Hover(TitleBadgeLvX, TitleBadgeY, TitleBadgeLvW, TitleBadgeH);
+
+	if (!m_nameEditing && HjUI::Clicked(TitleBadgeNameX, TitleBadgeY, TitleBadgeNameW, TitleBadgeH))
+	{
+		// 編集は今の名前から始める。空欄から打ち直させると、
+		// 少し直したいだけのときに全部打つことになる。
+		m_nameBuf     = prof.GetName();
+		m_nameEditing = true;
+		// 開いたクリックが直後の入力として拾われないようにする
+		HjKeyInput::Instance().ConsumeAll();
+	}
+	if (HjUI::Clicked(TitleBadgeLvX, TitleBadgeY, TitleBadgeLvW, TitleBadgeH))
+	{
+		m_statsOpen    = !m_statsOpen;
+		m_badgeClicked = true;
+	}
+
+	// 名前側。編集中は枠を強調し、末尾にカーソルを出す
+	DrawRectTL(TitleBadgeNameX, TitleBadgeY, TitleBadgeNameW, TitleBadgeH,
+	           (m_nameEditing || nameHover) ? ACID : PAPER, true);
+	DrawFrameTL(TitleBadgeNameX, TitleBadgeY, TitleBadgeNameW, TitleBadgeH, 2.0f, INK);
+
+	// 編集中の文字は中央のダイアログへ出す。ここは今の名前のまま。
+	// 名前は日本語・中国語が入りうるので、CJKのグリフを持つ書体で描く
+	DrawText(FontCJKSmall, TitleBadgeNameX + 14.0f, TitleBadgeY + 9.0f, 12.0f,
+	         prof.GetName().c_str(), INK);
+
+	// レベル側は常にアシッド塗り(この画面で一番の見せ場なので固定で強く出す)
+	DrawRectTL(TitleBadgeLvX, TitleBadgeY, TitleBadgeLvW, TitleBadgeH, ACID, true);
+	DrawFrameTL(TitleBadgeLvX, TitleBadgeY, TitleBadgeLvW, TitleBadgeH,
+	            lvHover ? 3.0f : 2.0f, INK);
+
+	char lv[16];
+	snprintf(lv, sizeof(lv), "LV.%d", prof.GetLevel());
+	DrawText(FontSmall, TitleBadgeLvX + 14.0f, TitleBadgeY + 9.0f, 12.0f, lv, INK);
+
+	// 次のレベルまでの進み具合。バッジの下辺に敷く
+	{
+		const float gy = TitleBadgeY + TitleBadgeH - TitleBadgeGaugeH;
+		Math::Color track = INK; track.w = 0.20f;
+		DrawRectTL(TitleBadgeAllX, gy, TitleBadgeAllW, TitleBadgeGaugeH, track, true);
+		DrawRectTL(TitleBadgeAllX, gy, TitleBadgeAllW * prof.GetLevelProgress(), TitleBadgeGaugeH, INK, true);
+	}
+
+	if (!m_statsOpen) { return; }
+
+	// 押したときだけ出す記録の内訳。
+	// 常時出すと上部が数字だらけになるので、見たいときだけ開く。
+	const float px = TitleBadgeAllX - 60.0f, py = TitleBadgeY + TitleBadgeH + 10.0f;
+	const float pw = TitleBadgeAllW + 60.0f, ph = 96.0f;
+	DrawRectTL(px, py, pw, ph, PAPER, true);
+	DrawFrameTL(px, py, pw, ph, 2.0f, INK);
+
+	char buf[64];
+	snprintf(buf, sizeof(buf), "TOTAL  %d", static_cast<int>(prof.GetTotalScore()));
+	DrawText(FontSmall, px + 14.0f, py + 14.0f, 12.0f, buf, INK);
+	snprintf(buf, sizeof(buf), "BEST   %d", static_cast<int>(prof.GetBestScore()));
+	DrawText(FontSmall, px + 14.0f, py + 38.0f, 12.0f, buf, INK);
+	snprintf(buf, sizeof(buf), "RUNS   %d", prof.GetRunCount());
+	DrawText(FontSmall, px + 14.0f, py + 62.0f, 12.0f, buf, INK);
+}
+
+//----------------------------------------------------------
+// 名前の編集中の文字入力。
+//
+// 英数字と一部の記号だけを受け付ける。
+// 保存は「key value」の簡易テキストなので、空白が入ると読み込みで崩れる。
+// 弾く場所を入力側に置けば、保存側で気にしなくて済む。
+//----------------------------------------------------------
+void TitleMenuUI::UpdateNameEdit()
+{
+	auto& key = HjKeyInput::Instance();
+
+	// ESC=取り消し。打った内容は捨てて元の名前のまま
+	if (key.Pressed(VK_ESCAPE))
+	{
+		m_nameEditing = false;
+		return;
+	}
+
+	// ENTER=確定
+	if (key.Pressed(VK_RETURN))
+	{
+		HjPlayerProfile::Instance().SetName(m_nameBuf);
+		HjPlayerProfile::Instance().Save();
+		m_nameEditing = false;
+		return;
+	}
+
+	if (key.Pressed(VK_BACK) && !m_nameBuf.empty())
+	{
+		// UTF-8 は1文字が複数バイトなので、後ろの継続バイトごと削る。
+		// 1バイトだけ消すと文字が壊れて表示できなくなる。
+		while (!m_nameBuf.empty())
+		{
+			const unsigned char c = static_cast<unsigned char>(m_nameBuf.back());
+			m_nameBuf.pop_back();
+			// 継続バイト(10xxxxxx)以外まで消したら1文字ぶん
+			if ((c & 0xC0) != 0x80) { break; }
+		}
+		return;
+	}
+
+	// IMEで確定した文字をそのまま受け取る。
+	// 仮想キーコードから組み立てる方式だと、日本語や中国語を拾えない。
+	const std::string& typed = key.TypedText();
+	if (typed.empty()) { return; }
+
+	for (char c : typed)
+	{
+		// 空白は入れない。保存が「key value」の簡易テキストなので、
+		// 空白が入ると読み込みで名前が途中で切れる。
+		if (c == ' ' || c == '	') { continue; }
+
+		if (CountUtf8Chars(m_nameBuf) >= PlayerConst::MaxNameLen) { break; }
+		m_nameBuf.push_back(c);
+	}
+}
+
+//----------------------------------------------------------
+// 名前入力のダイアログ(画面中央)。
+//
+// バッジの中で直接打たせると枠が狭く、今どこまで打ったか見えない。
+// 背景を暗く落として中央に大きく出し、入力だけに集中できるようにする。
+// 真っ暗にはしない。元の画面が見えないと、どこから来たのか分からなくなる。
+//----------------------------------------------------------
+void TitleMenuUI::DrawNameDialog()
+{
+	using namespace UIConst;
+	if (!m_nameEditing) { return; }
+
+	// 背景を落とす
+	{
+		Math::Color dim = INK; dim.w = NameDlgDim;
+		DrawRectTL(0.0f, 0.0f, DesignW, DesignH, dim, true);
+	}
+
+	DrawRectTL(NameDlgX, NameDlgY, NameDlgW, NameDlgH, PAPER, true);
+	DrawFrameTL(NameDlgX, NameDlgY, NameDlgW, NameDlgH, 2.0f, INK);
+
+	DrawText(FontSmall, NameDlgX + NameDlgPadX, NameDlgY + NameDlgCapDy, 12.0f,
+	         "DRIVER NAME", SUBTXT);
+
+	// 入力中の文字＋点滅カーソル。
+	// カーソルが無いと、打てる状態なのかどうかが分からない
+	const bool caretOn = std::fmodf(HjUI::Time() * 2.0f, 1.0f) < 0.5f;
+	const std::string shown = m_nameBuf + (caretOn ? "_" : " ");
+	// 日本語・中国語が入りうるのでCJK書体を使う。
+	// 登録サイズ(47px)と出したい大きさを揃えてあるので、拡大は掛からない
+	HjUI::TextScaled(FontCJK, NameDlgX + NameDlgPadX, NameDlgY + NameDlgValDy,
+	                 NameDlgValPx, shown.c_str(), INK);
+
+	// 打ち込む場所だと分かるよう、値の下に線を引く
+	DrawLineD(NameDlgX + NameDlgPadX, NameDlgY + NameDlgRuleDy,
+	          NameDlgX + NameDlgW - NameDlgPadX, NameDlgY + NameDlgRuleDy, 2.0f, INK);
+
+	// ENTERとESCの役割が分からないと確定できない
+	char hint[64];
+	snprintf(hint, sizeof(hint), "ENTER OK  /  ESC CANCEL  /  MAX %d", PlayerConst::MaxNameLen);
+	DrawText(FontTiny, NameDlgX + NameDlgPadX, NameDlgY + NameDlgHintDy, 10.0f, hint, SUBTXT);
+}
+
+//----------------------------------------------------------
+// UTF-8 の文字数を数える。
+// バイト数で上限を見ると、日本語は1文字3バイトなので
+// 数文字しか打てなくなる。継続バイト(10xxxxxx)を除いて数える。
+//----------------------------------------------------------
+int TitleMenuUI::CountUtf8Chars(const std::string& s)
+{
+	int n = 0;
+	for (char c : s)
+	{
+		if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) { ++n; }
+	}
+	return n;
 }

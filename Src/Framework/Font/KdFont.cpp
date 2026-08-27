@@ -2,14 +2,27 @@
 #include "../../Application/Util/AssetVault.h"   // 配布ビルド：埋め込みpakからフォント登録
 #include <vector>
 
-// 日本語判定
-static bool isSJIS(char a)
+// UTF-8 の文字列を UTF-16 へ変換する。
+//
+// ※以前は Shift-JIS 前提で「2バイト文字かどうか」を先頭バイトで判定していた。
+//   その方式では Shift-JIS で表せない文字(中国語など)を扱えない。
+//   ソース中の文字列は UTF-8 なので、UTF-16 へ直して 1コードずつ扱う。
+static std::wstring Utf8ToUtf16(const std::string& text)
 {
-	return ((BYTE)a >= 0x81 && (BYTE)a <= 0x9f || (BYTE)a >= 0xe0 && (BYTE)a <= 0xfc);
+	if (text.empty()) { return std::wstring(); }
+
+	const int len = MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+	                                    static_cast<int>(text.size()), nullptr, 0);
+	if (len <= 0) { return std::wstring(); }
+
+	std::wstring out(static_cast<size_t>(len), L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+	                    static_cast<int>(text.size()), &out[0], len);
+	return out;
 }
 
 // フォント作成
-static HFONT MakeFont(const std::string& fontName, int h, int angle, int weight = FW_REGULAR, int charset = SHIFTJIS_CHARSET)
+static HFONT MakeFont(const std::string& fontName, int h, int angle, int weight = FW_REGULAR, int charset = DEFAULT_CHARSET)
 {
 	HFONT hFont;
 	hFont = CreateFont(h,		//フォント高さ
@@ -35,33 +48,23 @@ void KdFontSprite::CreateFontTexture(HDC hdc, const std::string& text, int antiA
 	if (bAdd == false)		Release();
 	if (text.size() == 0)	return;
 
-	const char* pT = text.c_str();
+	// UTF-8 として受け取り、UTF-16 へ直してから1文字ずつ扱う。
+	// こうすると日本語も中国語も同じ経路で描ける。
+	const std::wstring wide = Utf8ToUtf16(text);
+	if (wide.empty()) { return; }
 
 	m_String += text;
 
-	if (m_TexList.size() < text.size())
+	if (m_TexList.size() < wide.size())
 	{
-		m_TexList.reserve(text.size());
+		m_TexList.reserve(wide.size());
 	}
 
-	while(1)
+	for (wchar_t wc : wide)
 	{
-		uint16_t code = 0;
-
-		// 文字の最後
-		if(pT[0] == '\0')break;
-
-		// 日本語判定
-		bool b2byte = false;
-		if(isSJIS(pT[0]))
-		{
-			b2byte = true;
-			code = (BYTE)pT[0] << 8 | (BYTE)pT[1];
-		}
-		else
-		{
-			code = pT[0];
-		}
+		// UTF-16 の1コードをそのままグリフの識別子に使う。
+		// キャッシュ配列(65536)はこの範囲をちょうど覆う。
+		const uint16_t code = static_cast<uint16_t>(wc);
 
 		bool bCreate = true;
 
@@ -122,9 +125,9 @@ void KdFontSprite::CreateFontTexture(HDC hdc, const std::string& text, int antiA
 			GetTextMetrics(hdc , &TM );
 			GLYPHMETRICS GM;
 			CONST MAT2 Mat = {{0,1},{0,0},{0,0},{0,1}};
-			DWORD size = GetGlyphOutline(hdc, code, gradFlag, &GM, 0, NULL, &Mat);	// アンチエイリアスの時に、spaceとか0が返るのはなぜ…
+			DWORD size = GetGlyphOutlineW(hdc, code, gradFlag, &GM, 0, NULL, &Mat);	// アンチエイリアスの時に、spaceとか0が返るのはなぜ…
 			std::unique_ptr<BYTE[]> ptr(new BYTE[size]);
-			GetGlyphOutline(hdc, code, gradFlag, &GM, size, ptr.get(), &Mat);
+			GetGlyphOutlineW(hdc, code, gradFlag, &GM, size, ptr.get(), &Mat);
 
 
 			int addX = 0;
@@ -139,9 +142,9 @@ void KdFontSprite::CreateFontTexture(HDC hdc, const std::string& text, int antiA
 			int texHeight				= TM.tmHeight;
 			int fontWidth_Alignment4	= (GM.gmBlackBoxX + 3) / 4 * 4;
 
-			// 文字のバイト数
-			if(b2byte)data->Bytes		= 2;
-			else data->Bytes			= 1;
+			// 1バイトで表せる文字(ASCII)かどうか。
+			// 表示側が半角/全角の区別に使っているので、その意味を保つ。
+			data->Bytes = (code < 0x80) ? 1 : 2;
 
 			// 総幅加算
 			m_TotalWidth += texWidth;
@@ -255,17 +258,6 @@ void KdFontSprite::CreateFontTexture(HDC hdc, const std::string& text, int antiA
 			}
 
 		}
-
-		// 進める
-		if(b2byte)
-		{
-			pT += 2;
-		}
-		else
-		{
-			pT += 1;
-		}
-
 	}
 }
 

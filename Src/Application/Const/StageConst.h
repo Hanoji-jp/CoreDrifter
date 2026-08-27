@@ -42,4 +42,26 @@ namespace StageConst
 	constexpr float ScaleStep = 0.01f;
 	constexpr float OffsetStep = 0.5f;
 	constexpr float YawStep    = 0.01f;
+
+	//===== 当たり判定から外すノード =====
+	// 草や葉は見た目のためのもので、乗ったり当たったりする物ではない。
+	// これらを判定に残すと、
+	//   ・葉の上に車が乗ってしまう(接地レイが拾う)
+	//   ・草むらに突っ込むと壁として押し返される
+	//   ・面の枚数が多いので判定そのものが重い
+	// という3つが同時に起きる。
+	//
+	// ノード名に以下のいずれかを含むものを外す。大文字小文字は区別しない。
+	// モデルによって命名が違うので、よくある綴りを並べてある。
+	// 個別の調整はステージのパネル(ImGui)から行える。
+	constexpr const char* NoCollisionKeywords[] =
+	{
+		"leaf", "leaves", "grass", "foliage", "plant", "bush",
+		"weed", "flower", "fern", "branch", "shrub",
+		"草", "葉",
+	};
+
+	// 除外リストの保存先。配置とは別ファイルにする
+	// (配置は数値だけ、こちらは名前の一覧で形式が違うため)
+	constexpr const char* NoCollisionPath = "Asset/Data/StageNoCollision.txt";
 }

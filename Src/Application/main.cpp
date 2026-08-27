@@ -1,4 +1,8 @@
 ﻿#include "main.h"
+#include "Util/HjProfiler.h"
+#include "Util/HjPostFxSettings.h"
+#include "Input/HjKeyInput.h"
+#include "GameObject/Score/HjPlayerProfile.h"
 
 #include "Scene/SceneManager.h"
 
@@ -41,6 +45,12 @@ void Application::KdBeginUpdate()
 	// 入力状況の更新
 	KdInputManager::Instance().Update();
 
+	// キーボード入力の更新。
+	// ここで1回だけ状態を取り、以降は全クラスがこれを参照する。
+	// 各クラスが個別に前フレーム状態を持つと、画面を跨いだときに
+	// 押しっぱなしが新規入力として拾われてしまう。
+	HjKeyInput::Instance().Update();
+
 	// 空間環境の更新
 	KdShaderManager::Instance().WorkAmbientController().Update();
 }
@@ -50,6 +60,17 @@ void Application::KdBeginUpdate()
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
 void Application::KdPostUpdate()
 {
+	// 1フレームぶんの計測を締めて、次のフレームを始める
+	HjProfiler::Instance().BeginFrame();
+
+	// 調整パネルで画面演出を触っていたら書き出す。
+	// スライダーを掴んでいる間は待って、手を離してから1回だけ保存する
+	HjPostFxSettings::Instance().Update();
+
+	// この1フレームに届いた文字を捨てる。
+	// シーンの更新が終わってから捨てるので、UIは確実に読める。
+	HjKeyInput::Instance().EndFrame();
+
 	// 3DSoundListnerの行列を更新
 	KdAudioManager::Instance().SetListnerMatrix(KdShaderManager::Instance().GetCameraCB().mView.Invert());
 }
@@ -244,11 +265,29 @@ bool Application::Init(int w, int h)
 	KdFontManager::Instance().AddFont(15, "Archivo Black",     -47,  900, LAT);  // 画面見出し (56/900)
 	KdFontManager::Instance().AddFont(16, "Archivo Black",     -30,  900, LAT);  // カード見出し (中サイズ)
 
+	// 名前入力など、日本語・中国語が入りうる場所で使う書体。
+	// Archivo は欧文専用でCJKのグリフを持たないため、別に用意する。
+	// Yu Gothic UI は日本語と中国語(簡体字)の多くを含む。
+	//
+	// ※実際に出したい大きさで登録すること。
+	//   描画側の pxHeight は縦位置を決めるだけで、字の大きさは変えない。
+	//   1つのサイズを拡大して使い回すと、そのぶん粗くなる。
+	KdFontManager::Instance().AddFont(17, "Yu Gothic UI", -47, 700);   // 名前入力(大)
+	KdFontManager::Instance().AddFont(18, "Yu Gothic UI", -12, 700);   // バッジ(小)
+
 	//===================================================================
 	// ゲーム固有の初期化
 	//===================================================================
 	// 例えばカーソルを消したい場合
 	//ShowCursor(false);
+
+	// これまでの走行記録(名前・累計スコア・走行回数)を読み込む。
+	// タイトルのバッジと銘板がこれを見て表示を変える。
+	HjPlayerProfile::Instance().Load();
+
+	// 画面演出(アウトライン・ハーフトーン)の調整値。
+	// シェーダー側が持っている値なので、車やステージとは別に読み込む
+	HjPostFxSettings::Instance().Load();
 
 	return true;
 }

@@ -1,4 +1,6 @@
 ﻿#include "KdPostProcessShader.h"
+#include "../../../Application/Util/HjProfiler.h"
+#include "../../../Application/GameObject/UI/UIConst.h"
 #include "../../../Application/Const/PostProcessConst.h"
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -275,6 +277,8 @@ void KdPostProcessShader::EndBright()
 
 void KdPostProcessShader::PostEffectProcess()
 {
+	HjScopedTimer _t(U8("画面加工"));
+
 	m_postEffectRTChanger.UndoRenderTarget();
 
 	LightBloomProcess();
@@ -472,7 +476,13 @@ void KdPostProcessShader::EnsureFluidItems()
 {
 	if (m_fluidItems.empty())
 	{
-		m_fluidItems.push_back(std::make_shared<FluidTextItem>());
+		// 既定は非表示。
+		// 中身が既定値("12340")のまま画面の最前面に出てしまい、
+		// ゲーム中ずっと巨大な数字が乗ることになるため。
+		// 調整パネルから表示を点ければ、これまで通り使える。
+		auto item = std::make_shared<FluidTextItem>();
+		item->enabled = false;
+		m_fluidItems.push_back(item);
 		m_fluidSelected = 0;
 	}
 }
@@ -511,6 +521,121 @@ int KdPostProcessShader::CycleFluidStyle()
 	return n;
 }
 
+//----------------------------------------------------------
+// 判定文字(GREAT/PERFECT)専用の枠を用意する。
+// 末尾へ足す＝レイヤーの最前面。判定は一番手前に出したい。
+//----------------------------------------------------------
+void KdPostProcessShader::EnsureJudgeItem()
+{
+	if (m_judgeItem) { return; }
+
+	m_judgeItem = std::make_shared<FluidTextItem>();
+	m_judgeItem->enabled = false;   // 出すまで描かない
+	m_fluidItems.push_back(m_judgeItem);
+}
+
+//----------------------------------------------------------
+// 判定文字とスタイルを決める(出す瞬間に1回だけ呼ぶ)。
+// 文字が変わったときだけ焼き直す。毎フレーム焼くとRTを作り直すことになる。
+//----------------------------------------------------------
+void KdPostProcessShader::SetFluidJudge(const char* str, int style,
+                                        const Math::Vector4& core, const Math::Vector4& fluid)
+{
+	if (!str) { return; }
+	EnsureFluidItems();
+	EnsureJudgeItem();
+
+	auto& it = *m_judgeItem;
+	if (it.str != str)
+	{
+		it.str = str;
+		strncpy_s(it.editBuf, sizeof(it.editBuf), str, _TRUNCATE);
+		it.dirty = true;
+	}
+	it.params.Style      = static_cast<float>(std::clamp(style, 0, kFluidStyleCount - 1));
+	it.params.CoreColor  = core;
+	it.params.FluidColor = fluid;
+	it.enabled = true;
+}
+
+//----------------------------------------------------------
+// 位置・大きさ・強さ(毎フレーム)。強さが0まで落ちたら描画を止める。
+//----------------------------------------------------------
+void KdPostProcessShader::UpdateFluidJudge(float intensity, float cx, float cy, float w, float h)
+{
+	if (!m_judgeItem) { return; }
+
+	auto& pa = m_judgeItem->params;
+	pa.Intensity = std::clamp(intensity, 0.0f, 1.0f);
+	pa.RectCX = cx;
+	pa.RectCY = cy;
+	pa.RectW  = w;
+	pa.RectH  = h;
+
+	m_judgeItem->enabled = (pa.Intensity > 0.003f);
+}
+
+void KdPostProcessShader::HideFluidJudge()
+{
+	if (m_judgeItem) { m_judgeItem->enabled = false; }
+}
+
+//----------------------------------------------------------
+// 走行中のスコア専用の枠。
+// 判定文字とは別に持つ。判定は一瞬しか出ないが、スコアは出っぱなしなので、
+// 同じ枠を取り合うと判定が出るたびにスコアが消える。
+//----------------------------------------------------------
+void KdPostProcessShader::EnsureScoreItem()
+{
+	if (m_scoreItem) { return; }
+
+	m_scoreItem = std::make_shared<FluidTextItem>();
+	m_scoreItem->enabled = false;
+	// 判定より先(奥)に置く。判定が出たときは手前に重なってほしい
+	m_fluidItems.push_back(m_scoreItem);
+}
+
+void KdPostProcessShader::SetFluidScore(const char* str, int style,
+                                        const Math::Vector4& core, const Math::Vector4& fluid,
+                                        float dilate)
+{
+	if (!str) { return; }
+	EnsureFluidItems();
+	EnsureScoreItem();
+
+	auto& it = *m_scoreItem;
+	if (it.str != str)
+	{
+		it.str = str;
+		strncpy_s(it.editBuf, sizeof(it.editBuf), str, _TRUNCATE);
+		it.dirty = true;   // 中身が変わったときだけ焼き直す
+	}
+	it.params.Style      = static_cast<float>(std::clamp(style, 0, kFluidStyleCount - 1));
+	it.params.CoreColor  = core;
+	it.params.FluidColor = fluid;
+	it.params.Dilate     = dilate;
+	it.enabled = true;
+}
+
+void KdPostProcessShader::UpdateFluidScore(float intensity, float cx, float cy, float w, float h)
+{
+	if (!m_scoreItem) { return; }
+
+	auto& pa = m_scoreItem->params;
+	pa.Intensity = std::clamp(intensity, 0.0f, 1.0f);
+	pa.RectCX = cx;
+	pa.RectCY = cy;
+	pa.RectW  = w;
+	pa.RectH  = h;
+
+	m_scoreItem->enabled = (pa.Intensity > 0.003f);
+}
+
+void KdPostProcessShader::HideFluidScore()
+{
+	if (m_scoreItem) { m_scoreItem->enabled = false; }
+}
+
 // UTF-8(ImGui)→Shift-JIS(フォント側が期待)へ変換。数字/英字はそのまま、日本語の化けを防ぐ。
 static std::string Utf8ToSjis(const std::string& u8)
 {
@@ -531,8 +656,13 @@ static std::string Utf8ToSjis(const std::string& u8)
 void KdPostProcessShader::BakeFluidText(FluidTextItem& item)
 {
 	auto& sp = KdShaderManager::Instance().m_spriteShader;
-	// 大フォント(No.1)でグリフ生成。UTF-8→SJIS変換して渡す。初回空ならdirtyのまま再試行。
-	auto fs = KdFontManager::Instance().CreateFontTexture(1, Utf8ToSjis(item.str), 0);
+	// グリフ生成。UTF-8→SJIS変換して渡す。初回空ならdirtyのまま再試行。
+	//
+	// ※画面のUIと同じ書体で焼くこと。
+	//   別の書体で焼くと、同じ数字が場所によって違う形で出てしまい、
+	//   同じものを指していると読めなくなる。
+	auto fs = KdFontManager::Instance().CreateFontTexture(UIConst::FontTitle,
+	                                                      Utf8ToSjis(item.str), 0);
 	if (!fs || fs->GetTexList().empty()) { return; }
 
 	// グリフ幅を実測(DrawFontはこの幅ぶんX前進する)＝テキスト全体の幅・高さ＋グリフ数。
@@ -571,8 +701,16 @@ void KdPostProcessShader::BakeFluidText(FluidTextItem& item)
 		for (; e < 32; ++e) { ep[e] = 1.0f; }   // 余りは右端で埋める(安全)
 	}
 
-	// テキストの実寸でRTを作り直す
-	item.rt.CreateRenderTarget(rtW, th + vpad * 2);
+	// テキストの実寸でRTを用意する。
+	// ※同じ大きさなら作り直さない。
+	//   スコアのように毎フレーム中身が変わるものを流すと、
+	//   そのたびにテクスチャを作ることになって極端に重い。
+	//   桁数が同じなら大きさも同じなので、中身を描き直すだけで済む。
+	const int rtH = th + vpad * 2;
+	const bool sameSize = item.rt.m_RTTexture
+	                   && static_cast<int>(item.rt.m_RTTexture->GetInfo().Width)  == rtW
+	                   && static_cast<int>(item.rt.m_RTTexture->GetInfo().Height) == rtH;
+	if (!sameSize) { item.rt.CreateRenderTarget(rtW, rtH); }
 	item.rt.ClearTexture(Math::Color(0.0f, 0.0f, 0.0f, 1.0f));   // 黒地
 
 	if (!m_textFluidRTChanger.ChangeRenderTarget(item.rt.m_RTTexture, nullptr, &item.rt.m_viewPort))
@@ -656,8 +794,9 @@ void KdPostProcessShader::DrawFluidTextImGui()
 	if (m_fluidSelected >= count) { m_fluidSelected = count - 1; }
 	if (m_fluidSelected < 0)      { m_fluidSelected = 0; }
 
-	// --- Hierarchy：オブジェクト一覧＋追加/削除/レイヤー移動 ---
-	ImGui::Begin("Hierarchy");
+	// --- 一覧：オブジェクト追加/削除/レイヤー移動 ---
+	// ※ウィンドウは開かない。呼び出し元(HjHierarchy)のInspectorの中へ描く。
+	//   文字エフェクトは複数持てるので、Inspector内に一覧と編集を並べる。
 
 	if (ImGui::Button("Add"))
 	{
@@ -696,10 +835,9 @@ void KdPostProcessShader::DrawFluidTextImGui()
 			(it->enabled ? "" : "(off) "), i, it->str.c_str(), i);
 		if (ImGui::Selectable(label, m_fluidSelected == i)) { m_fluidSelected = i; }
 	}
-	ImGui::End();
 
-	// --- Inspector：Hierarchyで選んだオブジェクトのパラメータをここで編集 ---
-	ImGui::Begin("Inspector");
+	// --- 選んだオブジェクトのパラメータ ---
+	// ※ウィンドウは開かない。呼び出し元(HjHierarchy)のInspectorの中へ描く。
 	if (m_fluidSelected >= 0 && m_fluidSelected < static_cast<int>(m_fluidItems.size()))
 	{
 		auto& item = *m_fluidItems[m_fluidSelected];
@@ -747,9 +885,8 @@ void KdPostProcessShader::DrawFluidTextImGui()
 	}
 	else
 	{
-		ImGui::TextUnformatted("Add an object in Hierarchy.");
+		ImGui::TextUnformatted("Add an object in Text Effects.");
 	}
-	ImGui::End();
 }
 
 void KdPostProcessShader::DrawDamageFlash()

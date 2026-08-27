@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // マップエディター・マップ配置に関わる定数
 namespace MapConst

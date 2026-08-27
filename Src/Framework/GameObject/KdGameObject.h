@@ -21,6 +21,11 @@ public:
 	// 生成される全てに共通するパラメータに対する初期化のみ
 	virtual void Init() {}
 
+	// シーンが更新を止めている間(ポーズ・カウントダウン)も更新するか。
+	// 車や採点は止めたいが、メニューや通知は動かないと操作できない。
+	// 止める側をシーンが決め、動き続ける側をオブジェクトが名乗る。
+	virtual bool UpdatesWhileFrozen() const { return false; }
+
 	virtual void PreUpdate() {}
 	virtual void Update() {}
 	// スレッドプールから並列実行される更新（他オブジェクトへのアクセス禁止）
@@ -41,6 +46,11 @@ public:
 	virtual void DrawOverlayEffect() {}
 	virtual void DrawBright() {}
 	virtual void DrawSprite() {}
+
+	// 文字流体化(ドリフトの判定演出)よりさらに手前へ描きたいもの。
+	// ポーズ画面のように「演出の上に必ず被さってほしい」ものだけがここを使う。
+	// 通常のUIは DrawSprite で足りる。
+	virtual void DrawSpriteOverlay() {}
 	virtual void DrawDebug();
 
 	virtual void SetAsset(const std::string&) {}

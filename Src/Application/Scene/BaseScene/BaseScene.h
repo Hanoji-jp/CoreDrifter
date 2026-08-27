@@ -35,6 +35,10 @@ protected :
 	virtual void Init();
 
 public:
+	// 中身の更新を止めているか。ポーズやカウントダウンの間に真を返す。
+	// 止めている間も、UpdatesWhileFrozen()が真のオブジェクトだけは動く。
+	virtual bool IsFrozen() const { return false; }
+
 	// ドリフトのスコア文字演出(DrawFluidText)を使うシーンか。既定は使わない。
 	// ゲーム中シーンだけ true を返してタイトル等へ演出が漏れないようにする。
 	virtual bool UsesFluidText() const { return false; }

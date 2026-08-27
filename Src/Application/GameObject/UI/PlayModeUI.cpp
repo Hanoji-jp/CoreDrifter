@@ -1,14 +1,16 @@
 ﻿#include "PlayModeUI.h"
+#include "../../Input/HjKeyInput.h"
 
 namespace
 {
-	// 暫定4モード(企画=ドリフト峠サンドボックス)＋マルチ(P2Pで棚上げ中=SOON)。
+	// 暫定4モード(企画=ドリフト峠サンドボックス)。
+	// マルチは直接IPで繋ぐ。soon=決定できない(未実装のモード用に残してある)。
 	struct Mode { const char* title; const char* sub; bool soon; };
 	const Mode kModes[4] = {
 		{ "FREE ROAM",   "EXPLORE THE PASS",  false },
 		{ "TIME ATTACK", "BEAT THE CLOCK",    false },
 		{ "DRIFT TRIAL", "SCORE YOUR SLIDES", false },
-		{ "MULTIPLAYER", "P2P - COMING SOON", true  },
+		{ "MULTIPLAYER", "P2P - DIRECT CONNECT", false },
 	};
 	const int kCount = 4;
 
@@ -26,11 +28,10 @@ void PlayModeUI::GetSelectedCardRect(float& dx, float& dy, float& w, float& h) c
 
 void PlayModeUI::Update()
 {
-	const bool lf = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0 || (GetAsyncKeyState('A') & 0x8000) != 0;
-	const bool rt = (GetAsyncKeyState(VK_RIGHT)& 0x8000) != 0 || (GetAsyncKeyState('D') & 0x8000) != 0;
-	if (lf && !m_prevL) { m_sel = (m_sel + kCount - 1) % kCount; }
-	if (rt && !m_prevR) { m_sel = (m_sel + 1) % kCount; }
-	m_prevL = lf; m_prevR = rt;
+	auto& key = HjKeyInput::Instance();
+
+	if (key.Pressed(HjKeyInput::Key::Left))  { m_sel = (m_sel + kCount - 1) % kCount; }
+	if (key.Pressed(HjKeyInput::Key::Right)) { m_sel = (m_sel + 1) % kCount; }
 
 	// マウス：カードにホバーで選択、クリックで決定
 	HjUI::BeginInput();
@@ -40,7 +41,10 @@ void PlayModeUI::Update()
 		if (HjUI::Hover(CardX(i), kCardY, kCardW, kCardH)) { m_sel = i; }
 		if (HjUI::Clicked(CardX(i), kCardY, kCardW, kCardH)) { m_sel = i; decide = true; }
 	}
-	if ((GetAsyncKeyState(VK_RETURN) & 0x8000) || (GetAsyncKeyState(VK_SPACE) & 0x8000)) { decide = true; }
+	// ※押しっぱなしを条件にしないこと。
+	//   そのまま書くと押している間ずっと決定が成立し、
+	//   画面が切り替わった先でも同じキーで決定が続いてしまう。
+	if (key.Pressed(HjKeyInput::Key::Decide)) { decide = true; }
 
 	// SOON(マルチ=棚上げ中)は決定できない
 	if (decide && !kModes[m_sel].soon) { m_activated = true; }

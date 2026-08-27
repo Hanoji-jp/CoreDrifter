@@ -141,6 +141,14 @@ public:
 private:
 	void GuiRelease();
 
+	// 「Game」ウィンドウ用にバックバッファを複製する。
+	// ポストプロセス直後のシーンRTだけを貼っていると、その後に描く
+	// HUD/UI(spriteShaderで直接バックバッファへ描く)が映らない。
+	// UIまで含めた最終画像を見せるには、UIを描き終えたバックバッファ自体を
+	// 複製するしかない(バックバッファはImGui自身がこの後で上書きするため、
+	// 毎フレーム描き終わった直後にコピーする)。
+	void CaptureGameView();
+
 	// ImGui
 	std::unique_ptr<ImGuiAppLog> m_uqLog = nullptr;
 
@@ -149,6 +157,7 @@ private:
 
 	// ゲーム画面ビューポート（バックバッファをコピーして ImGui::Image で表示）
 	bool m_gameViewport = false;
+	// UI込みの最終画像の複製先。「Game」ウィンドウはこちらを表示する
 	std::shared_ptr<KdTexture> m_gameCapture = nullptr;
 
 	// Game 画像上のマウス状態（GuiProcess で更新）

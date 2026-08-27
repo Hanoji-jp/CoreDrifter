@@ -1,4 +1,5 @@
 ﻿#include "HjEngineAudio.h"
+#include "HjAudioSpace.h"   // 反射と残響をまとめて掛ける
 
 using namespace EngineAudioConst;
 
@@ -42,6 +43,16 @@ void HjEngineAudio::ApplyEnginePreset()
 	m_turboLevel    = p.turboLevel;
 	m_formantHz     = p.formantHz;
 	m_formantAmount = p.formantAmount;
+
+	// エンジンの質感。ここが共通だとフィルタの色が違うだけの音になり、
+	// 暗い設定のものが「安っぽいモーター音」に聞こえてしまう。
+	m_pulseWidthMs  = p.pulseWidthMs;
+	m_cylImbalance  = p.cylImbalance;
+
+	// 吸気の性格。直6とV6は点火倍音が同じ(k=6)なので、
+	// ここを変えないと同じ気筒数のエンジンが区別できない。
+	m_formantRpmGain = p.formantRpmGain;
+	m_noiseTone      = p.noiseTone;
 }
 
 //----------------------------------------------------------
@@ -93,6 +104,10 @@ void HjEngineAudio::Init()
 	{
 		m_harm[k].wobVal = Rand01() * 2.0f - 1.0f;
 		m_harm[k].amp    = 0.0f;
+
+		// 気筒ごとの燃焼の強さ。1.0を中心にばらつかせる。
+		// 起動のたびに変わると音が安定しないので、ここで一度だけ決める。
+		m_cylGain[k] = 0.75f + 0.5f * Rand01();
 	}
 
 	WAVEFORMATEX wfx{};
@@ -104,23 +119,56 @@ void HjEngineAudio::Init()
 	wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
 	wfx.cbSize          = 0;
 
-	if (FAILED(xa->CreateSourceVoice(&m_voice, &wfx))) { m_voice = nullptr; return; }
+	// 遠いほど高音を落とすため、ボイスにフィルタを持たせる
+	if (FAILED(xa->CreateSourceVoice(&m_voice, &wfx, XAUDIO2_VOICE_USEFILTER))) { m_voice = nullptr; return; }
+	m_xa = xa;   // 以後、このエンジンが生きている間だけボイスを触る
 
 	// 送信用バッファを使い回す。XAudio2は再生し終わるまで中身を参照するので、
 	// 送ったメモリは解放せず、一周してから上書きする。
 	m_blocks.assign(QueuedBlocks, std::vector<float>(BlockSamples, 0.0f));
 
+	// 完全にドライな音は現実では聞くことがないため、どれだけ作り込んでも
+	// 作り物に聞こえる。反射と残響を持つ空間へ通す。
+	HjAudioSpace::Instance().Init();
+	HjAudioSpace::Instance().RouteVoice(m_voice, HjAudioSpace::Bus::Engine);
+
 	m_voice->Start(0);
 	SubmitPending();
+}
+
+void HjEngineAudio::Apply3D(const Math::Vector3& worldPos)
+{
+	HjAudioSpace::Instance().ApplySource(m_voice, worldPos);
+}
+
+//----------------------------------------------------------
+// ボイスがまだ生きているか。
+// XAudio2エンジンが破棄されると、ぶら下がっているボイスも解放される。
+// こちらは生ポインタを持っているだけなので、その後に触ると落ちる。
+//----------------------------------------------------------
+bool HjEngineAudio::IsVoiceAlive() const
+{
+	return m_xa && (KdAudioManager::Instance().GetXAudio2() == m_xa);
 }
 
 void HjEngineAudio::Stop()
 {
 	if (!m_voice) { return; }
+
+	// エンジンが先に消えていれば、ボイスは既に解放済み。
+	// ここで DestroyVoice を呼ぶと解放済みメモリへのアクセスになる。
+	if (!IsVoiceAlive())
+	{
+		m_voice = nullptr;
+		m_xa    = nullptr;
+		return;
+	}
+
 	m_voice->Stop(0);
 	m_voice->FlushSourceBuffers();
 	m_voice->DestroyVoice();
 	m_voice = nullptr;
+	m_xa    = nullptr;
 }
 
 //----------------------------------------------------------
@@ -139,11 +187,18 @@ void HjEngineAudio::Stop()
 //----------------------------------------------------------
 void HjEngineAudio::RenderTail(float& dst, float v, float svfF, float svfQ,
                                float fmtF, float fmtQ, float spoolTarget,
-                               float spoolStep, float rpmN)
+                               float spoolStep, float rpmN, float cutScale)
 {
 	const float sr = static_cast<float>(SampleRate);
+
 		//----- ④ マフラーを通す -----
-		// 状態変数フィルタ(レゾナンス付きローパス)。踏むとカットオフが上がって開く
+		// 状態変数フィルタ(レゾナンス付きローパス)。踏むとカットオフが上がって開く。
+		// さらに点火の直後だけカットオフを開く＝1発の中で明るさが落ちる。
+		// これが「ブローダウンの鋭い破裂 → 鈍い押し出し」で、パンチの正体。
+		// フィルタ係数はカットオフにほぼ比例するので、倍率を掛けるだけでよい。
+		// 上げすぎるとフィルタが発散するので上限を設ける。
+		svfF = std::min(svfF * cutScale, 1.35f);
+
 		const float high = v - m_svfLow - svfQ * m_svfBand;
 		m_svfBand += svfF * high;
 		m_svfLow  += svfF * m_svfBand;
@@ -188,6 +243,34 @@ void HjEngineAudio::RenderTail(float& dst, float v, float svfF, float svfQ,
 			const float whineNoise = m_noiseLp * 0.5f;
 			body += (sinf(m_whinePhase) * 0.7f + whineNoise) * whineAmp;
 
+			// コンプレッサーサージ：逃がし弁が無い/閉じている時、
+			// 過給空気がコンプレッサーを逆流して羽根を叩く「ストゥトゥトゥ」。
+			// 圧力が抜けるにつれて逆流の周期が延びるので、だんだん遅くなる。
+			if (m_surgeEnv > 0.0001f && m_surgeLevel > 0.001f)
+			{
+				// 残りの圧力が高いほど速く震える＝減衰につれて遅くなる
+				const float rate = SurgeRateHz * (1.0f - SurgeRateFall * (1.0f - m_surgeEnv));
+				m_surgePhase += rate / sr;
+				if (m_surgePhase >= 1.0f) { m_surgePhase -= 1.0f; }
+
+				// 1周ごとに羽根を叩く。立ち上がりが鋭く、すぐ減衰する形
+				const float beat = powf(1.0f - m_surgePhase, 3.0f);
+
+				const float rawS = Rand01() * 2.0f - 1.0f;
+				m_surgeLp += (rawS - m_surgeLp) * 0.55f;
+
+				// 共鳴に通して「叩いている」音色にする(素のノイズだと風の音になる)
+				const float r = expf(-3.14159265f * (SurgeToneHz / SurgeToneQ) / sr);
+				const float w = 6.2831853f * SurgeToneHz / sr;
+				const float y = 2.0f * r * cosf(w) * m_surgeR1 - r * r * m_surgeR2
+				              + (1.0f - r) * m_surgeLp * beat;
+				m_surgeR2 = m_surgeR1;
+				m_surgeR1 = y;
+
+				body += y * m_surgeEnv * m_surgeLevel;
+				m_surgeEnv -= m_surgeEnv * std::min(SurgeDecay / sr, 1.0f);
+			}
+
 			// ブローオフ：閉じた瞬間に溜まった空気が抜ける「プシュー」
 			if (m_bovEnv > 0.0001f)
 			{
@@ -198,9 +281,19 @@ void HjEngineAudio::RenderTail(float& dst, float v, float svfF, float svfQ,
 			}
 	}
 
+	// 低域を整理する。排気管の最低モードは非常に低く(2.4mで約36Hz)しかも一番強い。
+	// 理屈上は正しいが、実物の超低域は強く減衰するうえ、
+	// スピーカーでは「ボー」という濁りにしかならない。
+	{
+		const float k = std::clamp(6.2831853f * m_highPassHz / sr, 0.0f, 1.0f);
+		m_hpState += (body - m_hpState) * k;   // 低い成分だけを取り出して
+		body -= m_hpState;                     // 引く＝ハイパス
+	}
+
 	// ソフトクリップ。上限で切らず、大きいほど緩やかに寝かせる
 	const float o = body * m_master;
 	dst = ClipLevel * (o / (1.0f + fabsf(o)));
+	m_peakOut = std::max(m_peakOut, fabsf(dst));
 }
 
 void HjEngineAudio::RenderBlock(std::vector<float>& out)
@@ -239,7 +332,17 @@ void HjEngineAudio::RenderBlock(std::vector<float>& out)
 		else if (k % half   == 0) { w = m_halfLevel; }
 		else                      { w = m_otherLevel; }
 
-		const float a = w * powf(1.0f / static_cast<float>(k), rolloff);
+		// 排気パルスの長さから決まる、絶対的な周波数のエンベロープ。
+		// 排気弁が開いた瞬間の吹き出しは、回転数に関係なく数ミリ秒で終わる。
+		// つまりスペクトルの形は「何Hzか」で決まっていて、
+		// 回転が上がっても上へ伸びていくわけではない。
+		// 次数だけで減らすと、高回転でスペクトルが青天井に伸びて
+		// 金切り声のようになる(高回転が汚くなる主因)。
+		const float fk    = f0 * static_cast<float>(k);
+		const float fCut  = 1000.0f / std::max(m_pulseWidthMs, 0.2f);   // パルス長→帯域
+		const float shape = 1.0f / (1.0f + (fk / fCut) * (fk / fCut));
+
+		const float a = w * powf(1.0f / static_cast<float>(k), rolloff) * shape;
 		target[i] = a;
 		sumAmp += a;
 	}
@@ -252,15 +355,27 @@ void HjEngineAudio::RenderBlock(std::vector<float>& out)
 	const float svfF = 2.0f * sinf(3.14159265f * cutoff / sr);
 	const float svfQ = 1.0f / std::max(m_resonance, 0.5f);
 
-	const float noiseAmt = m_noiseLevel * (1.0f + NoiseRpmGain * rpmN) * (0.4f + 0.6f * thr);
+	// アクセルを離しても、ノイズは減らすのではなく増やす。
+	// 実物のオーバーラン(エンジンブレーキ)は荒くパチパチ鳴る。
+	// 音量・倍音・ノイズを一緒に減らすと、純粋な低い倍音だけが剥き出しで残り、
+	// それが「アクセルを離した瞬間のシンセ感」の正体になる。
+	const float overrun = (1.0f - thr) * std::clamp((rpmN - OverrunMinRpmN) / 0.4f, 0.0f, 1.0f);
+	const float noiseAmt = m_noiseLevel * (1.0f + NoiseRpmGain * rpmN)
+	                     * (0.55f + 0.45f * thr) * (1.0f + OverrunNoiseGain * overrun);
 	// 高回転ほど回転が安定するので揺らぎを減らす。
 	// 深いまま高回転へ行くと、強い倍音が何十本も独立に振れて汚くなる。
 	const float wobScale = 1.0f - 0.6f * rpmN;
+	// 回転が上がるほど、1発ごとの起伏を薄めて滑らかにする。
+	// 実機も低回転では1発1発が聞き分けられ、回転が上がると融合する。
+	// 深いまま回すと、どの回転域でも「ドッドッドッ」が残って
+	// 農機のような音になる(これが「トラクターっぽさ」の正体)。
+	const float blurScale = 1.0f - PulseBlurRpm * std::clamp(rpmN, 0.0f, 1.0f);
 	// 排気の乱流は垂れ流しではなく、点火のたびに吹き出す
-	const float fireInc = f0 * m_firingOrder / sr;
+	const float fireHz  = f0 * m_firingOrder;   // 1秒あたりの点火回数
+	const float fireInc = fireHz / sr;
 
 	// 吸気の共鳴。狭い帯域だけを強調して金属的な鳴きを出す
-	float fmtHz = m_formantHz + FormantRpmGain * rpmN;
+	float fmtHz = m_formantHz + m_formantRpmGain * rpmN;
 	fmtHz = std::clamp(fmtHz, 80.0f, sr * 0.45f);
 	const float fmtF = 2.0f * sinf(3.14159265f * fmtHz / sr);
 	const float fmtQ = 1.0f / std::max(m_formantQ, 0.5f);
@@ -280,7 +395,7 @@ void HjEngineAudio::RenderBlock(std::vector<float>& out)
 		if (sampleMode)
 		{
 			// エンジン本体は素材に任せ、ターボとブローオフだけ重ねる
-			RenderTail(out[n], 0.0f, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN);
+			RenderTail(out[n], 0.0f, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN, 1.0f);
 			continue;
 		}
 
@@ -308,7 +423,11 @@ void HjEngineAudio::RenderBlock(std::vector<float>& out)
 			v += m_noiseLp * noiseAmt * ((1.0f - NoisePulseDepth) + NoisePulseDepth * pulseP);
 
 			v *= volAll;
-			RenderTail(out[n], v, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN);
+			m_peakSource = std::max(m_peakSource, fabsf(v));
+			const float atkP = powf(1.0f - m_firePhase, m_pulseAttackSharp);
+			v *= 1.0f + m_pulsePunch * atkP;
+			RenderTail(out[n], v, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN,
+			           1.0f + m_pulseAttack * atkP);
 			continue;
 		}
 
@@ -339,21 +458,150 @@ void HjEngineAudio::RenderBlock(std::vector<float>& out)
 			v += sinf(m_masterPhase * static_cast<float>(i + 1)) * h.amp * wob;
 		}
 
+		//----- ②-3 気筒ごとの個体差 -----
+		// 実機は気筒ごとに燃焼の強さがわずかに違う。
+		// クランクが1サイクル回る間に、強い気筒と弱い気筒が順に来るので、
+		// 振幅がサイクルごとに揺れる。これが各次数の周りに細かい成分を生み、
+		// 「ざらついた回り方」になる。
+		// 全気筒が同じだと純粋な倍音列＝ブザーやノコギリ波と同じ構造になる。
+		if (m_cylImbalance > 0.001f)
+		{
+			// 回転が上がるほど個体差の効きを薄める。
+			// 実機も低回転では1発1発が聞き分けられるが、回転が上がると
+			// パルスが融合して滑らかになる。深いまま回すと、どの回転域でも
+			// 「ドッドッドッ」が残って農機のような音になる。
+			// m_masterPhase はクランク1サイクル(720度)の位相そのもの
+			const float cyc = m_masterPhase / 6.2831853f;             // 0〜1
+			const float pos = cyc * static_cast<float>(firing);       // 0〜気筒数
+			const int   ia  = static_cast<int>(pos) % firing;
+			const int   ib  = (ia + 1) % firing;
+			const float t   = pos - floorf(pos);
+
+			// 隣り合う気筒の間を滑らかに繋ぐ(排気の圧力波は重なり合うため)
+			const float g = m_cylGain[ia] + (m_cylGain[ib] - m_cylGain[ia]) * t;
+			v *= 1.0f + (g - 1.0f) * m_cylImbalance * blurScale;
+		}
+
 		//----- ③ 吸排気の乱流 -----
 		// 点火に合わせて脈打たせる。一定のノイズを混ぜるだけだと
 		// 「シャー」というだけで生気がない。
+		const float firePrev = m_firePhase;
 		m_firePhase += fireInc;
 		if (m_firePhase >= 1.0f) { m_firePhase -= 1.0f; }
+
+		//----- ③-2 レブリミッター(点火カット) -----
+		// 実物のリミッターは点火を飛ばす。飛んだ気筒は燃えないので、
+		// 生ガスが排気管へ流れ込み、そこで爆ぜる。あの「ババババッ」の正体。
+		// 音量を絞るだけでは「壁に当たっている感じ」が出ない。
+		if (m_firePhase < firePrev)   // 点火1回ぶん進んだ
+		{
+			m_cutPrev = m_cutNow;
+
+			// 飛ばす点火を「均等に散らす」。
+			// 確率で毎回独立に決めると、効き0.5でも3連続カットが普通に起き、
+			// そこで音が大きく途切れてガサつく。
+			// 実物のECUも失火が偏らないよう均等に分散させるので、
+			// 繰り上がりで配る(4回に1回→2回に1回→全カット と自然に移る)。
+			m_cutCarry += m_revCut;
+			if (m_cutCarry >= 1.0f)
+			{
+				m_cutCarry -= 1.0f;
+				m_cutNow = 1.0f;
+
+				// 飛んだ生ガスは排気管へ流れてから熱い排気に触れて着火する。
+				// つまり爆ぜるのは「飛んだ瞬間」ではなく少し遅れて。
+				// 同時に鳴らすと「消えた瞬間に爆音」になり音量が減らない。
+				// 強さは消えた燃焼のぶんに比例させる＝勝手に釣り合う。
+				m_popPending      = m_cutDepth * (0.7f + 0.6f * Rand01());
+				m_popPendingLevel = m_cutPopLevel;
+				m_popDelay        = (0.6f + 0.8f * Rand01()) / std::max(fireHz, 1.0f);
+			}
+			else
+			{
+				m_cutNow = 0.0f;
+			}
+
+			// オーバーラン：アクセルを離した高回転では、燃え残りが
+			// 排気管で不定期に爆ぜる。これが無いと離した瞬間が急に静かで
+			// 純粋な音になり、シンセっぽく聞こえる。
+			if (Rand01() < overrun * m_overrunCrackle)
+			{
+				m_popPending      = std::max(m_popPending, 0.45f * (0.6f + 0.8f * Rand01()));
+				m_popPendingLevel = m_cutPopLevel;
+				m_popDelay        = (0.5f + 1.0f * Rand01()) / std::max(fireHz, 1.0f);
+			}
+		}
+
+		// アフターファイア：予約した発数を、間隔を空けて順に撃つ
+		if (m_afterfireLeft > 0)
+		{
+			m_afterfireNext -= 1.0f / sr;
+			if (m_afterfireNext <= 0.0f)
+			{
+				--m_afterfireLeft;
+				// 1発ごとに大きさと間隔をばらつかせる。等間隔・同じ大きさだと
+				// 機械的な連打になって「燃えている」感じが出ない。
+				m_popPending      = 0.6f + 0.8f * Rand01();
+				m_popPendingLevel = m_afterfireLevel;   // レブの破裂音とは別の音量
+				m_popDelay        = 0.0f;
+				m_afterfireNext = (AfterfireGapMs * 0.001f) * (0.5f + 1.0f * Rand01());
+			}
+		}
+
+		// 予約した破裂音を、遅れて鳴らし始める
+		if (m_popPending > 0.0f)
+		{
+			m_popDelay -= 1.0f / sr;
+			if (m_popDelay <= 0.0f)
+			{
+				m_popEnv    = m_popPending;
+				m_popLevel  = m_popPendingLevel;
+				m_popAttack = 0.0f;
+				m_popPending = 0.0f;
+			}
+		}
 		const float pulse = powf(1.0f - m_firePhase, NoisePulseSharp);
-		const float pulseGain = (1.0f - NoisePulseDepth) + NoisePulseDepth * pulse;
+		// 脈動の深さも回転で薄める。深いまま高回転へ行くと、
+		// 点火のたびに「ドッ」と切れて農機のような音になる。
+		const float pulseDepth = NoisePulseDepth * blurScale;
+		const float pulseGain = (1.0f - pulseDepth) + pulseDepth * pulse;
 
 		const float raw = Rand01() * 2.0f - 1.0f;
 		m_noiseLp += (raw - m_noiseLp) * std::clamp(m_noiseTone, 0.01f, 1.0f);
 		v += m_noiseLp * noiseAmt * pulseGain;
 
+		// 点火が飛んだ気筒は燃焼の音を出さない。
+		// ただし点火の切れ目でステップ状に切り替えると波形が不連続になり、
+		// そこでクリックが鳴る(ブツブツの正体)。
+		// 前の点火と今の点火を、点火位相に沿って滑らかに繋ぐ。
+		const float cutBlend = m_cutPrev + (m_cutNow - m_cutPrev) * m_firePhase;
+		v *= 1.0f - cutBlend * m_cutDepth;
+
+		// 飛んだぶんの生ガスが排気管で爆ぜる。短く鋭い破裂音
+		if (m_popEnv > 0.0001f)
+		{
+			const float rawPop = Rand01() * 2.0f - 1.0f;
+			m_popLp += (rawPop - m_popLp) * 0.6f;
+
+			// 立ち上がりも持たせる。一瞬で最大へ跳ねると波形が段差になり、
+			// それ自体が「バチッ」というノイズになる。
+			m_popAttack += (1.0f - m_popAttack) * std::min(700.0f / sr, 1.0f);
+
+			v += m_popLp * m_popEnv * m_popAttack * m_popLevel;
+			m_popEnv -= m_popEnv * std::min(CutPopDecay / sr, 1.0f);
+		}
+
 		v *= volAll;
 
-		RenderTail(out[n], v, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN);
+		m_peakSource = std::max(m_peakSource, fabsf(v));
+
+		// 1発の中のアタック。点火直後だけフィルタを開き、音量も少し持ち上げる。
+		// 開くだけだと「明るくなる」に留まり、叩かれたような手応えが出ない。
+		const float atk = powf(1.0f - m_firePhase, m_pulseAttackSharp);
+		v *= 1.0f + m_pulsePunch * atk;
+
+		RenderTail(out[n], v, svfF, svfQ, fmtF, fmtQ, spoolTarget, spoolStep, rpmN,
+		           1.0f + m_pulseAttack * atk);
 	}
 }
 
@@ -384,7 +632,7 @@ void HjEngineAudio::SubmitPending()
 	}
 }
 
-void HjEngineAudio::Update(float dt, float rpm, float throttle, float maxRpm)
+void HjEngineAudio::Update(float dt, float rpm, float throttle, float maxRpm, float revCut)
 {
 	if (!m_voice) { return; }
 
@@ -398,14 +646,32 @@ void HjEngineAudio::Update(float dt, float rpm, float throttle, float maxRpm)
 		if (drop > BovThrottleDrop && m_spool > BovMinSpool)
 		{
 			m_bovEnv = std::min(m_bovEnv + m_spool, 1.0f);
+			// サージも同じ条件で立てる。実車は逃がし弁の有無でどちらかが出るので、
+			// 音量で好みの配分にできるようにしておく。
+			m_surgeEnv   = std::min(m_surgeEnv + m_spool, 1.0f);
+			m_surgePhase = 0.0f;
+		}
+	}
+
+	// アフターファイア：高回転で一気に閉じると、行き場を失った混合気が
+	// 排気管へ流れ、熱い排気に触れて一気に燃える。
+	// 「パパパンッ」と数発まとめて出るのが特徴で、
+	// 常時パラパラ鳴るオーバーランのクラックルとは別物。
+	{
+		const float drop = m_prevThrottleForBov - thrRaw;
+		const float rpmN = rpm / std::max(maxRpm, 1.0f);
+		if (drop > AfterfireDrop && rpmN > AfterfireMinRpmN && m_afterfireLeft <= 0)
+		{
+			m_afterfireLeft = AfterfireShots;
+			m_afterfireNext = 0.0f;   // 1発目はすぐ
 		}
 	}
 	m_prevThrottleForBov = thrRaw;
-
 	// 生の値をそのまま使うと踏み替えのたびに音がパチンと切り替わる
 	m_throttle += (thrRaw - m_throttle) * std::min(ThrottleSmooth * dt, 1.0f);
 	m_rpm      += (rpm - m_rpm) * std::min(RpmSmooth * dt, 1.0f);
 	m_maxRpm    = maxRpm;
+	m_revCut    = std::clamp(revCut, 0.0f, 1.0f);
 
 	m_sampler.Update(dt, m_rpm, m_throttle);
 
@@ -428,6 +694,18 @@ void HjEngineAudio::DrawImGui()
 
 	ImGui::SliderFloat(U8("全体音量"), &m_master, 0.0f, 1.0f);
 
+	// 耳だけで詰めると、飽和しているのか小さすぎるのか判別できない。
+	// 音源が1.0を大きく超えていれば出力段で潰れており、
+	// 出力が0.2に届かなければ持ち上げる余地がある。
+	ImGui::Text(U8("音源 %.2f"), m_peakSource);
+	ImGui::ProgressBar(std::clamp(m_peakSource, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f));
+	ImGui::Text(U8("出力 %.2f %s"), m_peakOut,
+	            (m_peakOut > 0.88f) ? U8("← 潰れています") : "");
+	ImGui::ProgressBar(std::clamp(m_peakOut, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f));
+	// ピークは見終わったら少し落とす(張り付いたままにしない)
+	m_peakSource *= 0.90f;
+	m_peakOut    *= 0.90f;
+
 	ImGui::SeparatorText(U8("積んでいるエンジン"));
 	const char* names[] = { U8("SR20DET (直4ターボ / S15純正)"),
 	                        U8("RB26DETT (直6ツインターボ)"),
@@ -447,6 +725,9 @@ void HjEngineAudio::DrawImGui()
 	ImGui::SliderFloat(U8("立ち上がりの遅さ"),      &m_spoolUp, 0.3f, 8.0f);
 	ImGui::SliderFloat(U8("抜けの速さ"),            &m_spoolDown, 0.3f, 12.0f);
 	ImGui::SliderFloat(U8("ブローオフの音量"),      &m_bovLevel, 0.0f, 2.0f);
+	// 逃がし弁が無い/閉じている時に出る「ストゥトゥトゥ」。
+	// ブローオフとは別物なので、片方だけにも両方にもできる。
+	ImGui::SliderFloat(U8("サージ(ストゥトゥトゥ)"), &m_surgeLevel, 0.0f, 2.0f);
 	ImGui::Text(U8("過給 %.2f"), m_spool);
 
 	// 排気系の共鳴。ここが「管を通った音」の正体。
@@ -467,6 +748,9 @@ void HjEngineAudio::DrawImGui()
 
 	ImGui::SeparatorText(U8("吸気の共鳴(金属的な鳴き)"));
 	ImGui::SliderFloat(U8("鳴く周波数(Hz)"),     &m_formantHz, 200.0f, 4000.0f);
+	// ここが「立ち上がり方」を決める。大きいほど回転と一緒に鳴き上がる。
+	// 小さいと大きなプレナムのようにモワッとした立ち上がりになる。
+	ImGui::SliderFloat(U8("回転で鳴き上がる量(Hz)"), &m_formantRpmGain, 0.0f, 4000.0f);
 	ImGui::SliderFloat(U8("鋭さ 大=細く金属的"), &m_formantQ, 1.0f, 14.0f);
 	// ※鋭さ(Q)を上げても音量が上がらないよう内部で割り戻してあるので、
 	//   鋭さと混ぜる量を独立に触れる
@@ -501,9 +785,42 @@ void HjEngineAudio::DrawImGui()
 		ImGui::SliderFloat(U8("燃焼時間(度) 短=鋭い"),     &m_sim.m_burnDurationDeg, 8.0f, 120.0f);
 		ImGui::SliderFloat(U8("排気弁が開く角度"),         &m_sim.m_exhaustOpenDeg, 440.0f, 560.0f);
 		ImGui::SliderFloat(U8("排気の抜けの良さ"),         &m_sim.m_exhaustFlowRate, 100.0f, 4000.0f);
+		ImGui::SliderFloat(U8("コンロッド比 小=歪む"),     &m_sim.m_rodRatio, 1.4f, 6.0f);
+
+		// 各気筒から集合部までの管。吹き出した波が走って反射して戻る。
+		// 戻った負圧が排気弁の開いている間に着くと燃焼ガスを吸い出す。
+		// 当たり外れが回転数で変わるので、回すと抜けの良さが変化する。
+		ImGui::SeparatorText(U8("排気管"));
+		ImGui::TextWrapped(U8("吹き出した波が管を走り、集合部で負圧として反射して戻る。"
+		                      "戻りが排気弁の開いている間に着くと抜けが良くなる。"
+		                      "当たる回転数が長さで変わる。"));
+		ImGui::SliderFloat(U8("排気管の長さ(m)"), &m_sim.m_runnerLength, 0.10f, 3.0f);
+		ImGui::SliderFloat(U8("反射の強さ 0=無し"), &m_sim.m_runnerReflect, 0.0f, 0.9f);
+		ImGui::SliderFloat(U8("管の減衰 大=丸い"),  &m_sim.m_runnerDamp, 0.0f, 0.9f);
+
+		// 吸気側。排気だけで音を作ると、吸い込む側の音が丸ごと抜け落ちる。
+		// NAの日本車で「吸気音」と呼ばれるのがこれ。
+		ImGui::SeparatorText(U8("吸気(吸い込む側の音)"));
+		ImGui::TextWrapped(U8("吸い込むと管に負圧の波ができ、入口で反射して戻る。"
+		                      "排気だけだとこの音が丸ごと無い。"));
+		ImGui::SliderFloat(U8("吸気管の長さ(m)"),   &m_sim.m_intakeLength, 0.05f, 1.2f);
+		ImGui::SliderFloat(U8("吸気の反射"),        &m_sim.m_intakeReflect, 0.0f, 0.9f);
+		ImGui::SliderFloat(U8("吸気の混ぜ具合 0=無し"), &m_sim.m_intakeLevel, 0.0f, 1.5f);
+
+		// エンジン本体。BeamNGも排気音と別レイヤーで持っている。
+		// 弁が座面へ当たる音で、回転が上がるほど強くなる。
+		ImGui::SeparatorText(U8("本体の機械音(弁の着座)"));
+		ImGui::TextWrapped(U8("弁が座面へ当たる音。クランク角に同期して出る。"
+		                      "排気だけだとマフラーの音しか鳴らない。"));
+		ImGui::SliderFloat(U8("機械音の量 0=無し"), &m_sim.m_mechLevel, 0.0f, 1.5f);
+		ImGui::SliderFloat(U8("機械音の高さ(Hz)"),  &m_sim.m_mechHz, 600.0f, 6000.0f);
+
+		ImGui::SeparatorText(U8("集合部"));
 		ImGui::SliderFloat(U8("集合部の大きさ 大=こもる"), &m_sim.m_plenumVolume, 0.2f, 8.0f);
 		ImGui::SliderFloat(U8("大気へ抜ける速さ"),         &m_sim.m_plenumOutflow, 0.3f, 12.0f);
-		ImGui::SliderFloat(U8("出力"),                     &m_sim.m_outputGain, 0.05f, 3.0f);
+		// 自動レベル合わせの後に掛ける微調整。基準は1.0
+		ImGui::SliderFloat(U8("出力の微調整"), &m_sim.m_outputGain, 0.0f, 2.0f);
+		ImGui::Text(U8("自動で %.1f 倍にしています"), m_sim.GetAutoGain());
 		ImGui::Text(U8("クランク角 %.0f度"), m_sim.GetCrankDeg());
 	}
 
@@ -512,8 +829,33 @@ void HjEngineAudio::DrawImGui()
 	ImGui::SliderFloat(U8("うねり(半分オーダー)"),   &m_halfLevel, 0.0f, 1.2f);
 	ImGui::SliderFloat(U8("ざらつき(その他)"),       &m_otherLevel, 0.0f, 1.0f);
 	ImGui::SliderFloat(U8("高次の落ち方 大=丸い"),   &m_rolloff, 0.3f, 3.0f);
+	// 排気パルスの長さ＝スペクトルの形を決める絶対的な周波数。
+	// 短いほど高い帯域まで伸び、鋭く硬い音になる。
+	// これが無いと高回転でスペクトルが青天井に伸びて金切り声になる。
+	ImGui::SliderFloat(U8("排気パルスの長さ(ms) 短=鋭い"), &m_pulseWidthMs, 0.5f, 12.0f);
+	// 気筒ごとの燃焼の差。0にすると純粋な倍音列＝ブザーになる
+	ImGui::SliderFloat(U8("気筒ごとの個体差 0=ブザー"),    &m_cylImbalance, 0.0f, 0.8f);
 	ImGui::SliderFloat(U8("アクセルオフのこもり"),   &m_offRolloffAdd, 0.0f, 2.5f);
+	// 低域を切る。排気管の最低モードは非常に低く(2.4mで約36Hz)、
+	// そのままだとスピーカーでは「ボー」という濁りにしかならない
+	ImGui::SliderFloat(U8("低域を切る(Hz) 大=すっきり"), &m_highPassHz, 20.0f, 300.0f);
+
+	// レブリミッターは点火を飛ばす処理。深く切ると音がブツブツに途切れ、
+	// 破裂音も大きいと暴れすぎて聞いていられなくなる。
+	ImGui::SeparatorText(U8("レブリミッター・オーバーラン"));
+	ImGui::SliderFloat(U8("点火を飛ばす深さ"),       &m_cutDepth, 0.0f, 1.0f);
+	ImGui::SliderFloat(U8("排気で爆ぜる音の大きさ"), &m_cutPopLevel, 0.0f, 0.8f);
+	ImGui::SliderFloat(U8("オーバーランのパチパチ"), &m_overrunCrackle, 0.0f, 1.0f);
+	// 高回転で一気に閉じた時だけ、数発まとめて出る「パパパンッ」
+	ImGui::SliderFloat(U8("アフターファイアの大きさ"), &m_afterfireLevel, 0.0f, 1.5f);
 	ImGui::SliderFloat(U8("揺らぎ 0=電子オルガン"),  &m_wobble, 0.0f, 0.8f);
+
+	// 1発の中で明るさが落ちる動き。倍音が一定のままでは作れない要素で、
+	// これが無いと「同じ波形の繰り返し」になってパンチが出ない。
+	ImGui::SeparatorText(U8("1発のアタック(パンチ)"));
+	ImGui::SliderFloat(U8("開く量 大=鋭い破裂"),   &m_pulseAttack, 0.0f, 8.0f);
+	ImGui::SliderFloat(U8("閉じる速さ 大=短い"),   &m_pulseAttackSharp, 0.5f, 12.0f);
+	ImGui::SliderFloat(U8("頭の押し出し"),         &m_pulsePunch, 0.0f, 1.5f);
 
 	ImGui::SeparatorText(U8("吸排気の乱流"));
 	ImGui::SliderFloat(U8("ノイズ量"),          &m_noiseLevel, 0.0f, 1.5f);
@@ -545,8 +887,18 @@ void HjEngineAudio::CollectTuneParams(std::vector<std::pair<const char*, float*>
 	out.push_back({ "engHalfLevel",  &m_halfLevel });
 	out.push_back({ "engOtherLevel", &m_otherLevel });
 	out.push_back({ "engRolloff",    &m_rolloff });
+	out.push_back({ "engHighPass",   &m_highPassHz });
+	out.push_back({ "engCutDepth",   &m_cutDepth });
+	out.push_back({ "engCutPop",     &m_cutPopLevel });
+	out.push_back({ "engOverrun",    &m_overrunCrackle });
+	out.push_back({ "engAfterfire",  &m_afterfireLevel });
+	out.push_back({ "engPulseMs",    &m_pulseWidthMs });
+	out.push_back({ "engCylImb",     &m_cylImbalance });
 	out.push_back({ "engOffRolloff", &m_offRolloffAdd });
 	out.push_back({ "engWobble",     &m_wobble });
+	out.push_back({ "engPulseAtk",  &m_pulseAttack });
+	out.push_back({ "engPulseSharp",&m_pulseAttackSharp });
+	out.push_back({ "engPulsePunch",&m_pulsePunch });
 	out.push_back({ "engNoise",      &m_noiseLevel });
 	out.push_back({ "engNoiseTone",  &m_noiseTone });
 	out.push_back({ "engCutBase",    &m_cutoffBase });
@@ -561,8 +913,10 @@ void HjEngineAudio::CollectTuneParams(std::vector<std::pair<const char*, float*>
 	out.push_back({ "engSpoolUp",    &m_spoolUp });
 	out.push_back({ "engSpoolDown",  &m_spoolDown });
 	out.push_back({ "engBov",        &m_bovLevel });
+	out.push_back({ "engSurge",      &m_surgeLevel });
 	out.push_back({ "engFormantHz",  &m_formantHz });
 	out.push_back({ "engFormantQ",   &m_formantQ });
+	out.push_back({ "engFormantRpm", &m_formantRpmGain });
 	out.push_back({ "engFormantAmt", &m_formantAmount });
 	// 物理シミュレーション側
 	out.push_back({ "simCompression", &m_sim.m_compressionRatio });
@@ -570,6 +924,15 @@ void HjEngineAudio::CollectTuneParams(std::vector<std::pair<const char*, float*>
 	out.push_back({ "simBurnDeg",     &m_sim.m_burnDurationDeg });
 	out.push_back({ "simExOpenDeg",   &m_sim.m_exhaustOpenDeg });
 	out.push_back({ "simExFlow",      &m_sim.m_exhaustFlowRate });
+	out.push_back({ "simRodRatio",    &m_sim.m_rodRatio });
+	out.push_back({ "simRunnerLen",   &m_sim.m_runnerLength });
+	out.push_back({ "simRunnerRefl",  &m_sim.m_runnerReflect });
+	out.push_back({ "simRunnerDamp",  &m_sim.m_runnerDamp });
+	out.push_back({ "simIntakeLen",   &m_sim.m_intakeLength });
+	out.push_back({ "simIntakeRefl",  &m_sim.m_intakeReflect });
+	out.push_back({ "simIntakeLevel", &m_sim.m_intakeLevel });
+	out.push_back({ "simMechLevel",   &m_sim.m_mechLevel });
+	out.push_back({ "simMechHz",      &m_sim.m_mechHz });
 	out.push_back({ "simPlenumVol",   &m_sim.m_plenumVolume });
 	out.push_back({ "simPlenumOut",   &m_sim.m_plenumOutflow });
 	out.push_back({ "simOutGain",     &m_sim.m_outputGain });

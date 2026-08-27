@@ -99,6 +99,25 @@ namespace HjUI
 		Text(fontId, dCx - w * 0.5f, dy, pxH, str, col);
 	}
 
+	//----------------------------------------------------------
+	// 中心基準・スケール付きの縁取り文字。
+	// 3D画面の上に文字を置くと、背景の明暗が毎フレーム変わって読めなくなる。
+	// 縁色を8方向へずらして描いてから本体を重ねると、背景に関係なく形が立つ。
+	// ずらし量はスケールに比例させること。固定にすると、
+	// 大きく出したときに縁が細くなって効かなくなる。
+	//----------------------------------------------------------
+	void TextCenteredScaledOutline(int fontId, float dCx, float dCy, float scale, const char* str,
+		const Math::Color& edge, const Math::Color& fill)
+	{
+		const float o = UIConst::OutlineOffset * scale;
+		const float off[8][2] = { {-o,0},{o,0},{0,-o},{0,o},{-o,-o},{o,-o},{-o,o},{o,o} };
+		for (int i = 0; i < 8; ++i)
+		{
+			TextCenteredScaled(fontId, dCx + off[i][0], dCy + off[i][1], scale, str, edge);
+		}
+		TextCenteredScaled(fontId, dCx, dCy, scale, str, fill);
+	}
+
 	void TextOutline(int fontId, float dx, float dy, float pxH, const char* str,
 		const Math::Color& edge, const Math::Color& fill)
 	{
@@ -107,6 +126,25 @@ namespace HjUI
 		const float off[8][2] = { {-o,0},{o,0},{0,-o},{0,o},{-o,-o},{o,-o},{-o,o},{o,o} };
 		for (int i = 0; i < 8; ++i) { Text(fontId, dx + off[i][0], dy + off[i][1], pxH, str, edge); }
 		Text(fontId, dx, dy, pxH, str, fill);
+	}
+
+	//----------------------------------------------------------
+	// 文字テクスチャの実際の高さ。
+	// 指定サイズ(FontPx)とは違い、上下の張り出しを含んだ実寸になる。
+	// 焼いた画像の縦横比を求めるのに要る。
+	//----------------------------------------------------------
+	float MeasureHeight(int fontId, const char* str)
+	{
+		auto sprite = KdFontManager::Instance().CreateFontTexture(fontId, str, 3);
+		if (!sprite) { return 0.0f; }
+
+		float h = 0.0f;
+		for (auto& d : sprite->GetTexList())
+		{
+			if (!d || !d->FontTex) { continue; }
+			h = std::max(h, static_cast<float>(d->FontTex->GetInfo().Height));
+		}
+		return h;
 	}
 
 	float Measure(int fontId, const char* str, float trackDesign)
@@ -182,20 +220,34 @@ namespace HjUI
 	}
 
 	// ══════════════ 図形 ══════════════
+	//----------------------------------------------------------
+	// 矩形。DrawBoxは「中心と半分の大きさ」を整数で取る。
+	//
+	// 半分の大きさを切り捨てると、細い物ほど割合として大きく痩せる。
+	// 幅5(デザイン)は 5×0.8333÷2 = 2.08 → 2 になり、実際は4px＝2割細い。
+	// 2pxの罫線に至っては 0.83 → 0 で消えてしまう。
+	// 四捨五入したうえで、最低1pxは残す。
+	//----------------------------------------------------------
 	void RectTL(float dx, float dy, float w, float h, const Math::Color& col, bool fill)
 	{
-		SP().DrawBox(static_cast<int>(MapX(dx + w * 0.5f)), static_cast<int>(MapY(dy + h * 0.5f)),
-			static_cast<int>(w * UIConst::Scale * 0.5f), static_cast<int>(h * UIConst::Scale * 0.5f), &col, fill);
+		const int hw = std::max(1, static_cast<int>(w * UIConst::Scale * 0.5f + 0.5f));
+		const int hh = std::max(1, static_cast<int>(h * UIConst::Scale * 0.5f + 0.5f));
+		SP().DrawBox(static_cast<int>(MapX(dx + w * 0.5f) + 0.5f),
+			static_cast<int>(MapY(dy + h * 0.5f) + 0.5f), hw, hh, &col, fill);
 	}
 
 	void FrameTL(float dx, float dy, float w, float h, float px, const Math::Color& col)
 	{
 		const float left = MapX(dx), top = MapY(dy);
 		const float ws = w * UIConst::Scale, hs = h * UIConst::Scale, t = px * 0.5f;
-		SP().DrawBox(static_cast<int>(left + ws * 0.5f), static_cast<int>(top - t),         static_cast<int>(ws * 0.5f), static_cast<int>(t), &col, true);
-		SP().DrawBox(static_cast<int>(left + ws * 0.5f), static_cast<int>(top - hs + t),     static_cast<int>(ws * 0.5f), static_cast<int>(t), &col, true);
-		SP().DrawBox(static_cast<int>(left + t),         static_cast<int>(top - hs * 0.5f),  static_cast<int>(t), static_cast<int>(hs * 0.5f), &col, true);
-		SP().DrawBox(static_cast<int>(left + ws - t),    static_cast<int>(top - hs * 0.5f),  static_cast<int>(t), static_cast<int>(hs * 0.5f), &col, true);
+		// 枠の太さも切り捨てると消える。最低1pxは残す
+		const int ti = std::max(1, static_cast<int>(t + 0.5f));
+		const int hw = std::max(1, static_cast<int>(ws * 0.5f + 0.5f));
+		const int hh = std::max(1, static_cast<int>(hs * 0.5f + 0.5f));
+		SP().DrawBox(static_cast<int>(left + ws * 0.5f), static_cast<int>(top - t),      hw, ti, &col, true);
+		SP().DrawBox(static_cast<int>(left + ws * 0.5f), static_cast<int>(top - hs + t), hw, ti, &col, true);
+		SP().DrawBox(static_cast<int>(left + t),         static_cast<int>(top - hs * 0.5f), ti, hh, &col, true);
+		SP().DrawBox(static_cast<int>(left + ws - t),    static_cast<int>(top - hs * 0.5f), ti, hh, &col, true);
 	}
 
 	void LineD(float x1, float y1, float x2, float y2, float px, const Math::Color& col)
@@ -305,6 +357,248 @@ namespace HjUI
 				Math::Color c = dot; c.w = dot.w * t;
 				SP().DrawRoundedBox(bx, by, isz, isz, hs * 0.45f, &c, 6);
 			}
+		}
+	}
+
+	// 下で定義する拡大描画を先に使うための宣言
+	void  TextScaled (int fontId, float dx, float dy, float targetPx, const char* str, const Math::Color& col);
+	void  TextScaledR(int fontId, float dRightX, float dy, float targetPx, const char* str, const Math::Color& col);
+	void  TextScaledC(int fontId, float dCx, float dy, float targetPx, const char* str, const Math::Color& col);
+
+	//----------------------------------------------------------
+	// 大きさを指定しない入口。
+	// pxH はフォントIDから引く。呼ぶ側が数字を書かないので食い違わない。
+	//----------------------------------------------------------
+	// ※Text() は縦位置を「指定サイズと文字テクスチャの高さの中点」で決めるので、
+	//   フォントによって上端の揃い方が変わる。大きいフォントほどずれが大きい。
+	//   そこで拡大文字と同じ経路(グリフ単位の描画)へ通し、
+	//   どのフォントでも上端が dy に来るようにする。
+	float TextAt(int fontId, float dx, float dy, const char* str, const Math::Color& col)
+	{
+		TextScaled(fontId, dx, dy, UIConst::FontPx(fontId), str, col);
+		return MapX(dx) + Measure(fontId, str, 0.0f);
+	}
+
+	void TextAtC(int fontId, float dCx, float dy, const char* str, const Math::Color& col)
+	{
+		TextScaledC(fontId, dCx, dy, UIConst::FontPx(fontId), str, col);
+	}
+
+	void TextAtR(int fontId, float dRightX, float dy, const char* str, const Math::Color& col)
+	{
+		TextScaledR(fontId, dRightX, dy, UIConst::FontPx(fontId), str, col);
+	}
+
+	float TextAtTracked(int fontId, float dx, float dy, const char* str,
+		const Math::Color& col, float trackDesign)
+	{
+		return TextTracked(fontId, dx, dy, UIConst::FontPx(fontId), str, col, trackDesign);
+	}
+
+	//----------------------------------------------------------
+	// フォントに無い大きさで出す。左上を(dx,dy)に置いて拡大縮小する。
+	// 大きな数字のためだけにフォントを増やすと、その分だけ
+	// テクスチャを持つことになる。1枚を伸ばす方が軽い。
+	//----------------------------------------------------------
+	void TextScaled(int fontId, float dx, float dy, float targetPx,
+		const char* str, const Math::Color& col)
+	{
+		auto sprite = KdFontManager::Instance().CreateFontTexture(fontId, str, 3);
+		if (!sprite || sprite->GetTexList().empty()) { return; }
+
+		const float scale = targetPx / std::max(UIConst::FontPx(fontId), 1.0f);
+
+		float x = MapX(dx);
+		const float top = MapY(dy);
+
+		// 文字テクスチャは指定サイズより縦に余白ぶん大きい。
+		// テクスチャの上端を dy に合わせると、実際の文字は余白のぶん下へずれ、
+		// 大きい文字ほどずれ幅が大きくなる。
+		// そこで「指定サイズの箱」の上端が dy に来るように置く。
+		const float boxH = targetPx * UIConst::Scale;   // 画面px
+		for (auto& d : sprite->GetTexList())
+		{
+			if (!d || !d->FontTex || d->Code == '\n') { continue; }
+
+			const float W = static_cast<float>(d->FontTex->GetInfo().Width);
+			const float H = static_cast<float>(d->FontTex->GetInfo().Height);
+			const int gw = static_cast<int>(W * scale);
+			const int gh = static_cast<int>(H * scale);
+
+			SP().DrawTex(d->FontTex.get(),
+				static_cast<int>(x + W * scale * 0.5f),
+				static_cast<int>(top - boxH * 0.5f),
+				gw, gh, nullptr, &col, { 0.5f, 0.5f });
+			x += W * scale;
+		}
+	}
+
+	//----------------------------------------------------------
+	// 拡大した文字を右端・中央へ合わせる。
+	// 伸ばした後の幅は「元の幅 × 倍率」。呼ぶ側で毎回計算すると
+	// 倍率の掛け忘れが起きるので、ここにまとめる。
+	//----------------------------------------------------------
+	static float ScaledWidth(int fontId, const char* str, float targetPx)
+	{
+		const float scale = targetPx / std::max(UIConst::FontPx(fontId), 1.0f);
+		return Measure(fontId, str, 0.0f) / UIConst::Scale * scale;
+	}
+
+	void TextScaledR(int fontId, float dRightX, float dy, float targetPx,
+		const char* str, const Math::Color& col)
+	{
+		TextScaled(fontId, dRightX - ScaledWidth(fontId, str, targetPx), dy, targetPx, str, col);
+	}
+
+	void TextScaledC(int fontId, float dCx, float dy, float targetPx,
+		const char* str, const Math::Color& col)
+	{
+		TextScaled(fontId, dCx - ScaledWidth(fontId, str, targetPx) * 0.5f, dy, targetPx, str, col);
+	}
+
+	//----------------------------------------------------------
+	// 右端を合わせて描く。
+	// 表の数値のように、頭ではなく右が揃う方が読みやすい場面で使う。
+	//----------------------------------------------------------
+	void TextR(int fontId, float dRightX, float dy, float pxH, const char* str, const Math::Color& col)
+	{
+		const float w = Measure(fontId, str, 0.0f) / UIConst::Scale;   // デザインpx幅
+		Text(fontId, dRightX - w, dy, pxH, str, col);
+	}
+
+	// ══════════════ 図形(追加分) ══════════════
+	void DiscD(float cx, float cy, float r, const Math::Color& col)
+	{
+		SP().DrawCircle(static_cast<int>(MapX(cx)), static_cast<int>(MapY(cy)),
+			static_cast<int>(r * UIConst::Scale), &col, true);
+	}
+
+	//----------------------------------------------------------
+	// 円弧。短い直線をつないで描く。
+	// 分割数は半径と角度から決める。半径が大きいほど細かくしないと角張る。
+	// ※デザイン座標はY下向きなので、画面上で時計回りに進むようYを反転する。
+	//----------------------------------------------------------
+	void ArcD(float cx, float cy, float r, float a0, float a1, float px, const Math::Color& col)
+	{
+		const float sweep = fabsf(a1 - a0);
+		const int   seg   = std::clamp(static_cast<int>(r * sweep * 0.25f), 4, 128);
+
+		float px0 = cx + cosf(a0) * r;
+		float py0 = cy + sinf(a0) * r;
+		for (int i = 1; i <= seg; ++i)
+		{
+			const float t = static_cast<float>(i) / static_cast<float>(seg);
+			const float a = a0 + (a1 - a0) * t;
+			const float x = cx + cosf(a) * r;
+			const float y = cy + sinf(a) * r;
+			LineD(px0, py0, x, y, px, col);
+			px0 = x; py0 = y;
+		}
+	}
+
+	//----------------------------------------------------------
+	// 多角形の塗りつぶし(走査線)。
+	//
+	// 使える図形が矩形・線・円しかないので、形を横1本ずつの線に
+	// 分けて塗る。1行ごとに輪郭との交点を求め、対になった区間を線で結ぶ。
+	//
+	// 矩形で塗らないのは、DrawBoxが「中心と半分の大きさ」を整数で取るため。
+	// 高さ1の帯を作ろうとすると半分が0になって消える。
+	//----------------------------------------------------------
+	void PolyFillD(const float* xy, int count, const Math::Color& col)
+	{
+		if (!xy || count < 3) { return; }
+
+		// 画面座標へ直しておく。1行ずつ塗るので、行は画面の1ピクセル
+		std::vector<float> px(count), py(count);
+		float top = 0.0f, bottom = 0.0f;
+		for (int i = 0; i < count; ++i)
+		{
+			px[i] = MapX(xy[i * 2 + 0]);
+			py[i] = MapY(xy[i * 2 + 1]);
+			if (i == 0) { top = bottom = py[i]; }
+			top    = std::max(top,    py[i]);
+			bottom = std::min(bottom, py[i]);
+		}
+
+		// 画面座標はY上向きなので、上から下へ向かって減らしていく
+		std::vector<float> cross;
+		for (int y = static_cast<int>(top); y >= static_cast<int>(bottom); --y)
+		{
+			const float fy = static_cast<float>(y) + 0.5f;   // 行の中心で見る
+
+			cross.clear();
+			for (int i = 0; i < count; ++i)
+			{
+				const int j = (i + 1) % count;
+				const float y0 = py[i], y1 = py[j];
+
+				// この行をまたぐ辺だけが交点を持つ。
+				// 片側だけを含める(>= と <)ことで、頂点をちょうど通るときに
+				// 交点が二重に数えられるのを防ぐ
+				if ((y0 <= fy && y1 > fy) || (y1 <= fy && y0 > fy))
+				{
+					const float t = (fy - y0) / (y1 - y0);
+					cross.push_back(px[i] + (px[j] - px[i]) * t);
+				}
+			}
+
+			if (cross.size() < 2) { continue; }
+			std::sort(cross.begin(), cross.end());
+
+			// 交点を2つずつ組にして、その間が図形の内側
+			for (size_t k = 0; k + 1 < cross.size(); k += 2)
+			{
+				SP().DrawLine(static_cast<int>(cross[k]),     y,
+				              static_cast<int>(cross[k + 1]), y, &col);
+			}
+		}
+	}
+
+	void PolylineD(const float* xy, int count, float px, const Math::Color& col)
+	{
+		if (!xy || count < 2) { return; }
+		for (int i = 1; i < count; ++i)
+		{
+			LineD(xy[(i - 1) * 2], xy[(i - 1) * 2 + 1], xy[i * 2], xy[i * 2 + 1], px, col);
+		}
+	}
+
+	//----------------------------------------------------------
+	// 状態チップ。
+	// 点いていればアシッド塗り、消えていれば細い枠だけ。
+	// 面と線の差で見せるので、色を増やさずに状態を表せる。
+	//----------------------------------------------------------
+	float Chip(float dx, float dy, const char* label, bool hot, const Math::Color& ink)
+	{
+		const float w = Measure(UIConst::FontTiny, label, 0.0f) / UIConst::Scale
+		              + UIConst::ChipPadX * 2.0f;
+
+		if (hot) { RectTL(dx, dy, w, UIConst::ChipH, UIConst::ACID); }
+		else     { FrameTL(dx, dy, w, UIConst::ChipH, 2.0f, ink); }
+
+		TextAt(UIConst::FontTiny, dx + UIConst::ChipPadX,
+			dy + UIConst::CenterInBox(UIConst::ChipH, UIConst::FontPx(UIConst::FontTiny)),
+			label, hot ? UIConst::INK : ink);
+		return w;
+	}
+
+	//----------------------------------------------------------
+	// 表の見出し帯。
+	// 列の左端は個別に指定する。等分割にすると、
+	// 短い列(PINGなど)に無駄な幅が付いて全体が間延びする。
+	//----------------------------------------------------------
+	void TableHead(float dx, float dy, float w, const char* const* cols,
+		const float* colX, int count)
+	{
+		if (!cols || !colX || count <= 0) { return; }
+
+		RectTL(dx, dy, w, UIConst::TableHeadH, UIConst::INK);
+		for (int i = 0; i < count; ++i)
+		{
+			TextAt(UIConst::FontFoot, colX[i],
+				dy + UIConst::CenterInBox(UIConst::TableHeadH, UIConst::FontPx(UIConst::FontFoot)),
+				cols[i], UIConst::WHITE);
 		}
 	}
 
@@ -574,17 +868,22 @@ namespace HjUI
 		RectTL(dx, barDy, w * std::clamp(value, 0.0f, 1.0f), barH, ACID, true); // アシッド充填
 	}
 
-	float Keycap(float dx, float dy, const char* key, const char* label)
+	float Keycap(float dx, float dy, const char* key, const char* label, const Math::Color& col)
 	{
 		using namespace UIConst;
 		const float pad = 10.0f;
 		const float kw = Measure(FontRow, key, 0.0f) / UIConst::Scale + pad * 2.0f;
 		const float kh = 30.0f;
-		FrameTL(dx, dy, kw, kh, 2.0f, INK);
-		Text(FontRow, dx + pad, CenterTextDy(dy, kh, 14.0f), 14.0f, key, INK);
+		FrameTL(dx, dy, kw, kh, 2.0f, col);
+		Text(FontRow, dx + pad, CenterTextDy(dy, kh, 14.0f), 14.0f, key, col);
 		const float cx = dx + kw + 9.0f;
-		Text(FontRow, cx, CenterTextDy(dy, kh, 14.0f), 14.0f, label, INK);
+		Text(FontRow, cx, CenterTextDy(dy, kh, 14.0f), 14.0f, label, col);
 		return (cx + Measure(FontRow, label, 0.0f) / UIConst::Scale) - dx;   // 消費幅
+	}
+
+	float Keycap(float dx, float dy, const char* key, const char* label)
+	{
+		return Keycap(dx, dy, key, label, UIConst::INK);
 	}
 
 	void Stepper(float dx, float dy, float w, const char* value)
@@ -626,5 +925,94 @@ namespace HjUI
 		using namespace UIConst;
 		Text(FontSmall, dx, dy, 12.0f, label, INK);
 		LineD(dx, dy + 20.0f, dx + 240.0f, dy + 20.0f, 2.0f, INK);   // 下線
+	}
+}
+
+//==========================================================
+// HjUI::Deco  装飾
+//==========================================================
+namespace HjUI::Deco
+{
+	using namespace UIConst;
+
+	//----------------------------------------------------------
+	// 同じ大きさの円を左上へずらしながら重ねる。
+	// 大きさを変えずに位置だけずらすのが要点で、
+	// 縮小コピーにすると遠近に見えてしまい、motifとして別物になる。
+	//----------------------------------------------------------
+	void DriftCircles(float startX, float startY, float r, int count,
+		float stepX, float stepY, const Math::Color& col)
+	{
+		for (int i = 0; i < count; ++i)
+		{
+			RingD(startX + stepX * i, startY + stepY * i, r, col);
+		}
+	}
+
+	void BoxedX(float dx, float dy, float s)
+	{
+		FrameTL(dx, dy, s, s, 5.0f, ACID);
+		const float p = s * 0.24f;
+		LineD(dx + p,     dy + p,     dx + s - p, dy + s - p, 4.0f, INK);
+		LineD(dx + s - p, dy + p,     dx + p,     dy + s - p, 4.0f, INK);
+	}
+
+	void DotGrid(float dx, float dy, int cols, int rows, float gap, const Math::Color& col)
+	{
+		for (int y = 0; y < rows; ++y)
+		{
+			for (int x = 0; x < cols; ++x)
+			{
+				DiscD(dx + x * gap, dy + y * gap, DotGridRadius, col);
+			}
+		}
+	}
+
+	//----------------------------------------------------------
+	// バーコード状の縦線。
+	// 幅を規則的にばらつかせる。完全に等間隔だと機械的な縞になり、
+	// 印刷物から取ってきた記号には見えない。
+	//----------------------------------------------------------
+	void Barcode(float dx, float dy, float h, int count)
+	{
+		float x = dx;
+		for (int i = 0; i < count; ++i)
+		{
+			// 3種の幅を巡回させて、規則はあるが読めない並びにする
+			const float w = BarcodeWidths[i % BarcodeWidthCount];
+			RectTL(x, dy, w, h, INK);
+			x += w + BarcodeGap;
+		}
+	}
+
+	void Guide(float dx, float dy0, float dy1, const Math::Color& col)
+	{
+		LineD(dx, dy0, dx, dy1, 1.0f, col);
+	}
+
+	//----------------------------------------------------------
+	// ガイド線の切れ目に置く印。
+	// 線を途中で切っただけだと描き忘れに見えるので、
+	// 切れ目であることを示す短い横線を足す。
+	//----------------------------------------------------------
+	void CropTick(float dx, float dy, const Math::Color& col)
+	{
+		LineD(dx - CropTickLen, dy, dx + CropTickLen, dy, 2.0f, col);
+	}
+
+	//----------------------------------------------------------
+	// 画面四隅のかぎ括弧。
+	// 中身を囲わないので、映像の上に置いても画面を塞がない。
+	//----------------------------------------------------------
+	void CornerBrackets(float inset, float len, float w, float h,
+		float px, const Math::Color& col)
+	{
+		const float l = inset, r = w - inset;
+		const float t = inset, b = h - inset;
+
+		LineD(l, t, l + len, t, px, col);   LineD(l, t, l, t + len, px, col);   // 左上
+		LineD(r - len, t, r, t, px, col);   LineD(r, t, r, t + len, px, col);   // 右上
+		LineD(l, b, l + len, b, px, col);   LineD(l, b - len, l, b, px, col);   // 左下
+		LineD(r - len, b, r, b, px, col);   LineD(r, b - len, r, b, px, col);   // 右下
 	}
 }

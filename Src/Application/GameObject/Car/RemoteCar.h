@@ -1,0 +1,95 @@
+﻿#pragma once
+
+#include "Silvia.h"
+#include "../../Network/HjNetProtocol.h"
+
+//==========================================================
+// RemoteCar
+//   他のプレイヤーの車。
+//
+//   ■ 物理を回さない
+//   本人のPCが出した答え(位置と向き)を受け取って、それを描くだけ。
+//   こちらでも物理を回すと、同じ操作をしていない以上ずれていくうえ、
+//   届いた位置で毎フレーム引き戻すことになって車が震える。
+//
+//   ■ わざと少し過去を描く
+//   届いた最新の位置をそのまま描くと、パケットが1つ遅れただけで
+//   相手の車が止まり、次が来た瞬間に飛ぶ。
+//   InterpDelay ぶん遅らせて描けば、手元には常に「次の位置」があるので、
+//   2点の間を繋ぐだけで滑らかになる。
+//   遅れと滑らかさの引き換えで、0.12秒は見て分かるほどの遅れではない。
+//
+//   ■ タイヤの回転は速度から作る
+//   毎秒20回では、その間にタイヤが1回転以上することがある。
+//   送られた角度を繋ぐと回り方がおかしくなるので、こちらで回す。
+//
+//   使い方(シーン側):
+//     PushState(届いたパケット)   受け取るたび
+//     あとは通常のオブジェクトとして Update / Draw される
+//==========================================================
+class RemoteCar : public Silvia
+{
+public:
+	// プレイヤー番号(名簿と対応)。どの車が誰かを見分けるのに使う
+	explicit RemoteCar(int playerId) : m_playerId(playerId) {}
+
+	void Init()   override;
+	void Update() override;
+	// 車の上に出す名前札。2Dで描くのでスプライトのパスに乗せる
+	void DrawSprite() override;
+
+	int GetPlayerId() const { return m_playerId; }
+
+	// 表示する名前。名簿から貰った値を入れる
+	void SetPlayerName(const std::string& name) { m_playerName = name; }
+	// 見分け用の色。アウトラインと煙に反映される
+	void SetPlayerColor(const Math::Vector3& color) { ApplyPlayerColor(color); }
+
+	// 届いた状態を積む。順番の入れ替わりはセッション側で弾いてある
+	void PushState(const HjNetStatePacket& state);
+
+	// まだ一度も状態が届いていない間は描かない。
+	// 原点に車が置かれたままになるのを避ける
+	bool CheckInScreen(const DirectX::BoundingFrustum&) const override { return m_hasState; }
+
+private:
+	// 受け取った状態と、それが手元へ届いた時刻。
+	//
+	// 送り主の時刻ではなく「自分が受け取った時刻」で並べる。
+	// PC同士の時計は合っていないので、送り主の時刻をそのまま使うと
+	// 時計合わせの仕組みが要る。受信時刻なら回線のばらつきぶんは
+	// 揺れるが、InterpDelay がそれを吸収してくれる。
+	struct Sample
+	{
+		float            time = 0.0f;
+		HjNetStatePacket state;
+	};
+
+	// 描くべき時刻の状態を作る。false=まだ描けるものが無い
+	bool SampleAt(float renderTime, HjNetStatePacket& out) const;
+
+	// 見た目のタイヤの回転を、今の速度から進める
+	void SpinWheels(float dt, float speed, bool handbrake);
+
+	// ワールド座標を、UIが使うデザイン座標へ直す。
+	// false=カメラの後ろにある(画面に出ない)
+	static bool WorldToDesign(const Math::Vector3& world, float& outX, float& outY);
+
+	// 角度の補間。359度→1度のような繋ぎ目で逆回りしないよう、
+	// 近いほうの回り方を選ぶ
+	static float LerpAngle(float a, float b, float t);
+
+	int         m_playerId = -1;
+	bool        m_hasState = false;
+	std::string m_playerName;
+
+	// タイヤの転がり角。基底のものは物理が回す前提で外から触れないので、
+	// ここで持って ApplyVisualState へ渡す
+	float m_spinFront = 0.0f;
+	float m_spinRear  = 0.0f;
+
+	// 自分の時計。届いた時刻を刻むのと、描く時刻を決めるのに使う
+	float m_time = 0.0f;
+
+	std::vector<Sample> m_history;
+};

@@ -1,4 +1,5 @@
 ﻿#include "TitleScene.h"
+#include "../../Input/HjKeyInput.h"
 #include "../SceneManager.h"
 #include "../HjTransition.h"
 #include "../../GameObject/UI/TitleMenuUI.h"
@@ -6,17 +7,23 @@
 void TitleScene::Event()
 {
 	// ELEMENTS(UIキット)確認用：F5 でいつでも開ける(デバッグ)
-	if (GetAsyncKeyState(VK_F5) & 0x8000)
+	if (HjKeyInput::Instance().Pressed(VK_F5))
 	{
 		HjTransition::Instance().Go(SceneManager::SceneType::Elements);
 		return;
 	}
 
 	// Enter/Space または マウスクリックで決定。選択中メニューに応じて遷移。
-	bool decide = (GetAsyncKeyState(VK_RETURN) & 0x8000) || (GetAsyncKeyState(VK_SPACE) & 0x8000);
+	// ※押しっぱなしを条件にしないこと。押している間ずっと決定が成立し、
+	//   遷移先でも同じキーで決定が続いてしまう。
+	bool decide = HjKeyInput::Instance().Pressed(HjKeyInput::Key::Decide);
 	int sel = 0;
 	if (auto menu = m_wpMenu.lock())
 	{
+		// 名前の編集中はENTERを決定に使わせない。
+		// 名前の確定に使うキーなので、そのまま画面遷移してしまう。
+		if (menu->IsNameEditing()) { return; }
+
 		sel = menu->GetSelected();
 		if (menu->ConsumeActivated()) { decide = true; }
 	}

@@ -16,6 +16,12 @@ public:
 
 	void SetBrightThreshold(float threshold) { m_cb0_BrightInfo.Work().Threshold = threshold; }
 
+	// 被写界深度(DoF)のON/OFF。
+	// 焦点が合っていないと全域にピントが合った状態と同じ絵になるうえ、
+	// 下準備のBlurProcess(全画面4パス)も無駄に走るので、切っている間は素通し。
+	void SetDoFEnabled(bool enable) { m_dofEnabled = enable; }
+	bool IsDoFEnabled() const { return m_dofEnabled; }
+
 	struct Vertex
 	{
 		Math::Vector3 Pos;
@@ -70,6 +76,30 @@ public:
 	void DrawFluidTextImGui();                     // Hierarchy/Inspectorパネル(ImGui)
 	void SetFluidTextIntensity(float v);           // 選択中オブジェクトの効果強さ(0-1)
 	int  CycleFluidStyle();                        // 選択中オブジェクトのスタイルを次へ回し番号を返す
+
+	// 判定文字(GREAT/PERFECT)専用の枠。
+	// Inspectorで並べる普段のオブジェクトとは別に1枠だけ持たせる。
+	// ゲーム側が毎フレーム位置と強さを書き換えるので、
+	// 選択中オブジェクトを乗っ取る作りにすると調整中のものが壊れる。
+	//   SetFluidJudge   … 文字とスタイルを決める(出す瞬間に1回)
+	//   UpdateFluidJudge… 位置・大きさ・強さ(毎フレーム)
+	//   HideFluidJudge  … 消す
+	void SetFluidJudge(const char* str, int style,
+	                   const Math::Vector4& core, const Math::Vector4& fluid);
+	void UpdateFluidJudge(float intensity, float cx, float cy, float w, float h);
+	void HideFluidJudge();
+
+	// 走行中のスコア専用の枠。判定とは別に持つ。
+	// 判定は一瞬しか出ないが、スコアは出っぱなしなので、
+	// 同じ枠を取り合うと判定が出るたびにスコアが消える。
+	// dilate=炎の尾(トレイル)の長さ。既定0.05はほぼ文字際にしか出ず、
+	// 炎が小さく見える。文字自体の大きさ(枠のサイズ)とは別のパラメータで、
+	// これを伸ばせば文字を大きくせずに炎だけ大きく見せられる。
+	void SetFluidScore(const char* str, int style,
+	                   const Math::Vector4& core, const Math::Vector4& fluid,
+	                   float dilate);
+	void UpdateFluidScore(float intensity, float cx, float cy, float w, float h);
+	void HideFluidScore();
 
 	// モーションブラー用：毎フレームカメラ位置を渡す
 	void SetCameraPositionForMotionBlur(const Math::Vector3& pos) { m_currentCamPos = pos; m_camPosSet = true; }
@@ -316,6 +346,12 @@ private:
 	KdRenderTargetChanger                       m_textFluidRTChanger;   // 焼き込み共用
 	std::vector<std::shared_ptr<FluidTextItem>> m_fluidItems;           // 描画順=レイヤー(先頭=奥)
 	int                                         m_fluidSelected = 0;    // Inspector対象
+	// 判定文字(GREAT/PERFECT)専用の枠。m_fluidItemsの末尾＝最前面に置く
+	std::shared_ptr<FluidTextItem>              m_judgeItem;
+	// 走行中のスコア専用の枠
+	std::shared_ptr<FluidTextItem>              m_scoreItem;
+	void EnsureJudgeItem();
+	void EnsureScoreItem();
 	void EnsureFluidItems();               // 空なら既定オブジェクトを1つ用意
 	void BakeFluidText(FluidTextItem& item);  // item.str をitem.rtへDrawFontで焼く
 

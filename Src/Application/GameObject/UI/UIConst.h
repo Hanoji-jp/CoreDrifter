@@ -14,6 +14,57 @@ namespace UIConst
 	const Math::Color INK30  = { 0.078f, 0.078f, 0.078f, 0.30f }; // 罫線(墨30%)
 	const Math::Color DOTS   = { 0.078f, 0.078f, 0.078f, 0.42f }; // ハーフトーン点
 
+	// 縁取り文字のずらし量(デザインpx)。3D画面の上では背景の明暗が
+	// 毎フレーム変わるので、縁が無いと文字が読めなくなる
+	const float OutlineOffset = 2.5f;
+
+	//===== 箱の中に文字を置くときの上端 =====
+	// 文字は上端が基準なので、箱の中で中央に見せるには
+	// (箱の高さ - 文字の高さ) / 2 だけ下げる。
+	// この計算を各画面で手打ちすると、箱や文字の大きさを変えるたびにずれる。
+	constexpr float CenterInBox(float boxH, float textPx)
+	{
+		return (boxH - textPx) * 0.5f;
+	}
+
+	//===== ゲームのバージョン =====
+	// 表示する場所が増えたときに食い違わないよう、文字列はここだけに持つ
+	const char* const GameVersion = "Ver. 0.1.0";
+
+	//===== タイトル上部のバッジ / 銘板 =====
+	// 描画と当たり判定で同じ数値を使う。
+	// 別々に書くと、片方だけ動かしたときに「見た目と押せる場所」がずれる。
+	const float TitleBadgeY = 40.0f, TitleBadgeH = 34.0f;
+	const float TitleBadgeNameX = 1262.0f, TitleBadgeNameW = 118.0f;
+	const float TitleBadgeLvX = 1380.0f, TitleBadgeLvW = 70.0f;
+	// 名前とレベルを合わせた範囲(ここ全体を押せるようにする)
+	const float TitleBadgeAllX = TitleBadgeNameX;
+	const float TitleBadgeAllW = (TitleBadgeLvX + TitleBadgeLvW) - TitleBadgeNameX;
+	// レベルの進み具合を示す細い帯(バッジの下辺に敷く)
+	const float TitleBadgeGaugeH = 3.0f;
+
+	//===== 状態チップ =====
+	// 点いていればアシッド塗り、消えていれば細い枠。
+	// 面と線の差で状態を見せるので、色を増やさずに済む。
+	// 文字の高さに対して上下の余白を広く取る。
+	// 詰まっていると窮屈に見えるうえ、隣のチップとの境も曖昧になる。
+	const float ChipH      = 42.0f;
+	const float ChipPadX   = 16.0f;
+	const float ChipTextDy = 17.0f;   // 文字のベースライン(チップ上端から)
+
+	//===== 表の見出し帯 =====
+	const float TableHeadH      = 44.0f;
+	const float TableHeadTextDy = 28.0f;
+
+	//===== 装飾 =====
+	const float DotGridRadius = 1.6f;   // 等間隔の点の半径
+	const float CropTickLen   = 5.0f;   // ガイド線の切れ目に置く印の長さ
+	// バーコードの線幅。等間隔だと機械的な縞になって記号に見えないので、
+	// 数種類を巡回させて「規則はあるが読めない」並びにする
+	const float BarcodeWidths[3] = { 2.0f, 4.0f, 3.0f };
+	const int   BarcodeWidthCount = 3;
+	const float BarcodeGap = 3.0f;
+
 	// ── 画面(1280x720, 中心原点) ──
 	const int   ScreenW   = 1280;
 	const int   ScreenH   = 720;
@@ -23,6 +74,24 @@ namespace UIConst
 	// デザインは1536x864基準。1280x720へ一様スケール。
 	const float DesignW   = 1536.0f;
 	const float DesignH   = 864.0f;
+
+	//===== 名前入力のダイアログ(画面中央) =====
+	// バッジの中で直接打たせると、枠が狭くて今どこまで打ったか見えない。
+	// 画面を暗く落として中央に大きく出し、入力だけに集中できるようにする。
+	const float NameDlgW = 560.0f, NameDlgH = 220.0f;
+	const float NameDlgX = (DesignW - NameDlgW) * 0.5f;
+	const float NameDlgY = (DesignH - NameDlgH) * 0.5f;
+	// 背景を落とす濃さ。真っ暗にすると元の画面が見えず、
+	// どこから来たのか分からなくなる
+	const float NameDlgDim = 0.72f;
+	// 中身(ダイアログ左上からの距離)
+	const float NameDlgPadX  = 36.0f;
+	const float NameDlgCapDy = 34.0f;    // 小見出し
+	const float NameDlgValDy = 84.0f;    // 入力中の文字
+	const float NameDlgValPx = 47.0f;
+	const float NameDlgRuleDy = 142.0f;  // 入力欄の下線
+	const float NameDlgHintDy = 166.0f;  // 操作の案内
+
 	const float Scale     = 1280.0f / 1536.0f;   // = 0.8333
 
 	// ── フォントID(main.cppでArchivoを登録) ──
@@ -40,7 +109,43 @@ namespace UIConst
 	const int   FontRow   = 13;  // Archivo 14/700    (設定行/バー)
 	const int   FontTab   = 14;  // Archivo 17/800    (タブ/見出し)
 	const int   FontHead  = 15;  // Archivo 47/900    (画面見出し)
-	const int   FontCard  = 16;  // Archivo 34/900    (カード見出し・中サイズ)
+	const int   FontCard  = 16;
+	// 日本語・中国語が入りうる場所で使う(名前入力など)。
+	// 欧文フォントはCJKのグリフを持たないので、別書体を割り当てる。
+	// 描画側は字の大きさを変えられないので、用途ごとにサイズを分けて登録する
+	const int   FontCJK      = 17;   // 名前入力(大)
+	const int   FontCJKSmall = 18;   // バッジ(小)  // Archivo 34/900    (カード見出し・中サイズ)
+
+	//===== フォントIDごとの実際の大きさ(px) =====
+	// HjUI::Text の pxH は「縦位置を決める値」であって、
+	// 文字の大きさは変えない。大きさはフォントIDで決まっている。
+	// ここが食い違うと、文字が上下にずれて置かれる。
+	// 呼ぶ側が数字を書かなくて済むよう、対応表をここに持つ。
+	// (main.cpp の AddFont と対で管理すること)
+	constexpr float FontPx(int fontId)
+	{
+		switch (fontId)
+		{
+		case 2:  return 125.0f;   // FontTitle
+		case 3:  return 88.0f;    // FontSub
+		case 4:  return 18.0f;    // FontMenu
+		case 5:  return 12.0f;    // FontSmall
+		case 6:  return 11.0f;    // FontStrip
+		case 7:  return 11.0f;    // FontFoot
+		case 8:  return 13.0f;    // FontNpTtl
+		case 9:  return 10.0f;    // FontNpArt
+		case 10: return 17.0f;    // FontSlash
+		case 11: return 10.0f;    // FontTiny
+		case 12: return 15.0f;    // FontBtn
+		case 13: return 14.0f;    // FontRow
+		case 14: return 17.0f;    // FontTab
+		case 15: return 47.0f;    // FontHead
+		case 16: return 30.0f;    // FontCard
+		case 17: return 47.0f;    // FontCJK
+		case 18: return 12.0f;    // FontCJKSmall
+		default: return 14.0f;
+		}
+	}
 
 	// ── 追加パレット ──
 	const Math::Color ACID_HL = { 0.756f, 0.831f, 0.098f, 1.0f }; // 枠のアシッド(#cfe021濃色)

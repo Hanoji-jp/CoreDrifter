@@ -1,4 +1,5 @@
 ﻿#include "SettingsUI.h"
+#include "../../Input/HjKeyInput.h"
 
 namespace
 {
@@ -28,13 +29,14 @@ void SettingsUI::Init() {}
 
 void SettingsUI::Update()
 {
-	const bool up = (GetAsyncKeyState(VK_UP)   & 0x8000) != 0 || (GetAsyncKeyState('W') & 0x8000) != 0;
-	const bool dn = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0 || (GetAsyncKeyState('S') & 0x8000) != 0;
-	const bool lf = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0 || (GetAsyncKeyState('A') & 0x8000) != 0;
-	const bool rt = (GetAsyncKeyState(VK_RIGHT)& 0x8000) != 0 || (GetAsyncKeyState('D') & 0x8000) != 0;
+	auto& key = HjKeyInput::Instance();
+	const bool up = key.Pressed(HjKeyInput::Key::Up);
+	const bool dn = key.Pressed(HjKeyInput::Key::Down);
+	const bool lf = key.Pressed(HjKeyInput::Key::Left);
+	const bool rt = key.Pressed(HjKeyInput::Key::Right);
 
-	if (up && !m_prevUp) { m_row = (m_row + kRowCount - 1) % kRowCount; }
-	if (dn && !m_prevDn) { m_row = (m_row + 1) % kRowCount; }
+	if (up) { m_row = (m_row + kRowCount - 1) % kRowCount; }
+	if (dn) { m_row = (m_row + 1) % kRowCount; }
 
 	auto stepRow = [&](int dir)
 	{
@@ -49,10 +51,9 @@ void SettingsUI::Update()
 		default: break;
 		}
 	};
-	if (rt && !m_prevR) { stepRow(1); }
-	if (lf && !m_prevL) { stepRow(-1); }
+	if (rt) { stepRow(1); }
+	if (lf) { stepRow(-1); }
 
-	m_prevUp = up; m_prevDn = dn; m_prevL = lf; m_prevR = rt;
 
 	// ── マウス ──
 	HjUI::BeginInput();

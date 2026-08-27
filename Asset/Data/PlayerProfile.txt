@@ -1,0 +1,4 @@
+name はあああ
+total 20885.8
+best 13904.7
+runs 5

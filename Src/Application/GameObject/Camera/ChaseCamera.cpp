@@ -5,7 +5,13 @@
 void ChaseCamera::Init()
 {
 	m_spCamera = std::make_shared<KdCamera>();
-	m_spCamera->SetProjectionMatrix(CarConst::CamFov);
+	m_spCamera->SetProjectionMatrix(CarConst::CamFov, 2000.0f, CarConst::CamNearClip);
+
+	// 被写界深度の焦点。値そのものはKdCameraが持ち、
+	// 毎フレームのSetToShader()で近遠クリップと合わせて自動的に送られる。
+	m_spCamera->SetFocus(CarConst::CamDofFocusDistance,
+	                     CarConst::CamDofForeRange,
+	                     CarConst::CamDofBackRange);
 
 	m_orbitYaw   = 0.0f;   // 右ドラッグのオフセット(基準は進行方向)
 	m_orbitPitch = CarConst::CamInitPitch;
@@ -142,7 +148,7 @@ void ChaseCamera::PreDraw()
 	camWorld._41 = camPos.x;   camWorld._42 = camPos.y;   camWorld._43 = camPos.z;
 
 	// 速度・ドリフトで開いたFOVを射影に反映
-	m_spCamera->SetProjectionMatrix(m_dynFov);
+	m_spCamera->SetProjectionMatrix(m_dynFov, 2000.0f, CarConst::CamNearClip);
 	m_spCamera->SetCameraMatrix(camWorld);
 	m_spCamera->SetToShader();
 }

@@ -1,11 +1,12 @@
 ﻿#include "PlayModeScene.h"
+#include "../../Input/HjKeyInput.h"
 #include "../SceneManager.h"
 #include "../HjTransition.h"
 #include "../../GameObject/UI/PlayModeUI.h"
 
 void PlayModeScene::Event()
 {
-	if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+	if (HjKeyInput::Instance().Pressed(HjKeyInput::Key::Cancel))
 	{
 		HjTransition::Instance().Go(SceneManager::SceneType::Title);
 		return;
@@ -15,10 +16,16 @@ void PlayModeScene::Event()
 	{
 		if (ui->ConsumeActivated())
 		{
-			// 選択カードが広がってゲームへ(コンテナ・トランスフォーム)
+			// マルチだけは先に部屋の一覧を挟む。
+			// 誰と走るかを決めてからでないとゲームへ入れないため。
+			const bool multi = (ui->GetSelected() == PlayModeUI::MultiplayerIndex);
+
+			// 選択カードが広がって次の画面へ(コンテナ・トランスフォーム)
 			float dx, dy, w, h;
 			ui->GetSelectedCardRect(dx, dy, w, h);
-			HjTransition::Instance().GoMorph(SceneManager::SceneType::Game, dx, dy, w, h);
+			HjTransition::Instance().GoMorph(
+				multi ? SceneManager::SceneType::Lobby : SceneManager::SceneType::Game,
+				dx, dy, w, h);
 		}
 	}
 }

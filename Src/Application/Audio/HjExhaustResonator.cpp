@@ -67,7 +67,17 @@ void HjExhaustResonator::Rebuild()
 		m.a2 = -r * r;
 
 		// 高いモードほど弱く。共振の利得(1/(1-r))で割って高さを揃える
-		const float lvl = powf(1.0f / static_cast<float>(n), m_rolloff);
+		float lvl = powf(1.0f / static_cast<float>(n), m_rolloff);
+
+		// 最低次のモードを抑える。1/nで並べると1次が一番強くなるが、
+		// 実物の管では最低次ほど強く減衰する。そのままだと
+		// 100〜180Hzが張り出して「ドコドコ」＝トラクターのような音になる。
+		if (m_lowCut > 0.001f)
+		{
+			const float x = f / LowModeCutHz;
+			lvl *= 1.0f - m_lowCut / (1.0f + x * x * x);   // 低いほど強く削る
+		}
+
 		m.gain = lvl * (1.0f - r);
 	}
 }

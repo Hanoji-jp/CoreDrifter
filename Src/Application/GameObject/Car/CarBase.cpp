@@ -1,4 +1,7 @@
 ﻿#include "CarBase.h"
+#include "../../Util/HjProfiler.h"
+#include "../../Util/HjPostFxSettings.h"
+#include "../../Audio/HjAudioSpace.h"
 
 void CarBase::Init()
 {
@@ -20,6 +23,7 @@ void CarBase::Init()
 	m_smoke.Init();
 	m_neon.Init();
 	m_engineAudio.Init();
+	m_tireAudio.Init();
 	// タイヤ痕のマップはコースに1枚の共有。自車ぶんの枠だけ確保する
 	SkidMark::Instance().Init();
 	m_skidBase = SkidMark::Instance().AllocTrails();
@@ -183,6 +187,166 @@ void CarBase::UpdateBodyAlignAssist(float dt, float vLong0, bool handbrake)
 //   横G  → ロール (コーナーで外傾)
 //   前後G→ ピッチ (加速で後沈み / ブレーキで前ダイブ)
 //----------------------------------------------------------
+//----------------------------------------------------------
+// 通信で受け取った状態を見た目へ流し込む。
+// 物理は一切進めない(他人の車は本人のPCが答えを出している)。
+//----------------------------------------------------------
+void CarBase::ApplyVisualState(const Math::Vector3& pos, float yaw, const Math::Vector3& vel,
+                               float steer, float spinFront, float spinRear)
+{
+	m_pos   = pos;
+	m_yaw   = yaw;
+	m_vel   = vel;          // カメラとHUDが進行方向を読むので入れておく
+	m_steer = steer;
+
+	m_wheelSpinFront = spinFront;
+	m_wheelSpinRear  = spinRear;
+}
+
+//----------------------------------------------------------
+// タイヤ痕と煙。
+//
+// ※自分の車(CarBase::UpdateMotionFeedback)と同じ形の処理が並ぶが、
+//   あちらは物理の途中の値を大量に使っており、切り出すと
+//   挙動そのものに触ることになる。こちらは「滑り量」だけを
+//   入力にした短い版で、同じ定数を使うので絵は揃う。
+//----------------------------------------------------------
+void CarBase::EmitTireFx(float dt, float speed, float slipRear01, float slipFront01,
+                           bool onGround)
+{
+	auto& skid = SkidMark::Instance();
+
+	const Math::Vector3 fwd(sinf(m_yaw), 0.0f, cosf(m_yaw));
+	const Math::Vector3 right(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+	// 前輪は舵の向きぶん回っている。痕の幅方向がここで変わる
+	const Math::Vector3 rightF(cosf(m_yaw + m_steer), 0.0f, -sinf(m_yaw + m_steer));
+
+	// 止まっている・浮いているときは痕を切る。
+	// 切らないと、次に接地したときに離れた点同士が線で繋がってしまう
+	const bool canMark = (speed > SmokeConst::MinSpeed) && onGround;
+
+	for (int side = -1; side <= 1; side += 2)
+	{
+		const int rearIdx  = m_skidBase + ((side < 0) ? 0 : 1);
+		const int frontIdx = m_skidBase + ((side < 0) ? 2 : 3);
+
+		if (!canMark) { skid.Cut(rearIdx); skid.Cut(frontIdx); continue; }
+
+		const Math::Vector3 lat = right * (static_cast<float>(side) * m_track);
+
+		Math::Vector3 wpR = m_pos + lat - fwd * m_base;
+		wpR.y = m_pos.y + SmokeConst::WheelGroundY;
+		skid.Emit(rearIdx, wpR, right, slipRear01);
+
+		Math::Vector3 wpF = m_pos + lat + fwd * m_base;
+		wpF.y = m_pos.y + SmokeConst::WheelGroundY;
+		skid.Emit(frontIdx, wpF, rightF, slipFront01);
+	}
+
+	if (!canMark) { m_smokeCarry = 0.0f; m_smokeCarryFront = 0.0f; return; }
+
+	// 煙。毎秒ぶん＋進んだ距離ぶんで数を決める。
+	// 距離ぶんを足すのは、速度が上がっても粒の間隔が広がらないようにするため
+	const float rate = SmokeConst::MeshSpawnPerSec
+	                 + SmokeConst::MeshSpawnPerMeter * speed;
+
+	// 後輪
+	if (slipRear01 > 0.0f)
+	{
+		m_smokeCarry += rate * slipRear01 * dt;
+		const int n = static_cast<int>(m_smokeCarry);
+		m_smokeCarry -= static_cast<float>(n);
+
+		if (n > 0)
+		{
+			const Math::Vector3 trail = -m_vel * SmokeConst::TrailFactor;
+			for (int side = -1; side <= 1; side += 2)
+			{
+				Math::Vector3 wp = m_pos + right * (static_cast<float>(side) * m_track)
+				                 - fwd * m_base;
+				wp.y = m_pos.y + SmokeConst::WheelGroundY;
+				m_smoke.Emit(wp, trail, right * static_cast<float>(side), n);
+			}
+		}
+	}
+	else { m_smokeCarry = 0.0f; }
+
+	// 前輪。擦れているときだけ、砂埃くらいの小さな粒を少量
+	if (slipFront01 > 0.0f)
+	{
+		m_smokeCarryFront += rate * SmokeConst::FrontSpawnMul * slipFront01 * dt;
+		const int nf = static_cast<int>(m_smokeCarryFront);
+		m_smokeCarryFront -= static_cast<float>(nf);
+
+		if (nf > 0)
+		{
+			const Math::Vector3 trailF = -m_vel * SmokeConst::TrailFactor;
+			for (int side = -1; side <= 1; side += 2)
+			{
+				Math::Vector3 wp = m_pos + right * (static_cast<float>(side) * m_track)
+				                 + fwd * m_base;
+				wp.y = m_pos.y + SmokeConst::WheelGroundY;
+				m_smoke.Emit(wp, trailF, right * static_cast<float>(side), nf,
+				             SmokeConst::FrontSizeMul);
+			}
+		}
+	}
+	else { m_smokeCarryFront = 0.0f; }
+}
+
+void CarBase::UpdateEffectParticles(float dt)
+{
+	m_smoke.Update(dt);
+	m_neon.Update(dt);
+}
+
+void CarBase::ApplyPlayerColor(const Math::Vector3& color)
+{
+	// 本来の色を一度だけ控える。
+	// 上書きしてから控えると、控えた値まで見分け色になってしまう
+	if (!m_tuneColorSaved)
+	{
+		m_tuneOutlineColor = m_outlineColor;
+		m_tuneSmokeColor   = m_smokeColor;
+		m_tuneSmokeColorB  = m_smokeColorB;
+		m_tuneColorSaved   = true;
+	}
+
+	// アウトライン＝一番目立つ輪郭。誰の車かはここで判別する
+	m_outlineColor = color;
+
+	// 煙も同じ色にする。ドリフト中は車体より煙のほうが面積が大きいので、
+	// 遠くからでも誰が滑っているか分かる。
+	// 先端は少し暗くして奥行きを出す(同色べったりだと塊が平たく見える)
+	m_smokeColor  = color;
+	m_smokeColorB = color * 0.55f;
+}
+
+void CarBase::ApplyVisualTilt(float terrainPitch, float terrainRoll,
+                              float bodyPitch, float bodyRoll)
+{
+	m_terrainPitch = terrainPitch;
+	m_terrainRoll  = terrainRoll;
+	m_pitchAngle   = bodyPitch;
+	m_rollAngle    = bodyRoll;
+}
+
+void CarBase::ClearPlayerColor()
+{
+	if (!m_tuneColorSaved) { return; }
+
+	m_outlineColor = m_tuneOutlineColor;
+	m_smokeColor   = m_tuneSmokeColor;
+	m_smokeColorB  = m_tuneSmokeColorB;
+	m_tuneColorSaved = false;
+}
+
+void CarBase::StopAudio()
+{
+	m_engineAudio.Stop();
+	m_tireAudio.Stop();
+}
+
 void CarBase::UpdateSuspensionVisual(float dt)
 {
 	// 加速度入力を平滑化(空転やアクセルのガタつきで跳ねないように)
@@ -215,9 +379,36 @@ void CarBase::UpdateDriveline(float dt, float throttle, bool handbrake,
 {
 	const float radius = std::max(m_wheelH, 0.01f);
 
+	// トルクカーブ(中回転ピーク)。空ぶかしの上昇率にも使うので先に求める。
+	// 回転数は前フレームの値を使うが、1フレームぶんの遅れは体感に出ない。
+	const float rpmN   = m_engineRPM / CarConst::MaxRPM;
+	const float dd     = rpmN - CarConst::TorquePeakN;
+	float torque = std::clamp(1.0f - CarConst::TorqueFall * dd * dd, CarConst::TorqueMin, 1.0f);
+
 	// 手動シフト(押した瞬間のみ1段。クラッチの有無に関係なく入る＝簡易化)
-	if (shiftUp   && m_gear < CarConst::GearCount) { m_gear++; }
-	if (shiftDown && m_gear > 1)                   { m_gear--; }
+	if ((shiftUp   && m_gear < CarConst::GearCount) ||
+	    (shiftDown && m_gear > 1))
+	{
+		if (shiftUp) { m_gear++; } else { m_gear--; }
+
+		// シンクロ機構がギア比の差を一瞬で吸収する体で、
+		// エンジン回転数を新しいギア比の分だけ即座に付け替える。
+		//
+		// ここを更新しないと、例えば1速レッドゾーンから5速へ飛んだ瞬間、
+		// 「5速換算では低回転のはずの場面に、1速の高回転が残る」という
+		// 矛盾した状態になる。下の駆動処理はこれを「エンジンが車輪を
+		// 空転させて引っ張っている」(サイドを離した直後と同じ状況)と
+		// 誤認し、5速の分母が小さいぶん「エンジン回転に釣り合う速度」が
+		// 異常に大きく計算されて、そこへ向かって駆動輪速度が急加速で
+		// 引っ張られる。結果、爆発的な加速として現れる。
+		if (!handbrake && !clutchPressed)
+		{
+			const float trNew = CarConst::GearRatios[m_gear] * CarConst::FinalDrive;
+			m_engineRPM = std::clamp(
+				fabsf(m_driveSpeed / radius) * trNew * CarConst::RpmPerRadSec,
+				CarConst::IdleRPM, CarConst::MaxRPM);
+		}
+	}
 
 	// クラッチ切断＝サイドブレーキ or クラッチボタン
 	const bool clutchOut = handbrake || clutchPressed;
@@ -229,12 +420,36 @@ void CarBase::UpdateDriveline(float dt, float throttle, bool handbrake,
 		// クラッチ接続：駆動輪は地面と一緒に転がる＝車速より遅くならない
 		if (vLong0 > 0.0f && m_driveSpeed < vLong0) { m_driveSpeed = vLong0; }
 
-		// 表示RPMは駆動輪速×今のギア比由来。接続へ滑らかに追従。
-		// マニュアルなので、高いギアで低速だとRPMが落ち、低いギアで高速だと吹け上がる。
 		const float tr = CarConst::GearRatios[m_gear] * CarConst::FinalDrive;
-		const float wheelRPM = std::clamp(fabsf(m_driveSpeed / radius) * tr * CarConst::RpmPerRadSec,
-		                                  CarConst::IdleRPM, CarConst::MaxRPM);
-		m_engineRPM += (wheelRPM - m_engineRPM) * std::min(CarConst::RpmLinkSpeed * dt, 1.0f);
+
+		// 地面から決まる駆動輪の回転。
+		// マニュアルなので、高いギアで低速だとRPMが落ち、低いギアで高速だと吹け上がる。
+		const float groundRPM = std::clamp(fabsf(m_driveSpeed / radius) * tr * CarConst::RpmPerRadSec,
+		                                   CarConst::IdleRPM, CarConst::MaxRPM);
+		// 今のエンジン回転から見た駆動輪の速さ
+		const float engineDriveSpeed = m_engineRPM / (CarConst::RpmPerRadSec * tr) * radius;
+
+		// クラッチが繋がるとき、回転差はクラッチが滑って埋まる。
+		// 大事なのは「速い側が遅い側を引っ張る」という向き。
+		if (m_engineRPM > groundRPM)
+		{
+			// エンジンが勝っている：エンジンが駆動輪を回す＝ホイールスピン。
+			// サイドを離した直後がまさにこれで、回転は落ちずに後輪が空転する。
+			// ここを逆向きにすると、サイド中は駆動輪をロックしていて
+			// しかもドリフト中は車が横を向いていて前後速度が小さいので、
+			// 駆動輪側がほぼアイドル扱いになり、回転がそこまで引き落とされる。
+			m_driveSpeed += (engineDriveSpeed - m_driveSpeed) *
+			                std::min(CarConst::ClutchGrabSpeed * m_clutch * dt, 1.0f);
+			// エンジン側は滑っているぶんだけ落ちる(急に同期させない)
+			m_engineRPM += (groundRPM - m_engineRPM) *
+			               std::min(CarConst::RpmLinkSpeed * CarConst::ClutchSlipDrop * dt, 1.0f);
+		}
+		else
+		{
+			// 駆動輪の方が速い＝エンジンが押し回される(エンジンブレーキ側)
+			m_engineRPM += (groundRPM - m_engineRPM) * std::min(CarConst::RpmLinkSpeed * dt, 1.0f);
+		}
+
 		// レブリミッター：駆動輪速はレッド回転相当を超えられない(無限空転防止)
 		const float maxDrive = CarConst::MaxRPM / (CarConst::RpmPerRadSec * tr) * radius;
 		m_driveSpeed = std::clamp(m_driveSpeed, -maxDrive, maxDrive);
@@ -242,24 +457,47 @@ void CarBase::UpdateDriveline(float dt, float throttle, bool handbrake,
 	else
 	{
 		// クラッチ切断：ギア固定。アクセルで回転上昇。
-		// サイド中は回転維持(空ぶかしキープ)、クラッチだけ切ったときはアイドルへ緩やかに戻る。
-		if (throttle > 0.0f)   { m_engineRPM += CarConst::RevUp * throttle * dt; }
-		else if (!handbrake)   { m_engineRPM -= CarConst::RevDown * dt; }
+		// アクセルを抜けばアイドルへ落ちる(サイドを引いていても同じ)。
+		// クランクの角加速度 = (トルク − 摩擦) ÷ 慣性。
+		// 一定の割合で上げ下げすると回転計が直線的に動き、機械仕掛けに見える。
+		// 摩擦は回転数の2乗におおむね比例する(ポンプ損失・かき混ぜ抵抗・油の粘性)。
+		// だから低回転では一気に吹け上がり、レッド手前で急激に鈍る。
+		const float rn = std::clamp(m_engineRPM / CarConst::MaxRPM, 0.0f, 1.2f);
+		const float friction = CarConst::RevFrictionBase + CarConst::RevFrictionRpm * rn * rn;
+
+		if (throttle > 0.0f)
+		{
+			// トルクカーブがそのまま吹け上がりの形になる。
+			// レブ手前でトルクが絞られるので、頭打ちも自然に出る。
+			m_engineRPM += (CarConst::RevUp * torque * throttle
+			              - CarConst::RevDown * friction) * dt;
+		}
+		else
+		{
+			// 落ちる方も摩擦で決まる＝高回転ほど速く落ち、アイドル付近で粘る。
+			//
+			//
+			// ※サイドブレーキで落ち方を変えてはいけない。
+			//   サイドは後輪に効くもので、クラッチが切れていれば
+			//   エンジンとは切り離されている。実車では回転の落ち方に
+			//   影響する余地がない。
+			//   ドリフト中に回転が保たれているのは車の性質ではなく、
+			//   運転手がアクセルを煽っているから。操作で解決する話なので、
+			//   ここで手心を加える必要はない。
+			m_engineRPM -= CarConst::RevDown * friction * dt;
+		}
 		m_engineRPM = std::clamp(m_engineRPM, CarConst::IdleRPM, CarConst::MaxRPM);
 	}
 
-	// トルクカーブ(中回転ピーク) × クラッチ × 出力 × ギア比 = 駆動加速
-	// ギア比で駆動力が変わる＝1速は加速が強く低速向き、5速は弱く最高速向き。
-	const float rpmN   = m_engineRPM / CarConst::MaxRPM;
-	const float dd     = rpmN - CarConst::TorquePeakN;
-	float torque = std::clamp(1.0f - CarConst::TorqueFall * dd * dd, CarConst::TorqueMin, 1.0f);
+
 	// レブ手前でトルクを絞る(頭打ち)。RevCutStart→RevCutEndで1→0へ。
 	// これでギアが上限に張り付き、伸ばすにはシフトアップが必要＝ギア差が体感できる。
+	float revCut = 0.0f;   // レブリミッターの効き具合(0〜1)。音側でも使う
 	if (rpmN > CarConst::RevCutStart)
 	{
-		const float t = std::clamp((rpmN - CarConst::RevCutStart) /
-		                           std::max(CarConst::RevCutEnd - CarConst::RevCutStart, 1e-4f), 0.0f, 1.0f);
-		torque *= (1.0f - t);   // レッドでトルク0
+		revCut = std::clamp((rpmN - CarConst::RevCutStart) /
+		                    std::max(CarConst::RevCutEnd - CarConst::RevCutStart, 1e-4f), 0.0f, 1.0f);
+		torque *= (1.0f - revCut);   // レッドでトルク0
 	}
 	const float gearFactor = CarConst::GearRatios[m_gear] / CarConst::DriveRefRatio;
 	m_driveAccel = m_enginePower * torque * m_clutch * gearFactor;
@@ -267,7 +505,7 @@ void CarBase::UpdateDriveline(float dt, float throttle, bool handbrake,
 	// エンジン音。回転数とアクセル開度を渡すだけで、点火の間隔と音量が決まる。
 	// 後退中はSがアクセルなので、踏み込み量として符号を落として渡す。
 	const float audioThrottle = std::clamp(fabsf(throttle), 0.0f, 1.0f);
-	m_engineAudio.Update(dt, m_engineRPM, audioThrottle, CarConst::MaxRPM);
+	m_engineAudio.Update(dt, m_engineRPM, audioThrottle, CarConst::MaxRPM, revCut);
 }
 
 //----------------------------------------------------------
@@ -429,6 +667,29 @@ for (int s = 0; s < sub; ++s)
 		// これがハンドブレーキドリフトの核心。倍率0.5=グリップ半減(ImGuiで調整可)。
 		if (handbrake && !w.front) { Dmax *= m_handbrakeGripMul; }
 
+		// この輪の駆動輪回転(デフの差ぶん左右で違う)。
+		// 空転の深さを見るために、横力より前に求めておく。
+		float wheelDrive = 0.0f;
+		if (!w.front)
+		{
+			wheelDrive = m_driveSpeed + (left ? -m_driveDiff : +m_driveDiff);
+
+			// 空転によるグリップ低下。
+			// 摩擦円は縦横の「配分」しか決めないので、それだけだと
+			// 空転してもその輪が出せる力の総量は変わらない。
+			// 実タイヤは滑り比がピークを超えると摩擦係数そのものが落ちる。
+			// 踏むほど後輪が失われ、旋回に使える力が減って半径が広がる＝外へ膨らむ。
+			// これが無いと、踏んでも角度が変わるだけで線が広がらない。
+			const float slipRatio = fabsf(wheelDrive - wLong) / std::max(fabsf(wLong), 2.0f);
+			if (slipRatio > CarConst::SpinPeakSlip)
+			{
+				const float t = std::clamp((slipRatio - CarConst::SpinPeakSlip) /
+				                           std::max(CarConst::SpinFallSlip - CarConst::SpinPeakSlip, 1e-3f),
+				                           0.0f, 1.0f);
+				Dmax *= (1.0f - CarConst::SpinGripFall * t);
+			}
+		}
+
 		// 横力：スリップ角から
 		const float denom = fabsf(wLong) + m_slipEps;
 		const float alpha = atan2f(wLat, denom);
@@ -450,14 +711,23 @@ for (int s = 0; s < sub; ++s)
 		}
 
 		// 縦力：後輪=駆動スリップ、全輪=ブレーキ
-		float Fx = brakeEach;
+		//
+		// ブレーキはタイヤの回転を止める力なので、進行方向の逆へ効く。
+		// 向きを見ずに一定の力をかけ続けると、止まったあとも押し続けて
+		// 車が後ろへ這い出す。止まりかけたら弱めて、そこで止める。
+		float Fx = 0.0f;
+		if (brakeEach != 0.0f)
+		{
+			const float fade = std::clamp(fabsf(wLong) / CarConst::BrakeFadeSpeed, 0.0f, 1.0f);
+			Fx = -std::copysign(fabsf(brakeEach), wLong) * fade;
+		}
 		float rearFxTraction = 0.0f;
 		if (!w.front)
 		{
 			// デフ：左右の駆動輪はそれぞれ違う速さで回る。
 			// m_driveSpeed が左右の平均、m_driveDiff がその差の半分。
 			// 旋回中は外輪が速く回る必要があり、その差をデフが許す。
-			const float wheelDrive = m_driveSpeed + (left ? -m_driveDiff : +m_driveDiff);
+			// (wheelDrive は空転の深さを見るために上で求めてある)
 			rearFxTraction = m_longStiff * (wheelDrive - wLong);   // 駆動/空転
 			Fx += rearFxTraction;
 		}
@@ -517,6 +787,19 @@ for (int s = 0; s < sub; ++s)
 	// ※後退中はaccelPressed=(S踏み)なので、後退駆動を打ち消さない。
 	else if (!accelPressed || clutchPressed)  { m_driveSpeed += (vLong - m_driveSpeed) * std::min(m_driveRelax * h, 1.0f); } // 路面速へ
 
+	// 空転の上限。
+	// 完全に滑り切ったタイヤは、それ以上速く回しても駆動力が増えない。
+	// 余った出力は熱とタイヤの摩耗になり、回転として蓄えられるわけではない。
+	//
+	// 上限が無いと、摩擦円で頭打ちになった時点で回転を止めるものが無くなり、
+	// 駆動輪がはずみ車のように回転を溜め込む。そしてグリップが戻った瞬間に
+	// 溜めたぶんを一気に放出して、不自然な加速になる。
+	// 停止からの発進ができるよう、下駄(MaxSlipBase)を履かせておく。
+	{
+		const float slipCap = fabsf(vLong) * (1.0f + CarConst::MaxSlipRatio) + CarConst::MaxSlipBase;
+		m_driveSpeed = std::clamp(m_driveSpeed, -slipCap, slipCap);
+	}
+
 	// 積分(ヨーはタイヤ力に即応＝グリップは一瞬でかかる。切り返しがキレる)
 	m_vel     += (forward * aLong + right * aLat) * h;
 	m_yawRate += (sumMz / std::max(m_izz, 0.05f)) * h;
@@ -530,7 +813,16 @@ for (int s = 0; s < sub; ++s)
 		const float ssAbs = fabsf(ss);
 		// ヨーと横滑りが同符号＝スピンアウト方向。逆符号＝リカバリー方向(抑えない)。
 		const bool spinningOut = (m_yawRate * vLat > 0.0f);
-		if (ssAbs > CarConst::SpinAssistThreshold && spinningOut)
+
+		// 回っている向きへ舵を当て続けている＝プレイヤーが狙って回している。
+		// ドリフト中はカウンター(回転と逆)を当てているので、ここには入らない。
+		// ドーナツや360度は回転と同じ向きへ入れ続けるので、そこで区別できる。
+		// この区別が無いと、狙って回そうとしてもアシストに止められて、
+		// 横滑り角がしきい値から先へ進めなくなる。
+		const bool intentional = (steerInput * m_yawRate > 0.0f) &&
+		                         (fabsf(steerInput) > CarConst::SpinIntentSteer);
+
+		if (ssAbs > CarConst::SpinAssistThreshold && spinningOut && !intentional)
 		{
 			// サイド中はアシストを弱めてリアを自由に回り込ませる(広がり感)
 			const float assist = m_spinAssist * (handbrake ? CarConst::HandbrakeSpinAssistMul : 1.0f);
@@ -557,6 +849,8 @@ for (int s = 0; s < sub; ++s)
 //----------------------------------------------------------
 void CarBase::ResolveWallCollision(float dt)
 {
+	HjScopedTimer _t(U8(" └ 壁の判定"));
+
 	// 車体近似プローブ(車体ローカル：px=右, pz=前)。四隅＋前後端の6点。
 	// 傾き(ピッチ/ロール/ヨー)込みで配置＝坂で誤って床に当たらない。DrawLitのcarWorldと同順。
 	const Math::Matrix tiltRot =
@@ -609,6 +903,10 @@ void CarBase::ResolveWallCollision(float dt)
 					const float into = m_vel.Dot(n);
 					if (into < 0.0f) { m_vel -= n * into * (1.0f + CarConst::WallSlideBounce); }
 					hitAny = true;
+
+					// どの地形ノードに当たったかを覚える。
+					// 当たり判定の調整で「今ぶつかっている物」を名指しするために使う
+					m_lastWallNode = r.m_hitNodeIndex;
 				}
 			}
 		}
@@ -640,6 +938,8 @@ void CarBase::ResolveWallCollision(float dt)
 //----------------------------------------------------------
 void CarBase::UpdateGroundContact(float dt)
 {
+	HjScopedTimer _t(U8(" └ 接地の判定"));
+
 	// 4輪の車体ローカル配置(px=右, pz=前)。DrawLitのタイヤ配置と揃える。
 	struct WheelPos { float px; float pz; };
 	const WheelPos wheelPos4[4] =
@@ -792,8 +1092,10 @@ void CarBase::UpdateGroundContact(float dt)
 // タイヤの見た目の回転と、走行状態から出すエフェクト(煙・ネオン・タイヤ痕)の放出。
 // 挙動には影響しない。スリップ量など、物理の結果を読んで演出へ渡すだけ。
 //----------------------------------------------------------
-void CarBase::UpdateMotionFeedback(float dt, bool handbrake)
+void CarBase::UpdateMotionFeedback(float dt, bool handbrake, float throttle)
 {
+	HjScopedTimer _t(U8(" └ 演出の放出"));
+
 const Math::Vector3 fwd(sinf(m_yaw), 0.0f, cosf(m_yaw));
 const float radius   = std::max(m_wheelH, 0.01f);
 const float vLongEnd = fwd.Dot(m_vel);   // 路面上の前後速度
@@ -821,6 +1123,28 @@ wrap(m_wheelSpinRear);
 	const float slip01 = std::clamp(
 		(rearSlip - SmokeConst::SlipThreshold) /
 		(SmokeConst::SlipFull - SmokeConst::SlipThreshold), 0.0f, 1.0f);
+	m_slipRear01 = slip01;   // 通信で相手へ送る(相手の画面でも同じ量の煙が出る)
+
+	// タイヤのスキール音とブレーキ鳴き。
+	// 煙・タイヤ痕とまったく同じ滑り量で駆動するので、
+	// 「煙が出ている＝鳴いている」が必ず一致する。
+	// ブレーキは前進中にSを踏んでいる量(後退中は駆動なので鳴らさない)。
+	{
+		const float brake01 = (!m_reverse && throttle < 0.0f) ? fabsf(throttle) : 0.0f;
+		m_tireAudio.Update(dt, slip01, carSpeed, brake01, m_onGround);
+	}
+
+	// 音の3D。聴取点はカメラ、音源は車。
+	// エンジンは車の後ろ(マフラー)、タイヤは接地面から鳴らす。
+	// 位置を与えないと常に耳元で同じ大きさに聞こえ、距離と方向の
+	// 手がかりが無いまま＝実在しない音になる。
+	{
+		HjAudioSpace::Instance().UpdateListener();
+
+		const Math::Vector3 fwdA(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		m_engineAudio.Apply3D(m_pos - fwdA * m_base + Math::Vector3(0.0f, 0.3f, 0.0f));
+		m_tireAudio.Apply3D(m_pos - fwdA * m_base * 0.5f);
+	}
 
 	// タイヤ痕：煙と同じ後輪接地点に毎フレーム点を渡す。
 	// (実際に点が増えるのは前の点から一定距離離れた時だけなので、低速でも密集しない)
@@ -838,6 +1162,7 @@ wrap(m_wheelSpinRear);
 			(frontScrub - SkidMarkConst::FrontSlipThreshold) /
 			std::max(SkidMarkConst::FrontSlipFull - SkidMarkConst::FrontSlipThreshold, 1e-4f),
 			0.0f, 1.0f) * SkidMarkConst::FrontAlphaMul;
+		m_slipFront01 = frontSlip01;   // 同上
 
 		// 前輪の幅方向は操舵で向きが変わる＝車の右方向を舵角ぶん回したもの
 		const Math::Vector3 rightF(cosf(m_yaw + m_steer), 0.0f, -sinf(m_yaw + m_steer));
@@ -976,12 +1301,15 @@ m_neon.Update(dt);
 
 void CarBase::Update()
 {
+	HjScopedTimer _t(U8("車の物理"));
+
 	const float dt = KdFPSController::GetDt();
 	if (dt <= 0.0f) { return; }
 
 	UpdateDebugKeys();
 
 	const DriveInput in = ReadInput();
+	m_handbrakeNow = in.handbrake;   // 通信で相手へ送るので覚えておく
 	float throttle       = in.throttle;
 	float steerInput     = in.steer;
 	bool  handbrake      = in.handbrake;
@@ -1016,7 +1344,12 @@ void CarBase::Update()
 	// 二値でパチパチ切り替わらず、Wの踏み加減で角度を連続的にコントロールできる。
 	const float liftTarget = (throttle > 0.0f) ? 1.0f : 0.0f;
 	m_liftCounterFactor += (liftTarget - m_liftCounterFactor) * std::min(4.0f * dt, 1.0f);
-	autoCounter *= m_liftCounterFactor;   // オフに近いほどカウンターが抜けて前輪が食う
+	// アクセルを抜いたときにカウンターを抜く挙動。既定は切ってある。
+	// 舵に触っていないのに前輪の角度が変わると、手ごたえが読めなくなる。
+	// アクセルオフでリアがグリップを取り戻すのは荷重移動で既に起きているので、
+	// ここまでやると二重に効く。
+	// (m_liftCounterFactor 自体は「アクセルオフで進行方向へ回頭」でも使うので残す)
+	if (m_liftCounterEnabled) { autoCounter *= m_liftCounterFactor; }
 
 	//===== ステア(CarX参考のドリフトアシスト) =====
 	// プレイヤー入力は平滑化。オートカウンターは"即時"反映してスライドを素早く捕まえる。
@@ -1030,7 +1363,18 @@ void CarBase::Update()
 	const bool returning = (playerTarget * m_playerSteer < 0.0f)          // 逆側へ振る
 	                    || (fabsf(playerTarget) < fabsf(m_playerSteer));  // 中央へ戻す
 	if (returning) { steerRate *= m_steerReturnMul; }
-	m_playerSteer += (playerTarget - m_playerSteer) * std::min(steerRate * dt, 1.0f);
+
+	// 舵は一定の速さで動いて、目標に着いたらそこで止まる。
+	//
+	// ここを1次遅れ(指数)で寄せると、最初だけ速くて後はじわじわ近づき、
+	// いつまでも目標に届かない。ゴムで引っ張られるような手ごたえになり、
+	// 今どこまで切れているのかが分からなくなる。
+	// 実車のステアリングは腕が動かせる速さで動き、握った位置で止まる。
+	{
+		const float step = steerRate * m_maxSteerAngle * dt;   // このフレームで動ける量
+		const float diff = playerTarget - m_playerSteer;
+		m_playerSteer += std::clamp(diff, -step, step);
+	}
 
 	// 振り返しの意思があるならカウンターを緩める。
 	// アシストは横滑り角を掴んで当て舵を当て続けるので、そのままだと
@@ -1041,8 +1385,19 @@ void CarBase::Update()
 		autoCounter *= 1.0f - release;
 	}
 
-	// カウンターは横滑り角へ即追従(遅れなし)＝出口で当て舵が残らずワイドに膨らまない
-	m_steer = m_playerSteer + autoCounter;
+	// カウンターも動ける量に上限を付けて追わせる。
+	//
+	// 元になる横滑り角は速度から毎フレーム計算した生の値で、
+	// 段差・タイヤの緩和・摩擦円の頭打ちで細かく震える。
+	// そのまま舵へ入れると見た目のタイヤがカクカク動く。
+	// プレイヤーの舵より速いレートにしてあるので、スライドの捕まえは鈍らない。
+	{
+		const float step = CarConst::CounterRate * m_maxSteerAngle * dt;
+		const float diff = autoCounter - m_autoCounter;
+		m_autoCounter += std::clamp(diff, -step, step);
+	}
+
+	m_steer = m_playerSteer + m_autoCounter;
 	// 舵角の上限。過剰に切ると前輪の横力がcos(舵角)で消えて食わなくなるので、
 	// maxSteerを控えめにした上で1.3倍までに収める(捕捉に十分＋前輪が効く範囲)。
 	const float steerLimit = m_maxSteerAngle * 1.3f;
@@ -1072,15 +1427,39 @@ void CarBase::Update()
 	UpdateDriveline(dt, throttle, handbrake, clutchPressed, shiftUp, shiftDown, vLong0);
 
 	//===== 後退ギア(R)の断続 =====
-	// ほぼ停止中にS(throttle<0)を踏んだら後退へ入る。W(throttle>0)か
-	// 前進し始めたら解除。前進中のSは通常どおりブレーキ(後退には入らない)。
+	// ほぼ停止中にSを踏み続けたら後退へ入る。Wか前進し始めたら解除。
+	// 前進中のSは通常どおりブレーキ。
+	//
+	// ■ 判定に「実際の速さ」を使う
+	// 車体前方の速度(vLong0)で見ると、ドリフト中に誤って後退へ入る。
+	// 横を向いている間は前方成分が小さくなるので、実際には高速で
+	// 滑っていても停止扱いになってしまう。
+	// 後退へ入るとブレーキが後退駆動に置き換わる(brakeEach=0)ため、
+	// 「サイドを引いて思い切りブレーキしても止まらず前へ進む」という
+	// 挙動になっていた。
+	//
+	// ■ サイド中は入らない
+	// サイドブレーキは減速とドリフトの操作であって、後退の意思ではない。
+	//
+	// ■ 少し踏み続けさせる
+	// 一瞬でも条件を満たしたら入る作りだと、停止寸前のブレーキ中に
+	// ギアが勝手に切り替わって制動が抜ける。
 	if (m_reverse)
 	{
-		if (throttle > 0.0f || vLong0 > CarConst::ReverseEngageSpeed) { m_reverse = false; }
+		if (throttle > 0.0f || vLong0 > CarConst::ReverseExitSpeed)
+		{
+			m_reverse = false;
+			m_reverseHold = 0.0f;
+		}
 	}
 	else
 	{
-		if (throttle < 0.0f && vLong0 < CarConst::ReverseEngageSpeed) { m_reverse = true; }
+		const bool wantReverse = (throttle < 0.0f)
+		                      && !handbrake
+		                      && (m_vel.Length() < CarConst::ReverseEngageSpeed);
+
+		m_reverseHold = wantReverse ? (m_reverseHold + dt) : 0.0f;
+		if (m_reverseHold >= CarConst::ReverseEngageHold) { m_reverse = true; }
 	}
 	// 駆動方向へアクセルを踏んでいるか(前進=W / 後退=S)。空転リラックスの判定に使う。
 	const bool accelPressed = m_reverse ? (throttle < 0.0f) : (throttle > 0.0f);
@@ -1093,7 +1472,7 @@ void CarBase::Update()
 	ResolveWallCollision(dt);
 	UpdateGroundContact(dt);
 
-	UpdateMotionFeedback(dt, handbrake);
+	UpdateMotionFeedback(dt, handbrake, throttle);
 }
 
 //----------------------------------------------------------
@@ -1136,6 +1515,8 @@ void CarBase::TriggerBoost()
 //----------------------------------------------------------
 void CarBase::DrawEffect()
 {
+	HjScopedTimer _t(U8("煙の描画"));
+
 	m_smoke.SetTint(m_smokeColor);
 	m_smoke.SetTintB(m_smokeColorB);
 	m_smoke.SetGradDist(m_smokeGradDist);
@@ -1196,6 +1577,8 @@ void CarBase::DrawDebug()
 //----------------------------------------------------------
 void CarBase::PreDraw()
 {
+	HjScopedTimer _t(U8("タイヤ痕の焼付"));
+
 	SkidMark::Instance().BakePending();
 }
 
@@ -1302,76 +1685,15 @@ void CarBase::DrawLit()
 	}
 }
 
-//----------------------------------------------------------
-// HUD（スピード / RPM / ステア角）をバー＋フォントで表示
-//   ※シーン側が spriteShader.Begin()～End() 内で呼ぶ
-//----------------------------------------------------------
-void CarBase::DrawSprite()
-{
-	auto& sp = KdShaderManager::Instance().m_spriteShader;
-
-	//===== 表示する数値 =====
-	const float kmh      = m_vel.Length() * CarConst::HudMsToKmh;
-	const float rpm      = m_engineRPM;
-	const float steerDeg = m_steer * 57.29578f;
-
-	const float speedRatio = std::clamp(kmh / (m_maxSpeed * CarConst::HudMsToKmh), 0.0f, 1.0f);
-	const float rpmRatio   = std::clamp(rpm / CarConst::HudRpmMax, 0.0f, 1.0f);
-	const float steerNorm  = std::clamp(m_steer / std::max(m_maxSteerAngle, 1e-4f), -1.0f, 1.0f);
-
-	//===== 色 =====
-	const Math::Color colBack (0.05f, 0.05f, 0.07f, 0.6f);   // バー背景
-	const Math::Color colText (1.0f, 1.0f, 1.0f, 1.0f);
-	const Math::Color colSpeed(0.2f, 0.8f, 1.0f, 1.0f);      // 水色
-	const Math::Color colRpm  (0.3f, 1.0f, 0.4f, 1.0f);      // 緑
-	const Math::Color colRed  (1.0f, 0.25f, 0.2f, 1.0f);     // レッドゾーン
-	const Math::Color colSteer(1.0f, 0.85f, 0.2f, 1.0f);     // 黄
-
-	const int L  = CarConst::HudLeft;
-	const int bW = CarConst::HudBarW;
-	const int bH = CarConst::HudBarH;
-
-	// 左詰めバー(背景＋値)を描くヘルパ
-	auto drawBar = [&](int cy, float ratio, const Math::Color& col)
-	{
-		sp.DrawBox(L + bW / 2, cy, bW / 2, bH / 2, &colBack, true);
-		const int fillW = static_cast<int>(bW * ratio);
-		if (fillW > 0) { sp.DrawBox(L + fillW / 2, cy, fillW / 2, bH / 2, &col, true); }
-	};
-
-	//===== RPM + ギア(上段) =====
-	int y = CarConst::HudBaseY + CarConst::HudRowGap * 2;
-	drawBar(y, rpmRatio, (rpm >= CarConst::HudRedline) ? colRed : colRpm);
-	// ギア表示：後退中は "R"、前進はギア段数
-	char gearBuf[8];
-	if (m_reverse) { gearBuf[0] = 'R'; gearBuf[1] = '\0'; }
-	else           { snprintf(gearBuf, sizeof(gearBuf), "%d", m_gear); }
-	sp.DrawFont(Math::Vector2(static_cast<float>(L), static_cast<float>(y + bH / 2 + CarConst::HudTextDY)),
-	            &colText, "RPM %4.0f  GEAR %s  %s", rpm, gearBuf, (m_clutch < 0.5f) ? "[CLUTCH]" : "");
-
-	//===== SPEED(中段) =====
-	y = CarConst::HudBaseY + CarConst::HudRowGap;
-	drawBar(y, speedRatio, colSpeed);
-	sp.DrawFont(Math::Vector2(static_cast<float>(L), static_cast<float>(y + bH / 2 + CarConst::HudTextDY)),
-	            &colText, "SPEED %3.0f km/h", kmh);
-
-	//===== STEER(下段：中央基準) =====
-	y = CarConst::HudBaseY;
-	sp.DrawBox(L + bW / 2, y, bW / 2, bH / 2, &colBack, true);
-	const int cx = L + bW / 2;                                  // バー中央
-	sp.DrawBox(cx, y, 1, bH / 2, &colText, true);               // 中央マーク
-	const int knob = cx + static_cast<int>(steerNorm * (bW / 2));
-	sp.DrawBox(knob, y, 6, bH / 2, &colSteer, true);            // ステア位置
-	sp.DrawFont(Math::Vector2(static_cast<float>(L), static_cast<float>(y + bH / 2 + CarConst::HudTextDY)),
-	            &colText, "STEER %+4.0f", steerDeg);
-}
 
 //----------------------------------------------------------
 // 見た目のライブ調整パネル（決まった値は各車種のコンストラクタへ反映する）
 //----------------------------------------------------------
 void CarBase::DrawTuningImGui()
 {
-	ImGui::Begin(m_tuningName.c_str());
+	// ※ウィンドウは開かない。Hierarchy が用意した Inspector の中へ描く。
+	//   自前で Begin すると、選ぶたびに別ウィンドウが現れて
+	//   位置もドッキング状態もバラバラになる。
 
 	// ===== ライブ診断 =====
 	{
@@ -1441,27 +1763,47 @@ void CarBase::DrawTuningImGui()
 	ImGui::Text(U8("現在の塗り %.2f"), m_driftTint * m_driftTintMax);
 
 	// 画面全体のエッジ検出アウトライン(トゥーン輪郭・ポストプロセス)
+	//
+	// ここの値はシェーダー側が持っていて、車の調整値ではない。
+	// そのままだと保存されず、次に起動したときに戻ってしまうので、
+	// 触ったことを設定側へ伝えて自動的に書き出させる。
 	ImGui::SeparatorText(U8("画面アウトライン(トゥーン)"));
 	{
 		auto& pp = KdShaderManager::Instance().m_postProcessShader;
+		bool changed = false;
+
 		bool sceneOutline = pp.IsSceneOutlineEnabled();
-		if (ImGui::Checkbox(U8("有効##sceneOutline"), &sceneOutline)) { pp.SetSceneOutlineEnabled(sceneOutline); }
-		ImGui::DragFloat(U8("太さ(px)##sceneOutline"), &pp.WorkOutlineThickness(), 0.05f, 0.5f, 8.0f);
-		ImGui::DragFloat(U8("深度しきい値(シルエット)"), &pp.WorkOutlineDepthThreshold(), 0.01f, 0.01f, 2.0f);
-		ImGui::DragFloat(U8("法線しきい値(角)"), &pp.WorkOutlineNormalThreshold(), 0.01f, 0.01f, 1.0f);
-		ImGui::DragFloat(U8("濃さ##sceneOutline"), &pp.WorkOutlineEdgeStrength(), 0.02f, 0.0f, 1.0f);
-		ImGui::ColorEdit3(U8("色##sceneOutline"), &pp.WorkOutlineColor().x);
+		if (ImGui::Checkbox(U8("有効##sceneOutline"), &sceneOutline))
+		{
+			pp.SetSceneOutlineEnabled(sceneOutline);
+			changed = true;
+		}
+		changed |= ImGui::DragFloat(U8("太さ(px)##sceneOutline"), &pp.WorkOutlineThickness(), 0.05f, 0.5f, 8.0f);
+		changed |= ImGui::DragFloat(U8("深度しきい値(シルエット)"), &pp.WorkOutlineDepthThreshold(), 0.01f, 0.01f, 2.0f);
+		changed |= ImGui::DragFloat(U8("法線しきい値(角)"), &pp.WorkOutlineNormalThreshold(), 0.01f, 0.01f, 1.0f);
+		changed |= ImGui::DragFloat(U8("濃さ##sceneOutline"), &pp.WorkOutlineEdgeStrength(), 0.02f, 0.0f, 1.0f);
+		changed |= ImGui::ColorEdit3(U8("色##sceneOutline"), &pp.WorkOutlineColor().x);
+
+		if (changed) { HjPostFxSettings::Instance().NotifyChanged(); }
 	}
 
 	// 画面全体のハーフトーン(印刷風の網点)
 	ImGui::SeparatorText(U8("ハーフトーン(印刷風)"));
 	{
 		auto& pp = KdShaderManager::Instance().m_postProcessShader;
+		bool changed = false;
+
 		bool halftone = pp.IsHalftoneEnabled();
-		if (ImGui::Checkbox(U8("有効##halftone"), &halftone)) { pp.SetHalftoneEnabled(halftone); }
-		ImGui::DragFloat(U8("網点の周期(px)"), &pp.WorkHalftoneScale(), 0.1f, 2.0f, 40.0f);
-		ImGui::DragFloat(U8("濃さ##halftone"), &pp.WorkHalftoneStrength(), 0.01f, 0.0f, 1.0f);
-		ImGui::DragFloat(U8("暗部に寄せる量"), &pp.WorkHalftoneDarkBias(), 0.02f, 0.0f, 1.0f);
+		if (ImGui::Checkbox(U8("有効##halftone"), &halftone))
+		{
+			pp.SetHalftoneEnabled(halftone);
+			changed = true;
+		}
+		changed |= ImGui::DragFloat(U8("網点の周期(px)"), &pp.WorkHalftoneScale(), 0.1f, 2.0f, 40.0f);
+		changed |= ImGui::DragFloat(U8("濃さ##halftone"), &pp.WorkHalftoneStrength(), 0.01f, 0.0f, 1.0f);
+		changed |= ImGui::DragFloat(U8("暗部に寄せる量"), &pp.WorkHalftoneDarkBias(), 0.02f, 0.0f, 1.0f);
+
+		if (changed) { HjPostFxSettings::Instance().NotifyChanged(); }
 	}
 
 	ImGui::SeparatorText(U8("動力"));
@@ -1520,6 +1862,8 @@ void CarBase::DrawTuningImGui()
 
 	// エンジン音は鳴らしながら詰めるものなので、走行中に触れる位置に出す
 	m_engineAudio.DrawImGui();
+	m_tireAudio.DrawImGui();
+	HjAudioSpace::Instance().DrawImGui();
 
 	// アシストの一括操作。すべて切ると、タイヤと荷重だけで走る素の挙動になる。
 	// CarXも同種の設定を持つが、あちらは「切っても物理が成立する」前提なので、
@@ -1548,6 +1892,7 @@ void CarBase::DrawTuningImGui()
 
 	ImGui::SeparatorText(U8("オートカウンター(CarX風)"));
 	ImGui::Checkbox(U8("有効##counter"), &m_counterSteerEnabled);
+	ImGui::Checkbox(U8("アクセルオフでカウンターを抜く"), &m_liftCounterEnabled);
 	ImGui::DragFloat(U8("カウンター強さ(0-1.3)"), &m_counterAssist, 0.01f, 0.0f, 1.3f);
 	ImGui::DragFloat(U8("逆に切った時カウンターを緩める(0-1)"), &m_counterRelease, 0.01f, 0.0f, 1.0f);
 	ImGui::DragFloat(U8("効き始め速度"), &m_counterMinSpeed, 0.1f, 0.0f, 20.0f);
@@ -1573,7 +1918,6 @@ void CarBase::DrawTuningImGui()
 	ImGui::DragFloat(U8("トランジション補助(振り返し, 0=OFF)"), &m_transitionAssist, 0.1f, 0.0f, 15.0f);
 	ImGui::DragFloat(U8("舵を戻す速さの倍率"), &m_steerReturnMul, 0.05f, 1.0f, 6.0f);
 
-	ImGui::End();
 }
 
 //----------------------------------------------------------
@@ -1648,6 +1992,7 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 	// エンジン音の調整値は音側が持っているので、そこから受け取って足す。
 	// ここへ手書きで並べると、パラメータを増やすたびに追加漏れが起きる。
 	m_engineAudio.CollectTuneParams(list);
+	m_tireAudio.CollectTuneParams(list);
 
 	return list;
 }

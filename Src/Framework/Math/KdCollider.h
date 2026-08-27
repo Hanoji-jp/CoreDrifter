@@ -142,6 +142,10 @@ public:
 		Math::Vector3 m_hitDir;			// 対象からの方向ベクトル（押し返しなどに使う
 		Math::Vector3 m_hitNDir;		// HITした面の法線ベクトル
 		float m_overlapDistance = 0.0f; // 重なり量
+		// 当たったメッシュノードの番号。-1=不明。
+		// どの部品に当たったのかが分かると、当たり判定の調整で
+		// 「今ぶつかっている物」を名指しで外せる。
+		int m_hitNodeIndex = -1;
 	};
 
 	KdCollider() {}
@@ -299,8 +303,30 @@ public:
 	bool Intersects(const KdCollider::RayInfo& target, const Math::Matrix& world, KdCollider::CollisionResult* pRes) override;
 
 private:
+	//----------------------------------------------------------
+	// 荒い判定(ブロードフェーズ)用のワールド境界ボックス。
+	//
+	// メッシュごとの境界ボックスはモデル座標で持っているので、
+	// 判定のたびにワールドへ変換していた。ところが地形のように
+	// 動かないモデルでは、その結果は毎回まったく同じになる。
+	//
+	// ノードが数千あると1クエリで数千回、1フレームでは数十万回の
+	// 変換を同じ結果のために繰り返すことになる。
+	// 行列が変わったときだけ作り直して、あとは使い回す。
+	//----------------------------------------------------------
+	void RebuildWorldBounds(const Math::Matrix& world);
+
 	std::shared_ptr<KdModelWork> m_shape;
 	std::vector<int> m_nodeFilter; // 空なら全ノード使用
+
+	// 判定に使うノードの一覧と、それぞれのワールド境界ボックス。
+	// 添字が対応している(m_boundsNodes[i] のボックスが m_worldBounds[i])
+	std::vector<int>                     m_boundsNodes;
+	std::vector<DirectX::BoundingBox>    m_worldBounds;
+
+	// 上のキャッシュを作ったときの行列。これと違えば作り直す
+	Math::Matrix m_boundsMatrix;
+	bool         m_boundsValid = false;
 };
 
 

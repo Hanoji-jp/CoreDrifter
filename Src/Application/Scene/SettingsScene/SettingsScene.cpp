@@ -1,11 +1,12 @@
 ﻿#include "SettingsScene.h"
+#include "../../Input/HjKeyInput.h"
 #include "../SceneManager.h"
 #include "../HjTransition.h"
 #include "../../GameObject/UI/SettingsUI.h"
 
 void SettingsScene::Event()
 {
-	if (GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+	if (HjKeyInput::Instance().Pressed(HjKeyInput::Key::Cancel))
 	{
 		HjTransition::Instance().Go(SceneManager::SceneType::Title);
 	}
