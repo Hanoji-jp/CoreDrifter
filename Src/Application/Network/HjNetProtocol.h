@@ -31,6 +31,7 @@ enum class HjNetMsg : unsigned char
 	Roster     = 3,   // 参加者一覧        ホスト → 全員
 	State      = 4,   // 車の状態          全員 → 全員
 	Leave      = 5,   // 退出              誰か → 全員
+	Look       = 6,   // 見た目の変更      誰か → 全員
 };
 
 #pragma pack(push, 1)
@@ -41,8 +42,18 @@ enum class HjNetMsg : unsigned char
 struct HjNetJoinPacket
 {
 	unsigned char msg  = static_cast<unsigned char>(HjNetMsg::Join);
-	// 見分け用の色。1成分1バイトで足りる(色の微妙な差は見分けに関係ない)
-	unsigned char colR = 255, colG = 255, colB = 255;
+	// 車の見た目。持ち主が調整パネルで設定した色をそのまま運ぶ。
+	// 通信側で色を決めると、せっかく詰めた配色が上書きされる。
+	// 1成分1バイトで足りる(見分けに色の微妙な差は関係ない)
+	unsigned char outlineR = 0, outlineG = 0, outlineB = 0;
+	unsigned char smokeAR = 0, smokeAG = 0, smokeAB = 0;
+	unsigned char smokeBR = 0, smokeBG = 0, smokeBB = 0;
+	unsigned char accentR = 0, accentG = 0, accentB = 0;
+	unsigned char neonAR = 0, neonAG = 0, neonAB = 0;
+	unsigned char neonBR = 0, neonBG = 0, neonBB = 0;
+	unsigned char smokeHiR = 0, smokeHiG = 0, smokeHiB = 0;
+	// 煙のグラデが色Bになりきる距離。0〜255 を 0〜32m として使う
+	unsigned char smokeGradDist = 0;
 	char          name[NetConst::MaxNameLen + 1] = {};
 };
 
@@ -60,10 +71,18 @@ struct HjNetPeerEntry
 	unsigned char  id   = 0;         // プレイヤー番号
 	unsigned char  used = 0;         // 0=空き
 
-	// 見分け用の色。
+	// 車の見た目。持ち主の調整パネルの色をそのまま運ぶ。
 	// 走行中に変わるものではないので、毎秒20回の状態パケットには入れず、
 	// 名簿と一緒に1回だけ配る
-	unsigned char  colR = 255, colG = 255, colB = 255;
+	unsigned char outlineR = 0, outlineG = 0, outlineB = 0;
+	unsigned char smokeAR = 0, smokeAG = 0, smokeAB = 0;
+	unsigned char smokeBR = 0, smokeBG = 0, smokeBB = 0;
+	unsigned char accentR = 0, accentG = 0, accentB = 0;
+	unsigned char neonAR = 0, neonAG = 0, neonAB = 0;
+	unsigned char neonBR = 0, neonBG = 0, neonBB = 0;
+	unsigned char smokeHiR = 0, smokeHiG = 0, smokeHiB = 0;
+	// 煙のグラデが色Bになりきる距離。0〜255 を 0〜32m として使う
+	unsigned char smokeGradDist = 0;
 	unsigned char  pad2 = 0;
 
 	char           name[NetConst::MaxNameLen + 1] = {};
@@ -82,6 +101,39 @@ struct HjNetRosterPacket
 	unsigned char  count  = 0;
 	unsigned char  pad    = 0;
 	HjNetPeerEntry peers[NetConst::MaxPlayers];
+};
+
+//----------------------------------------------------------
+// 車の見た目。
+//
+// 車の調整パネルで設定した色をそのまま持つ。
+// 通信側で色を決めると、せっかく詰めた配色が上書きされる。
+//----------------------------------------------------------
+// 煙のグラデ距離を1バイトへ丸めるときの上限(m)。
+// 送る側と受け取る側で同じ値を使わないと距離が食い違う
+constexpr float HjSmokeGradDistMax = 32.0f;
+
+struct HjCarLook
+{
+	Math::Vector3 outline;   // 車の輪郭
+	Math::Vector3 smokeA;    // 煙(手前)
+	Math::Vector3 smokeB;    // 煙(奥)
+	Math::Vector3 accent;    // ドリフト中に車体へ乗るアクセント
+	Math::Vector3 neonA;     // タイヤ周りの線画
+	Math::Vector3 neonB;
+	Math::Vector3 smokeHi;   // 煙の一番光が当たる面
+
+	// 煙のグラデが色Bになりきる距離(m)。色ではないが見た目の一部
+	float smokeGradDist = 6.0f;
+
+	// 中身が変わったか。変わったときだけ送り直すために使う
+	bool operator==(const HjCarLook& o) const
+	{
+		return outline == o.outline && smokeA == o.smokeA && smokeB == o.smokeB
+		    && accent  == o.accent  && neonA  == o.neonA  && neonB  == o.neonB
+		    && smokeHi == o.smokeHi && smokeGradDist == o.smokeGradDist;
+	}
+	bool operator!=(const HjCarLook& o) const { return !(*this == o); }
 };
 
 //----------------------------------------------------------
@@ -166,6 +218,28 @@ struct HjCarSyncState
 };
 
 //----------------------------------------------------------
+// 見た目の変更。
+//
+// 名簿は参加・退出のときしか配られないので、途中で色を変えても
+// そのままでは相手へ届かない。変えた本人が全員へ直接伝える。
+//----------------------------------------------------------
+struct HjNetLookPacket
+{
+	unsigned char msg = static_cast<unsigned char>(HjNetMsg::Look);
+	unsigned char id  = 0;
+	unsigned char pad[2] = { 0, 0 };
+	unsigned char outlineR = 0, outlineG = 0, outlineB = 0;
+	unsigned char smokeAR = 0, smokeAG = 0, smokeAB = 0;
+	unsigned char smokeBR = 0, smokeBG = 0, smokeBB = 0;
+	unsigned char accentR = 0, accentG = 0, accentB = 0;
+	unsigned char neonAR = 0, neonAG = 0, neonAB = 0;
+	unsigned char neonBR = 0, neonBG = 0, neonBB = 0;
+	unsigned char smokeHiR = 0, smokeHiG = 0, smokeHiB = 0;
+	// 煙のグラデが色Bになりきる距離。0〜255 を 0〜32m として使う
+	unsigned char smokeGradDist = 0;
+};
+
+//----------------------------------------------------------
 // 退出の通知
 //----------------------------------------------------------
 struct HjNetLeavePacket
@@ -186,9 +260,6 @@ static_assert(sizeof(HjNetStatePacket) <= NetConst::MaxPacket,
 //----------------------------------------------------------
 // flags の中身。ビットを直接書くと意味が読めないので名前を付ける
 //----------------------------------------------------------
-// ※煙やタイヤ痕を出すための滑り量は、まだ受け取り側が使っていないので送らない。
-//   送っても使わない項目は、あとから見たときに「効いているはず」と読み違える。
-//   演出を繋ぐときに一緒に足すこと。
 namespace HjNetFlag
 {
 	constexpr unsigned char Handbrake = 1 << 0;

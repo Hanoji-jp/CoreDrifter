@@ -36,7 +36,6 @@ public:
 private:
 	void DrawFrame();                           // 四隅のかぎ括弧と中心の印
 	void DrawRunInfo();                         // 左上(何本目・コース・区間)
-	void DrawCourseLine();                      // 左下(走行ラインと通過点)
 	void DrawDriftAngle(float angleDeg);        // 上中央
 	void DrawScore(double live, int combo, float hold);   // 上中央
 	void DrawTach(float rpmRatio);              // 下右(回転計)

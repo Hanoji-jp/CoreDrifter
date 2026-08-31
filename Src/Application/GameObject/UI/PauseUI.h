@@ -45,6 +45,22 @@ private:
 	void DrawMenu();
 	void DrawScorePanel();
 
+	//===== 設定ウィンドウ =====
+	// 走行中に音量だけ直したい、という用がほとんどなので、
+	// 画面ごと切り替えず小さな窓で出す。
+	// 画面を移ると走行の映像が消えて、どこで止めたのか分からなくなる。
+	void UpdateSettingsWindow();
+	void DrawSettingsWindow();
+	// 音量の行を1段階動かす
+	void StepVolume(int row, int dir);
+	// 行の値を取り出す
+	float VolumeOf(int row) const;
+	// 行へ値を入れる(バスへの反映も行う)
+	void SetVolumeOf(int row, float v);
+
+	bool m_settingsOpen = false;
+	int  m_settingsRow  = 0;
+
 
 	bool   m_visible = false;
 	int    m_sel   = 0;

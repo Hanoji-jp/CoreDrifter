@@ -36,4 +36,15 @@ namespace NamePlateConst
 	// 名前だけだと、車が近いときにどちらのものか分からない
 	constexpr float PointerW = 10.0f;
 	constexpr float PointerH = 6.0f;
+
+	//===== 観戦中の表記 =====
+	// 誰を見ているのかを、名前札そのものに出す。
+	// カメラが動いただけだと「自分がそこへ移動した」ようにも見えるので、
+	// 見られている側の札に印を付けて区別する。
+	constexpr const char* SpectateLabel = "SPECTATING";
+	// 名前の上に置く帯の高さ
+	constexpr float TagH = 16.0f;
+	// 帯の色はアクセント。名前の白と分けて、印だと分かるようにする
+	const Math::Color TagColor  = UIConst::ACID;
+	const Math::Color TagText   = UIConst::INK;
 }

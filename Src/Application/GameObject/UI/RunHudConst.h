@@ -70,9 +70,6 @@ namespace RunHudConst
 
 	//===== 左下：走行ラインと通過点 =====
 	// ※中身は仮。コースの形も通過判定もまだ無い
-	constexpr float ClipLabelY = 700.0f;
-	constexpr float ClipChipY = 806.0f, ClipChipGap = 58.0f;
-	constexpr int   ClipCount = 4;
 
 	//===== 上中央：スコアとチェーン倍率 =====
 	// 角度と入れ替えて上へ置く。

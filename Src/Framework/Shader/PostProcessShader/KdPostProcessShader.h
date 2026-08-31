@@ -48,6 +48,13 @@ public:
 
 	// 画面エッジ検出アウトライン(トゥーン輪郭)の ON/OFF と調整用アクセサ
 	void SetSceneOutlineEnabled(bool enable) { m_sceneOutlineEnabled = enable; }
+
+	// 3Dシーンの背景色。
+	//
+	// 走行画面は空のモデルで覆われるので何色でも変わらないが、
+	// タイトルのように背景を持たない画面では、この色がそのまま出る。
+	// 画面ごとに変えたいので、外から入れられるようにしてある。
+	void SetSceneClearColor(const Math::Color& col) { m_sceneClearColor = col; }
 	bool IsSceneOutlineEnabled() const { return m_sceneOutlineEnabled; }
 	float& WorkOutlineThickness()       { return m_cb0_OutlineInfo.Work().Thickness; }
 	float& WorkOutlineDepthThreshold()  { return m_cb0_OutlineInfo.Work().DepthThreshold; }
@@ -324,6 +331,9 @@ private:
 	// ONにすると下準備のBlurProcess(全画面4パス)＋DoF合成(1パス)が走る。
 	bool          m_dofEnabled = false;
 	bool          m_camPosSet       = false;
+	// 3Dシーンの背景色。既定は元の青。
+	// 背景を持たない画面(タイトルなど)では、この色がそのまま出る
+	Math::Color   m_sceneClearColor    = kBlueColor;
 	bool          m_sceneOutlineEnabled = true; // 画面エッジ検出アウトライン(トゥーン輪郭)ON/OFF
 	bool          m_smokeOutlineEnabled = true; // 煙シルエット輪郭 ON/OFF
 	bool          m_halftoneEnabled     = true; // 画面全体のハーフトーン ON/OFF

@@ -202,14 +202,120 @@ void Stage::LoadNoCollision()
 
 void Stage::RebuildMatrix()
 {
+	m_drawBoundsValid = false;   // 配置が変われば境界も作り直す
+
 	m_mWorld =
 		Math::Matrix::CreateScale(m_scale) *
 		Math::Matrix::CreateRotationY(m_yaw) *
 		Math::Matrix::CreateTranslation(m_offset);
 }
 
+//----------------------------------------------------------
+// 描画に使うノードのワールド境界ボックスを作り直す。
+//
+// コースは動かないので、一度作れば使い回せる。
+// 配置(大きさ・座標・向き)を変えたときだけ作り直す。
+//----------------------------------------------------------
+void Stage::RebuildDrawBounds()
+{
+	if (m_drawBoundsValid && m_drawBoundsMatrix == m_mWorld) { return; }
+
+	m_drawNodes.clear();
+	m_drawBounds.clear();
+
+	auto data = m_model.GetData();
+	if (!data) { return; }
+
+	const auto& dataNodes = data->GetOriginalNodes();
+	const auto& workNodes = m_model.GetNodes();
+
+	for (int index : data->GetDrawMeshNodeIndices())
+	{
+		if (index < 0 || index >= static_cast<int>(dataNodes.size())) { continue; }
+		if (!dataNodes[index].m_spMesh) { continue; }
+
+		DirectX::BoundingBox aabb;
+		dataNodes[index].m_spMesh->GetBoundingBox().Transform(
+			aabb, workNodes[index].m_worldTransform * m_mWorld);
+
+		m_drawNodes.push_back(index);
+		m_drawBounds.push_back(aabb);
+	}
+
+	m_drawBoundsMatrix = m_mWorld;
+	m_drawBoundsValid  = true;
+}
+
+//----------------------------------------------------------
+// 画面に映るノードだけ描くようにする。
+//
+// コースは1つのオブジェクトとして扱われているので、
+// オブジェクト単位のカリングでは常に「映っている」になる。
+// 中身のノードを一つずつ見て、映らない物を伏せる。
+//----------------------------------------------------------
+void Stage::CullForCamera()
+{
+	RebuildDrawBounds();
+	m_cullView.Update();
+
+	for (size_t i = 0; i < m_drawNodes.size(); ++i)
+	{
+		const auto& box = m_drawBounds[i];
+
+		// 境界ボックスを包む球で見る。少し大きめに取るので、
+		// 画面の端で急に消えることがない
+		const Math::Vector3 center(box.Center.x, box.Center.y, box.Center.z);
+		const float radius = Math::Vector3(box.Extents.x, box.Extents.y, box.Extents.z).Length()
+		                   + StageConst::CullMargin;
+
+		m_model.SetNodeVisibleAt(m_drawNodes[i], m_cullView.IsVisible(center, radius, 0.0f));
+	}
+}
+
+//----------------------------------------------------------
+// 影を焼くときに描くノードを絞る。
+//
+// 影は光源から見て焼くので、画面の視錐台では絞れない。
+// ただし影が要るのは車の周りだけで、遠くの物の影は画面に落ちない。
+// カメラからの距離で切る。
+//----------------------------------------------------------
+void Stage::CullForShadow()
+{
+	RebuildDrawBounds();
+
+	const Math::Vector3 camPos = KdShaderManager::Instance().GetCameraCB().CamPos;
+	const float limit = StageConst::ShadowCullDistance;
+
+	for (size_t i = 0; i < m_drawNodes.size(); ++i)
+	{
+		const auto& box = m_drawBounds[i];
+		const Math::Vector3 center(box.Center.x, box.Center.y, box.Center.z);
+		const float radius = Math::Vector3(box.Extents.x, box.Extents.y, box.Extents.z).Length();
+
+		// 距離は二乗のまま比べる(平方根を取らないぶん軽い)
+		const Math::Vector3 d = center - camPos;
+		const float reach = limit + radius;
+		m_model.SetNodeVisibleAt(m_drawNodes[i], d.LengthSquared() <= reach * reach);
+	}
+}
+
+//----------------------------------------------------------
+// 影を焼くパス。
+// 既定の実装は DrawLit をそのまま呼ぶので、何もしないと
+// コース全体をもう一度描くことになる。
+//----------------------------------------------------------
+void Stage::GenerateDepthMapFromLight()
+{
+	CullForShadow();
+	KdShaderManager::Instance().m_StandardShader.DrawModel(m_model, m_mWorld);
+}
+
 void Stage::DrawLit()
 {
+	// 画面に映るノードだけ描く。
+	// 影のパスで別の絞り方をしているので、ここで必ずやり直す
+	CullForCamera();
+
 	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);   // 裏面カリング有効
 
 	// タイヤ痕の焼き付けマップを路面へ適用する。

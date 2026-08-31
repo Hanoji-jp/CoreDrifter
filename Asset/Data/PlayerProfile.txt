@@ -1,4 +1,4 @@
-name はあああ
-total 20885.8
-best 13904.7
-runs 5
+name HarukinGames
+total 920054
+best 482523
+runs 9

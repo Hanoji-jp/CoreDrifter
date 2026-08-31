@@ -15,6 +15,13 @@ public:
 	void DrawSprite() override;
 
 private:
+	// タブごとに行の中身が違うので、今のタブの行数を返す
+	int  RowCount() const;
+	// 選択中の行を1段階動かす(←→)
+	void StepRow(int dir);
+	// 音量の行を描く。値と棒グラフを出す
+	void DrawVolumeRow(float dx, float dy, float w, float value) const;
+
 	int  m_tab = 0;   // 選択中タブ
 	int  m_row = 0;   // 選択中の設定行
 

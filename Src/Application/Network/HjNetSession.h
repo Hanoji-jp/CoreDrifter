@@ -65,10 +65,16 @@ public:
 	Link GetLink() const { return m_link; }
 
 	// ホストとして待ち受ける
-	// myColor = 見分け用の色(アウトラインと煙に使われる)
-	bool StartHost(const char* myName, const Math::Vector3& myColor);
+	// 自分の車の見た目。シーンが毎フレーム入れる。
+	//
+	// 接続時に引数で渡す作りにすると、渡し忘れた経路(調整パネルから
+	// 直接繋ぐなど)で既定の色が送られてしまう。持っておいて、
+	// 繋ぐときに必ずここを見るようにする。
+	void SetMyLook(const HjCarLook& look);
+
+	bool StartHost(const char* myName);
 	// 相手のIPへ参加要求を送る
-	bool StartJoin(const char* address, const char* myName, const Math::Vector3& myColor);
+	bool StartJoin(const char* address, const char* myName);
 	// 退出を伝えてから閉じる
 	void Leave();
 
@@ -104,8 +110,8 @@ public:
 
 	// 番号から名前を引く。一覧を作らずに済むので、毎フレーム呼んでよい
 	const char* GetPeerName(int id) const;
-	// 番号から見分け用の色を引く
-	Math::Vector3 GetPeerColor(int id) const;
+	// 番号から車の見た目を引く
+	HjCarLook GetPeerLook(int id) const;
 
 	// 相手が抜けた/タイムアウトした番号を取り出す。false=もう無い
 	bool PopRemovedId(int& outId);
@@ -126,7 +132,7 @@ private:
 		std::string  name;
 		int          id       = -1;
 		bool         used     = false;
-		Math::Vector3 color   = Math::Vector3(1.0f, 1.0f, 1.0f);   // 見分け用
+		HjCarLook    look;   // 持ち主の調整パネルの色
 		float        silence  = 0.0f;   // 最後に何か届いてからの秒数
 		unsigned int lastSeq  = 0;      // 受け取った中で一番新しい連番
 	};
@@ -137,11 +143,13 @@ private:
 	void HandleRoster(const HjNetRosterPacket& pkt);
 	void HandleState(const HjNetStatePacket& pkt, const HjNetAddress& from);
 	void HandleLeave(const HjNetLeavePacket& pkt);
+	void HandleLook(const HjNetLookPacket& pkt);
 
 	//===== 送信 =====
 	void SendState();                                  // 自分の状態を全員へ
 	void SendRoster();                                 // ホストが名簿を全員へ
 	void SendJoinRequest();                            // 参加要求(届くまで繰り返す)
+	void SendLook();                                   // 見た目の変更を全員へ
 	void SendToAllPeers(const void* data, int size);   // 自分以外の全員へ
 
 	//===== 名簿の操作 =====
@@ -162,7 +170,10 @@ private:
 	Mode m_mode = Mode::Offline;
 	int  m_myId = -1;
 	std::string   m_myName;
-	Math::Vector3 m_myColor = Math::Vector3(1.0f, 1.0f, 1.0f);
+	HjCarLook m_myLook;
+	// 最後に送った見た目。変わったときだけ送り直すために覚えておく
+	HjCarLook m_sentLook;
+	bool      m_lookDirty = false;
 
 	// 参加者(自分は含めない)
 	std::vector<Peer> m_peers;

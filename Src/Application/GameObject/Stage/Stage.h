@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "../../Const/StageConst.h"
+#include "../Effect/HjCullView.h"   // 画面に映るノードだけ描くための判定
 
 //==========================================================
 // Stage
@@ -16,6 +17,8 @@ class Stage : public KdGameObject
 public:
 	void Init()      override;
 	void DrawLit()   override;
+	// 影を焼くパス。ここでもコース全体を描くと、描画命令が倍になる
+	void GenerateDepthMapFromLight() override;
 	void DrawDebug() override;
 
 	// 位置合わせ用の調整パネル(ImGui)
@@ -42,6 +45,29 @@ private:
 	// 草や葉は見た目だけの物なので判定から外す。
 	// モデル全体をそのまま判定に使うと、葉の上に乗ったり
 	// 草むらに押し返されたりする。
+	//===== 描画するノードの絞り込み =====
+	// コースは数千のメッシュノードでできていて、そのまま描くと
+	// その数だけ描画命令が出る。見えていない物は描かない。
+	//
+	// visible=false のノードは描画側が自動で飛ばすので、
+	// 描く前にフラグを伏せるだけでよい。
+
+	// 各ノードのワールド境界ボックスを作り直す(配置が変わったときだけ)
+	void RebuildDrawBounds();
+	// 画面に映るノードだけ visible を立てる
+	void CullForCamera();
+	// 車の周りのノードだけ visible を立てる(影用)
+	void CullForShadow();
+
+	// 描画対象のノード番号と、そのワールド境界ボックス。添字が対応する
+	std::vector<int>                  m_drawNodes;
+	std::vector<DirectX::BoundingBox> m_drawBounds;
+	Math::Matrix m_drawBoundsMatrix;
+	bool         m_drawBoundsValid = false;
+
+	// 視錐台の判定器。描画の頭で作り直す
+	HjCullView m_cullView;
+
 	void RebuildCollision();
 	// ノード名が除外対象か(キーワード一致 or 手動で外したもの)
 	bool IsNoCollisionNode(const std::string& name) const;

@@ -10,6 +10,8 @@
 #include "../../GameObject/Camera/ChaseCamera.h"
 #include "../../GameObject/Score/DriftScore.h"
 #include "../../GameObject/UI/RunHudUI.h"
+#include "../../GameObject/UI/HjModMenu.h"
+#include "../../Updater/HjUpdater.h"
 #include "../../GameObject/Score/HjRunResult.h"
 #include "../../GameObject/Score/HjPlayerProfile.h"
 #include "../../GameObject/UI/CountdownUI.h"
@@ -19,6 +21,7 @@
 #include "../../GameObject/UI/HjUiVisibility.h"
 #include "../../Editor/HjHierarchy.h"
 #include "../../Util/HjProfiler.h"
+#include "../../Audio/HjBgm.h"
 #include "../../Const/FogConst.h"
 
 void GameScene::Event()
@@ -145,6 +148,10 @@ void GameScene::Init()
 
 	// 被写界深度(DoF)：手前(車・路面)はくっきり、遠景だけ柔らかくぼかす。
 	// 焦点そのものはChaseCamera::Initで設定している(カメラが持つ値のため)。
+	// 背景色を既定へ戻す。
+	// タイトルが緑にしているので、戻さないと空の見えない所が緑になる
+	KdShaderManager::Instance().m_postProcessShader.SetSceneClearColor(kBlueColor);
+
 	KdShaderManager::Instance().m_postProcessShader.SetDoFEnabled(true);
 
 	// コースマップ(地形＋当たり判定)
@@ -175,6 +182,14 @@ void GameScene::Init()
 	hud->SetScore(score);
 	AddObject(hud);
 
+	// MODメニュー(TABで開く)。
+	// 走行画面の上へ重ねるので、HUDより後ろに足して上に出す
+	auto modMenu = std::make_shared<HjModMenu>();
+	modMenu->Init();
+	modMenu->SetCar(car);
+	m_wpModMenu = modMenu;
+	AddObject(modMenu);
+
 	// 走行中の通知。前の走行のぶんが残っていると混ざるので空にしてから始める
 	HjToastQueue::Instance().Clear();
 	AddObject(std::make_shared<ToastUI>());
@@ -191,7 +206,7 @@ void GameScene::Init()
 
 	// 調整パネル(ImGui)：車のチューニングとマップ配置を1つのコールバックにまとめて登録
 	//   ※SetPersistentGuiCallbackは単一スロット(上書き)なので合成して渡す
-	KdDebugGUI::Instance().SetPersistentGuiCallback([car, stage]()
+	KdDebugGUI::Instance().SetPersistentGuiCallback([this, car, stage]()
 	{
 		// エディタ表示(F2)のときだけ Hierarchy/Inspector を出す。
 		// 走行中は画面を塞ぎたくないので、常時表示にはしない。
@@ -233,6 +248,59 @@ void GameScene::Init()
 		// 1フレームの時間がどこで使われているか。
 		// FPSは60で頭打ちなので、速くなったかどうかはこちらでしか分からない
 		hier.Add("Profiler",     []() { HjProfiler::Instance().DrawImGui(); });
+
+		// コントローラーが反応しないときの切り分け用。
+		// 車が持っているものをそのまま覗く(別に作ると、
+		// 実際に使われているのと違うものを見ることになる)
+		hier.Add("Pad",          [car]() { car->DrawPadImGui(); });
+
+		// 更新の様子。実際に繋がるかを目で見るため。
+		// 遊ぶ人へ出す画面は別に用意する
+		hier.Add("Updater",      []()
+		{
+			auto& up = HjUpdater::Instance();
+
+			ImGui::Text(U8("いまの版 : %s"), HjUpdater::GetCurrentVersion().c_str());
+
+			const std::string latest = up.GetLatestVersion();
+			if (!latest.empty()) { ImGui::Text(U8("向こうの版 : %s"), latest.c_str()); }
+
+			ImGui::TextUnformatted(up.StateText());
+
+			const std::string err = up.GetErrorMessage();
+			if (!err.empty())
+			{
+				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", err.c_str());
+			}
+
+			if (up.GetState() == HjUpdater::State::Downloading)
+			{
+				ImGui::ProgressBar(up.GetProgress());
+				if (ImGui::Button(U8("やめる"))) { up.CancelDownload(); }
+				return;
+			}
+
+			if (up.IsWorking()) { return; }
+
+			if (ImGui::Button(U8("確認する"))) { up.StartCheck(); }
+
+			if (up.GetState() == HjUpdater::State::Available)
+			{
+				ImGui::SameLine();
+				if (ImGui::Button(U8("受け取る"))) { up.StartDownload(); }
+			}
+
+			if (up.GetState() == HjUpdater::State::Ready)
+			{
+				// ここを押すとゲームが閉じる。押し間違いが痛いので、
+				// 何が起きるかを先に書いておく
+				ImGui::TextDisabled(U8("押すと閉じて、入れ替えてから開き直します"));
+				if (ImGui::Button(U8("入れ替えて再起動"))) { up.Apply(); }
+			}
+		});
+		hier.Add("BGM",          []() { HjBgm::Instance().DrawImGui(); });
+		// 観戦。相手の走りを見て、同期が正しいかを目で確かめられる
+		hier.Add("Spectate",     [this]() { DrawSpectateImGui(); });
 		hier.Add("Network",      []() { HjNetSession::Instance().DrawImGui(); });
 		hier.Add("Lobby",        []() { HjSteamLobby::Instance().DrawImGui(); });
 
@@ -243,6 +311,7 @@ void GameScene::Init()
 	auto cam = std::make_shared<ChaseCamera>();
 	cam->Init();
 	cam->SetTarget(car);
+	m_wpCamera = cam;   // 観戦で追う相手を差し替えるために持つ
 	AddObject(cam);
 }
 
@@ -263,9 +332,40 @@ bool GameScene::IsFrozen() const
 // 自分の状態を渡して、届いた状態をそれぞれの車へ配るだけ。
 // 送受信の中身は HjNetSession が持つ。
 //----------------------------------------------------------
+//----------------------------------------------------------
+// 自分の車の見た目を作る。
+//
+// 通信側で色を決めず、車の調整パネルで設定した色をそのまま配る。
+// そうしないと、せっかく詰めた配色が接続した瞬間に上書きされる。
+//----------------------------------------------------------
+HjCarLook GameScene::BuildMyLook() const
+{
+	HjCarLook look;
+	if (auto car = m_wpCar.lock())
+	{
+		look.outline = car->GetOutlineColor();
+		look.smokeA  = car->GetSmokeColorA();
+		look.smokeB  = car->GetSmokeColorB();
+		look.accent  = car->GetAccentColor();
+		look.neonA   = car->GetNeonColorA();
+		look.neonB   = car->GetNeonColorB();
+		look.smokeHi = car->GetSmokeHiColor();
+		look.smokeGradDist = car->GetSmokeGradDist();
+	}
+	return look;
+}
+
 void GameScene::UpdateNetwork(float dt)
 {
 	auto& net = HjNetSession::Instance();
+
+	// 自分の車の見た目を毎フレーム預ける。
+	//
+	// 繋ぐ経路が複数ある(ロビーから自動・調整パネルから直接)ので、
+	// 接続のたびに渡す作りだと、どれか一つで渡し忘れて
+	// 既定の色が送られる。ここで常に最新にしておけば取りこぼさない。
+	// 走行中に色を変えても、次の名簿配布で相手へ届く。
+	net.SetMyLook(BuildMyLook());
 
 	// ロビーの返事を処理する。
 	// 通信を始める前(部屋を探している間)も回す必要があるので、
@@ -281,32 +381,13 @@ void GameScene::UpdateNetwork(float dt)
 		net.SetLink(HjNetSession::Link::Steam);
 		if (lobby.IsOwner())
 		{
-			net.StartHost(HjPlayerProfile::Instance().GetName().c_str(),
-			              HjPlayerProfile::Instance().GetColor());
+			net.StartHost(HjPlayerProfile::Instance().GetName().c_str());
 		}
 		else
 		{
 			char ownerId[32] = {};
 			snprintf(ownerId, sizeof(ownerId), "%llu", lobby.GetOwnerId());
-			net.StartJoin(ownerId, HjPlayerProfile::Instance().GetName().c_str(),
-			              HjPlayerProfile::Instance().GetColor());
-		}
-	}
-
-	// 見分け色は繋いでいる間だけ乗せる。
-	//
-	// 起動時から乗せてしまうと、調整パネルで設定して保存した
-	// アウトラインと煙の色を上書きしてしまい、
-	// 「調整が読み込まれていない」ように見える。
-	if (auto car = m_wpCar.lock())
-	{
-		if (net.IsActive())
-		{
-			car->ApplyPlayerColor(HjPlayerProfile::Instance().GetColor());
-		}
-		else
-		{
-			car->ClearPlayerColor();
+			net.StartJoin(ownerId, HjPlayerProfile::Instance().GetName().c_str());
 		}
 	}
 
@@ -344,7 +425,7 @@ void GameScene::UpdateNetwork(float dt)
 			// 名前と色は名簿が届いて初めて分かる。
 			// 車のほうが先にできることがあるので、毎回入れ直す
 			remote->SetPlayerName(net.GetPeerName(state.id));
-			remote->SetPlayerColor(net.GetPeerColor(state.id));
+			remote->SetLook(net.GetPeerLook(state.id));
 		}
 	}
 
@@ -383,4 +464,112 @@ void GameScene::RemoveRemoteCar(int playerId)
 		car->Expire();
 	}
 	m_wpRemoteCars[playerId].reset();
+
+	// 見ていた相手が抜けたら自分へ戻す。
+	// 戻さないと、いなくなった位置をカメラが見続けることになる
+	if (m_spectateId == playerId) { SetSpectate(-1); }
+}
+
+//----------------------------------------------------------
+// 観戦する相手を切り替える。-1 は自分。
+//
+// カメラの追う相手を差し替えるだけで、自分の車は走り続ける。
+// 止めたい場合はポーズを使う(そちらは別の役目)。
+//----------------------------------------------------------
+void GameScene::SetSpectate(int playerId)
+{
+	auto cam = m_wpCamera.lock();
+	if (!cam) { return; }
+
+	// 前に見ていた相手の印を消す
+	if (m_spectateId >= 0 && m_spectateId < NetConst::MaxPlayers)
+	{
+		if (auto prev = m_wpRemoteCars[m_spectateId].lock()) { prev->SetSpectated(false); }
+	}
+
+	if (playerId < 0)
+	{
+		auto car = m_wpCar.lock();
+		if (!car) { return; }
+
+		cam->SetTarget(car);
+		// 自分へ戻ったら走行を再開する
+		car->SetHalted(false);
+		m_spectateId = -1;
+		return;
+	}
+
+	if (playerId >= NetConst::MaxPlayers) { return; }
+
+	// まだ来ていない相手は選べない
+	auto remote = m_wpRemoteCars[playerId].lock();
+	if (!remote) { return; }
+
+	cam->SetTarget(remote);
+	remote->SetSpectated(true);
+
+	// 観戦中は自分の車を止める。
+	// 動いたままだと、見ていない間に崖から落ちたり壁に刺さったりする
+	if (auto car = m_wpCar.lock()) { car->SetHalted(true); }
+
+	m_spectateId = playerId;
+}
+
+//----------------------------------------------------------
+// 観戦の切り替えパネル。
+//----------------------------------------------------------
+void GameScene::DrawSpectateImGui()
+{
+	if (!ImGui::CollapsingHeader(U8("観戦"))) { return; }
+
+	auto& net = HjNetSession::Instance();
+
+	ImGui::TextWrapped(
+		U8("カメラの追う相手を切り替えます。自分の車は走り続けるので、"
+		   "止めたい場合はポーズを使ってください。"));
+	ImGui::Separator();
+
+	// 自分
+	{
+		const bool on = (m_spectateId < 0);
+		ImGui::BeginDisabled(on);
+		if (ImGui::Button(U8("自分"))) { SetSpectate(-1); }
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (on) { ImGui::TextColored(ImVec4(0.4f, 1, 0.5f, 1), U8("← 見ています")); }
+		else    { ImGui::TextDisabled(U8("%s"), HjPlayerProfile::Instance().GetName().c_str()); }
+	}
+
+	// 相手
+	int shown = 0;
+	for (int id = 0; id < NetConst::MaxPlayers; ++id)
+	{
+		auto remote = m_wpRemoteCars[id].lock();
+		if (!remote) { continue; }
+		++shown;
+
+		ImGui::PushID(id);
+
+		const bool on = (m_spectateId == id);
+		ImGui::BeginDisabled(on);
+		if (ImGui::Button(U8("見る"))) { SetSpectate(id); }
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+
+		// 名簿が届く前は名前が空なので、番号で出す
+		const char* name = net.GetPeerName(id);
+		if (!name || !name[0]) { name = U8("(名前待ち)"); }
+
+		if (on) { ImGui::TextColored(ImVec4(0.4f, 1, 0.5f, 1), U8("[%d] %s  ← 見ています"), id, name); }
+		else    { ImGui::Text(U8("[%d] %s"), id, name); }
+
+		ImGui::PopID();
+	}
+
+	if (shown == 0)
+	{
+		ImGui::TextDisabled(U8("(他のプレイヤーがいません)"));
+	}
 }

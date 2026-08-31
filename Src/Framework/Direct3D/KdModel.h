@@ -162,6 +162,18 @@ public:
 	bool NeedCalcNodeMatrices() { return m_needCalcNode; }
 
 	// ノード単位の表示切替
+	// 可視フラグだけを番号で切り替える。
+	//
+	// WorkNodes() を使うと、触っただけで「行列を計算し直す」印が付き、
+	// 全ノードの階層をたどる処理が走る。可視フラグは行列に影響しないので、
+	// それを避けるための入口。
+	// 名前で探す SetNodeVisible と違い、ノードが数千あっても軽い。
+	void SetNodeVisibleAt(int index, bool visible)
+	{
+		if (index < 0 || index >= static_cast<int>(m_coppiedNodes.size())) { return; }
+		m_coppiedNodes[index].m_visible = visible;
+	}
+
 	void SetNodeVisible(std::string_view name, bool visible)
 	{
 		for (auto& n : m_coppiedNodes)

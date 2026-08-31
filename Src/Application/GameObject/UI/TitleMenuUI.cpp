@@ -1,5 +1,6 @@
 ﻿#include "TitleMenuUI.h"
 #include "../Score/HjPlayerProfile.h"
+#include "../../Audio/HjBgm.h"
 #include "../../Input/HjKeyInput.h"
 #include "HjUI.h"   // マウス入力(BeginInput/Hover/Clicked)
 
@@ -46,6 +47,13 @@ void TitleMenuUI::Update()
 		const float rowDy = kMenuTopDy + i * kMenuRowDy;
 		if (HjUI::Hover(kMenuLeftDx, rowDy, kMenuWDx, kMenuRowDy)) { m_sel = i; }
 		if (HjUI::Clicked(kMenuLeftDx, rowDy, kMenuWDx, kMenuRowDy)) { m_sel = i; m_activated = true; }
+	}
+
+	// NOW PLAYING の再生/停止ボタン。
+	// 曲を止めたいときに設定画面まで行かせない
+	if (HjUI::Clicked(1410.0f, 778.0f, 46.0f, 46.0f))
+	{
+		HjBgm::Instance().ToggleMuted();
 	}
 }
 
@@ -407,23 +415,62 @@ void TitleMenuUI::DrawSprite()
 	DrawTextRotated(FontFoot, 1514.0f, 432.0f, "FOCUS // ADAPT // OVERCOME", INK, 0.18f * 13.0f);
 
 	// ══ NOW PLAYING(z4) ══
-	DrawRectTL(1124.0f, 768.0f, 346.0f, 66.0f, NPBG, true);
-	DrawFrameTL(1124.0f, 768.0f, 346.0f, 66.0f, 2.0f, INK);
-	// 波形(小さなバーで代替)
+	// 実際に鳴っている曲と連動させる。
+	// 飾りとして固定の曲名を出すと、鳴っている音と食い違って
+	// 「作り込んでいない所」として目に付く。
 	{
-		const float bh[9] = { 6, 12, 18, 9, 22, 12, 6, 15, 9 };
-		for (int i = 0; i < 9; ++i)
+		auto& bgm = HjBgm::Instance();
+		const bool sounding = bgm.IsSounding();
+
+		DrawRectTL(1124.0f, 768.0f, 346.0f, 66.0f, NPBG, true);
+		DrawFrameTL(1124.0f, 768.0f, 346.0f, 66.0f, 2.0f, INK);
+
+		// 波形。鳴っている間だけ動かす。
+		// 止めているのに揺れていると、止まったことが伝わらない
 		{
-			DrawRectTL(1140.0f + i * 6.0f, 800.0f - bh[i] * 0.5f, 3.0f, bh[i], INK, true);
+			const float base[9] = { 6, 12, 18, 9, 22, 12, 6, 15, 9 };
+			for (int i = 0; i < 9; ++i)
+			{
+				float h = base[i];
+				if (sounding)
+				{
+					// 棒ごとに位相と速さをずらす。揃っていると機械的に見える
+					const float t = HjUI::Time() * (5.0f + i * 0.7f) + i * 1.3f;
+					h = 4.0f + (base[i] - 2.0f) * (0.55f + 0.45f * std::fabs(std::sin(t)));
+				}
+				else
+				{
+					// 止めている間は低く平らに寝かせる
+					h = 3.0f;
+				}
+				DrawRectTL(1140.0f + i * 6.0f, 800.0f - h * 0.5f, 3.0f, h,
+				           sounding ? INK : SUBTXT, true);
+			}
 		}
-	}
-	DrawText(FontNpTtl, 1210.0f, 776.0f, 13.0f, "MIDNIGHT", INK);
-	DrawText(FontNpTtl, 1210.0f, 793.0f, 13.0f, "DRIVE", INK);
-	DrawText(FontNpArt, 1210.0f, 812.0f, 10.0f, "KORDHELL", SUBTXT);
-	DrawRectTL(1410.0f, 778.0f, 46.0f, 46.0f, INK, true);              // 再生ボタン
-	{   // ▶
-		const int bx = static_cast<int>(MapX(1433.0f)), by = static_cast<int>(MapY(801.0f));
-		sp.DrawTriangle(bx - 5, by - 7, bx - 5, by + 7, bx + 7, by, &WHITE, true);
+
+		// 曲名。長いので枠に収まるところまで
+		DrawText(FontNpTtl, 1210.0f, 776.0f, 13.0f, bgm.GetTitle(), INK);
+		DrawText(FontNpArt, 1210.0f, 812.0f, 10.0f, bgm.GetArtist(), SUBTXT);
+
+		// 再生/停止ボタン。押せることが分かるよう、指すと色が変わる
+		const bool overBtn = HjUI::Hover(1410.0f, 778.0f, 46.0f, 46.0f);
+		DrawRectTL(1410.0f, 778.0f, 46.0f, 46.0f, overBtn ? ACID : INK, true);
+		{
+			const int bx = static_cast<int>(MapX(1433.0f));
+			const int by = static_cast<int>(MapY(801.0f));
+			const Math::Color mark = overBtn ? INK : WHITE;
+
+			if (sounding)
+			{
+				// 停止(一時停止)の印。縦棒2本
+				sp.DrawBox(bx - 4, by, 2, 7, &mark, true);
+				sp.DrawBox(bx + 4, by, 2, 7, &mark, true);
+			}
+			else
+			{
+				sp.DrawTriangle(bx - 5, by - 7, bx - 5, by + 7, bx + 7, by, &mark, true);
+			}
+		}
 	}
 
 	// ══ SVGデコ(z5, 最前面) ══

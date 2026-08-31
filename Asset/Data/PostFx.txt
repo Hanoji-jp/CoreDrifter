@@ -6,7 +6,7 @@ outlineStrength 1
 outlineColR 0
 outlineColG 0
 outlineColB 0
-smokeOutlineOn 0
+smokeOutlineOn 1
 smokeOutlineThick 2
 smokeOutlineAlphaTh 0.25
 smokeOutlineStr 1

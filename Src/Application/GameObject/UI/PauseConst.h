@@ -33,4 +33,34 @@ namespace PauseConst
 
 	//===== 下段 =====
 	constexpr float KeycapY = 700.0f;
+
+	//===== 設定ウィンドウ =====
+	// 走行中に音量だけ直したい、という用がほとんどなので、
+	// 画面ごと切り替えず小さな窓で出す。
+	// 画面を移ると走行の映像が消えて、どこで止めたのか分からなくなる。
+	//
+	// 中央へ置く。ポーズのメニューは左寄せなので、
+	// 窓が中央にあれば「別の層が開いた」ことが位置で伝わる。
+	constexpr float WinW = 560.0f, WinH = 340.0f;
+	constexpr float WinX = (CanvasW - WinW) * 0.5f;
+	constexpr float WinY = (CanvasH - WinH) * 0.5f;
+
+	// 窓が開いている間、後ろのポーズ画面もさらに暗く落とす。
+	// 落とさないと、どちらを操作しているのか分からない
+	constexpr float WinDimAlpha = 0.45f;
+
+	// 見出しの帯
+	constexpr float WinHeadH = 52.0f;
+
+	// 行
+	constexpr float WinRowH   = 62.0f;
+	constexpr float WinRowPadX = 26.0f;
+	// 音量の棒
+	constexpr float WinBarW = 220.0f, WinBarH = 12.0f;
+
+	// 窓の下に出す操作説明
+	constexpr float WinFootDy = 22.0f;
+
+	// 音量を1回で動かす量。設定画面と揃える
+	constexpr float WinVolStep = 0.05f;
 }

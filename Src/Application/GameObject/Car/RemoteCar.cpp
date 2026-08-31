@@ -50,12 +50,26 @@ float RemoteCar::LerpAngle(float a, float b, float t)
 }
 
 //----------------------------------------------------------
+// 1つの状態から車体の姿勢を作る。
+//
+// 掛ける順番は描画側と揃える。ここがずれると、
+// 通信で来た車だけ傾き方が違うことになる。
+//----------------------------------------------------------
+Math::Quaternion RemoteCar::MakeRotation(const HjNetStatePacket& st)
+{
+	return Math::Quaternion::CreateFromAxisAngle(Math::Vector3::UnitX, -st.terrainPitch)
+	     * Math::Quaternion::CreateFromAxisAngle(Math::Vector3::UnitZ, -st.terrainRoll)
+	     * Math::Quaternion::CreateFromAxisAngle(Math::Vector3::UnitY,  st.yaw);
+}
+
+//----------------------------------------------------------
 // 指定した時刻の状態を作る。
 //   ・その時刻を挟む2つがあれば、その間を繋ぐ
 //   ・一番古いものより前なら、一番古いものをそのまま使う
 //   ・一番新しいものより後なら、速度で少しだけ伸ばす
 //----------------------------------------------------------
-bool RemoteCar::SampleAt(float renderTime, HjNetStatePacket& out) const
+bool RemoteCar::SampleAt(float renderTime, HjNetStatePacket& out,
+                         Math::Quaternion& outRot) const
 {
 	if (m_history.empty()) { return false; }
 
@@ -63,7 +77,8 @@ bool RemoteCar::SampleAt(float renderTime, HjNetStatePacket& out) const
 	// 補間する材料が無いので、持っているものをそのまま置く
 	if (renderTime <= m_history.front().time)
 	{
-		out = m_history.front().state;
+		out    = m_history.front().state;
+		outRot = MakeRotation(out);
 		return true;
 	}
 
@@ -76,27 +91,56 @@ bool RemoteCar::SampleAt(float renderTime, HjNetStatePacket& out) const
 
 		const float span = b.time - a.time;
 		// 同時刻に2つ届いた場合は割り算ができないので、新しいほうを使う
-		if (span <= 1e-6f) { out = b.state; return true; }
+		if (span <= 1e-6f) { out = b.state; outRot = MakeRotation(out); return true; }
 
 		const float t = std::clamp((renderTime - a.time) / span, 0.0f, 1.0f);
 
 		out = b.state;   // 数値以外(番号・フラグ)は新しいほうに合わせる
-		out.px = a.state.px + (b.state.px - a.state.px) * t;
-		out.py = a.state.py + (b.state.py - a.state.py) * t;
-		out.pz = a.state.pz + (b.state.pz - a.state.pz) * t;
+
+		// 位置は「速度を接線に使った曲線」で繋ぐ(エルミート補間)。
+		//
+		// 2点を直線で結ぶと、旋回中に内側を通ってしまう。
+		// 毎秒20回では点の間隔が広いので、コーナーで車が
+		// 実際より内側を走って見える。速度が分かっているなら、
+		// その向きへ出て その向きへ入る曲線を引ける。
+		{
+			const float t2 = t * t;
+			const float t3 = t2 * t;
+			// エルミート基底。始点・終点の位置と、両端の接線の重み
+			const float h00 =  2.0f * t3 - 3.0f * t2 + 1.0f;
+			const float h10 =         t3 - 2.0f * t2 + t;
+			const float h01 = -2.0f * t3 + 3.0f * t2;
+			const float h11 =         t3 -        t2;
+
+			// 接線は「速度 × 区間の長さ」。
+			// 秒速のままだと区間の長さと単位が合わず、曲がりすぎる
+			const Math::Vector3 p0(a.state.px, a.state.py, a.state.pz);
+			const Math::Vector3 p1(b.state.px, b.state.py, b.state.pz);
+			const Math::Vector3 m0 = Math::Vector3(a.state.vx, a.state.vy, a.state.vz) * span;
+			const Math::Vector3 m1 = Math::Vector3(b.state.vx, b.state.vy, b.state.vz) * span;
+
+			const Math::Vector3 p = p0 * h00 + m0 * h10 + p1 * h01 + m1 * h11;
+			out.px = p.x;  out.py = p.y;  out.pz = p.z;
+		}
 		out.vx = a.state.vx + (b.state.vx - a.state.vx) * t;
 		out.vy = a.state.vy + (b.state.vy - a.state.vy) * t;
 		out.vz = a.state.vz + (b.state.vz - a.state.vz) * t;
 		out.steer = a.state.steer + (b.state.steer - a.state.steer) * t;
-		out.yaw   = LerpAngle(a.state.yaw, b.state.yaw, t);
+		out.yaw = LerpAngle(a.state.yaw, b.state.yaw, t);
 
-		// 傾きも繋ぐ。ここが飛ぶと車体がガクッと揺れて目立つ。
-		// 傾きは小さい範囲しか動かないが、向きと同じ扱いにしておけば
-		// 繋ぎ目で逆へ回ることが無い
-		out.terrainPitch = LerpAngle(a.state.terrainPitch, b.state.terrainPitch, t);
-		out.terrainRoll  = LerpAngle(a.state.terrainRoll,  b.state.terrainRoll,  t);
-		out.bodyPitch    = LerpAngle(a.state.bodyPitch,    b.state.bodyPitch,    t);
-		out.bodyRoll     = LerpAngle(a.state.bodyRoll,     b.state.bodyRoll,     t);
+		// 車体の姿勢は合成してから球面で繋ぐ(Slerp)。
+		//
+		// 坂の傾き・バンク・向きは掛け合わさった1つの回転なので、
+		// 角度ごとに別々に繋ぐと、3軸が同時に動いたときに
+		// 本来たどるはずの経路と違う道を通る。バンクの付いた
+		// コーナーで車体がわずかに揺れて見えるのがこれ。
+		// 球面で繋げば、常に最短の回り方で一定の速さで回る。
+		outRot = Math::Quaternion::Slerp(MakeRotation(a.state), MakeRotation(b.state), t);
+
+		// サスの傾きは車体へ後から掛ける小さな角度なので、そのまま繋ぐ。
+		// 合成へ含めても差が出ないうえ、分けておけばタイヤは接地したままにできる
+		out.bodyPitch = LerpAngle(a.state.bodyPitch, b.state.bodyPitch, t);
+		out.bodyRoll  = LerpAngle(a.state.bodyRoll,  b.state.bodyRoll,  t);
 		return true;
 	}
 
@@ -111,6 +155,10 @@ bool RemoteCar::SampleAt(float renderTime, HjNetStatePacket& out) const
 	out.px += last.state.vx * ahead;
 	out.py += last.state.vy * ahead;
 	out.pz += last.state.vz * ahead;
+
+	// 姿勢は伸ばさない。回る速さを送っていないので、
+	// 推測で回すと止まった相手が回り続けることになる
+	outRot = MakeRotation(last.state);
 	return true;
 }
 
@@ -146,7 +194,8 @@ void RemoteCar::Update()
 	const float renderTime = m_time - NetConst::InterpDelay;
 
 	HjNetStatePacket s;
-	if (!SampleAt(renderTime, s)) { return; }
+	Math::Quaternion rot;
+	if (!SampleAt(renderTime, s, rot)) { return; }
 
 	const Math::Vector3 pos(s.px, s.py, s.pz);
 	const Math::Vector3 vel(s.vx, s.vy, s.vz);
@@ -156,10 +205,13 @@ void RemoteCar::Update()
 	SpinWheels(dt, vel.Length(), handbrake);
 	ApplyVisualState(pos, s.yaw, vel, s.steer, m_spinFront, m_spinRear);
 
-	// 傾きは送り主が出した答えをそのまま使う。
+	// 車体の姿勢は球面で繋いだものをそのまま渡す。
+	// サスの傾きだけは、車体へ後から掛ける小さな角度として別に渡す。
+	//
 	// ここで UpdateSuspensionVisual を呼んでも、加速度を持っていないので
 	// 常に水平のままになる。地形の傾きに至っては、レイを飛ばしていないので
 	// そもそも求まらない。
+	ApplyVisualRotation(rot);
 	ApplyVisualTilt(s.terrainPitch, s.terrainRoll, s.bodyPitch, s.bodyRoll);
 
 	// 煙とタイヤ痕。送られてきた滑り量をそのまま使う
@@ -238,6 +290,20 @@ void RemoteCar::DrawSprite()
 	const float plateH = textH + NP::PadY * 2.0f;
 	const float plateX = cx - plateW * 0.5f;
 	const float plateY = cy - plateH;   // 指し先が車になるよう、上へ積む
+
+	// 観戦中の印。名前の上に帯で出す。
+	// 遠くの車でも、どれを見ているのかが一目で分かる
+	if (m_spectated)
+	{
+		const float tagY = plateY - NP::TagH;
+		Math::Color tagBg = NP::TagColor; tagBg.w *= alpha;
+		Math::Color tagTx = NP::TagText;  tagTx.w *= alpha;
+
+		HjUI::RectTL(plateX, tagY, plateW, NP::TagH, tagBg);
+		HjUI::TextAtC(UIConst::FontTiny, cx,
+		              tagY + UIConst::CenterInBox(NP::TagH, UIConst::FontPx(UIConst::FontTiny)),
+		              NP::SpectateLabel, tagTx);
+	}
 
 	// 後ろの板。明るい路面や空の上でも読めるようにする
 	HjUI::RectTL(plateX, plateY, plateW, plateH,

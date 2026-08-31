@@ -3,6 +3,9 @@
 #include "../SceneManager.h"
 #include "../HjTransition.h"
 #include "../../GameObject/UI/TitleMenuUI.h"
+#include "../../GameObject/UI/HjUpdateNotice.h"
+#include "../../GameObject/Stage/TitleShowcase.h"
+#include "../../Const/ShowcaseConst.h"
 
 void TitleScene::Event()
 {
@@ -45,8 +48,26 @@ void TitleScene::Init()
 {
 	m_objList.clear();
 
+	// 背景は緑一色。タイトルは3Dの背景を持たないので、
+	// ここで指定した色がそのまま窓の中に出る
+	KdShaderManager::Instance().m_postProcessShader.SetSceneClearColor(
+		Math::Color(ShowcaseConst::BgR, ShowcaseConst::BgG, ShowcaseConst::BgB, 1.0f));
+
+	// 窓の中に映る車。走らせず、回転台に載せたように回すだけ
+	auto showcase = std::make_shared<TitleShowcase>();
+	showcase->Init();
+	AddObject(showcase);
+
 	auto menu = std::make_shared<TitleMenuUI>();
 	menu->Init();
 	AddObject(menu);
 	m_wpMenu = menu;
+
+	// 更新の知らせ(左下)。新しい版があるときだけ出る。
+	//
+	// ※メニューより後に足すこと。
+	//   あちらは画面いっぱいに紙色の地を描くので、
+	//   先に足すとその下へ潜って見えなくなる
+	auto notice = std::make_shared<HjUpdateNotice>();
+	AddObject(notice);
 }

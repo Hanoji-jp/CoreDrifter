@@ -6,6 +6,7 @@
 #include "../Effect/DriftNeon.h"         // タイヤ周りのネオン線画(Unbound風)
 #include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
+#include "../../Mod/HjModLoader.h"      // 見た目の差し替え(MOD)
 #include "../../Audio/HjEngineAudio.h"   // エンジン音
 #include "../../Audio/HjTireAudio.h"     // タイヤのスキール音・ブレーキ鳴き
 
@@ -99,6 +100,52 @@ public:
 	// スポーン(初期配置)：位置・向きを与え、速度など運動状態をリセット。
 	// 与えた値はリスポーン地点として記憶する。
 	void SetSpawn(const Math::Vector3& pos, float yaw);
+	// 走行を止める(観戦中など)。
+	//
+	// 入力を切るだけでは惰性で走り続けるので、見ていない間に
+	// 崖から落ちたり壁に刺さったりする。速度ごと止める。
+	// コントローラーの状況を出す(F2のパネル)。
+	// 実際に操作へ使っているものをそのまま覗く。
+	// 別に用意すると、使われているのと違うものを見ることになる
+	//===== 見た目の差し替え(MOD) =====
+	// 利用者が置いた .gltf に替える。
+	//
+	// 失敗しても見た目はそのまま残る。読み込めなかった理由は
+	// 戻り値で返すので、画面へそのまま出せる。
+	// 何も返さないと「押したのに変わらない」だけになり、
+	// 置き場所が違うのか形式が違うのか分からない。
+	//
+	// 空文字か ModConst::StockMark を渡すと標準へ戻る。
+	HjModLoader::Result SetBodyModel(const std::string& path);
+	HjModLoader::Result SetWheelModel(const std::string& path);
+
+	// いま何を使っているか。標準なら StockMark
+	const std::string& GetBodyModPath()  const { return m_bodyModPath; }
+	const std::string& GetWheelModPath() const { return m_wheelModPath; }
+
+	// 選んだものの保存 / 読込。
+	// 車の調整(CarTune)とは別のファイルにする。
+	// あちらは数値だけを並べる作りなので、パスを混ぜると読み込みが壊れる
+	// 見た目合わせの調整値。MODメニューが左右で動かす。
+	//
+	// TuneParamList は物理まで全部返すので、そのまま見せると
+	// 走行中のメニューから車の性能まで変えられてしまう。
+	// 見た目に関わるものだけを別に返す
+	std::vector<std::pair<const char*, float*>> AppearanceParamList();
+
+	// ※見た目の調整をここから書き出す口は置かない。
+	//   差し替えたモデルの合わせ込みを車の調整へ書くと、
+	//   モデルを替えるたびに前の値が消え、標準へ戻したときには
+	//   標準の値まで壊れている。モデルごとの記録(HjModProfile)へ持つ。
+
+	void SaveModChoice() const;
+	void LoadModChoice();
+
+	void DrawPadImGui() { m_pad.DrawImGui(); }
+
+	void SetHalted(bool halted) { m_halted = halted; }
+	bool IsHalted() const { return m_halted; }
+
 	// 記憶したスポーン地点へ戻す(Rキーのリスポーン)
 	void Respawn() { SetSpawn(m_spawnPos, m_spawnYaw); }
 
@@ -107,14 +154,25 @@ public:
 	// Hierarchy に並べる名前(車種ごとに Silvia などを設定する)
 	const std::string& GetTuningName() const { return m_tuningName; }
 
-	// 見分け用の色を反映する(アウトラインと煙)。
-	// マルチで誰の車か一目で分かるようにするためのもの。
-	// 車種ごとの色ではなくプレイヤーごとの色なので、外から与える。
-	// 自分の車にもシーンから設定するので公開しておく
-	void ApplyPlayerColor(const Math::Vector3& color);
-	// 見分け用の色をやめて、調整パネルで設定した色へ戻す。
-	// 1人で走っているときまで見分け色にすると、車種ごとに詰めた色が消える
-	void ClearPlayerColor();
+	//===== 見た目の色 =====
+	// 調整パネルで設定した色。通信で相手へ送り、
+	// 相手の画面でも同じ車に見せる
+	const Math::Vector3& GetOutlineColor() const { return m_outlineColor; }
+	const Math::Vector3& GetSmokeColorA()  const { return m_smokeColor; }
+	const Math::Vector3& GetSmokeColorB()  const { return m_smokeColorB; }
+	const Math::Vector3& GetAccentColor()  const { return m_driftTintColor; }
+	const Math::Vector3& GetNeonColorA()   const { return m_neonColorA; }
+	const Math::Vector3& GetNeonColorB()   const { return m_neonColorB; }
+	const Math::Vector3& GetSmokeHiColor() const { return m_smokeHiColor; }
+	float                GetSmokeGradDist() const { return m_smokeGradDist; }
+
+	// 受け取った色を反映する(他人の車用)。
+	// 自分の車は調整パネルの値をそのまま使うので、これは呼ばない
+	void ApplyLookColors(const Math::Vector3& outline,
+	                     const Math::Vector3& smokeA, const Math::Vector3& smokeB,
+	                     const Math::Vector3& accent,
+	                     const Math::Vector3& neonA,  const Math::Vector3& neonB,
+	                     const Math::Vector3& smokeHi, float smokeGradDist);
 
 	// ブースト(ニトロ)演出を発動：車体に一瞬だけアクセントカラーが乗り、
 	// 同時にネオンの線画が全方向へ弾ける。将来ニトロ機能から呼ぶ。
@@ -161,6 +219,14 @@ protected:
 	void ApplyVisualTilt(float terrainPitch, float terrainRoll,
 	                     float bodyPitch, float bodyRoll);
 
+	// 通信で受け取った姿勢(合成済み)。
+	//
+	// 車体の向きは「坂の傾き × バンク × ヨー」を掛け合わせた回転で、
+	// 3軸が同時に動く。これを角度ごとに別々に補間すると、
+	// 本来たどるはずの経路と違う道を通って車体が揺れる。
+	// 受け取り側で合成してから補間した結果を、そのまま使う。
+	void ApplyVisualRotation(const Math::Quaternion& rot);
+
 	// タイヤ痕と煙を出す。
 	//
 	// 入力は「どれだけ滑っているか」だけ。物理から出しても通信から
@@ -200,17 +266,25 @@ protected:
 	void UpdateMotionFeedback(float dt, bool handbrake, float throttle);
 
 	void DrawTuningImGui();
+	void DrawModImGui();   // 見た目の差し替え(調整パネルの中の1区画)
 
 	// 調整値の保存/読込（車種ごとのファイルへ）
 	void SaveTuning();
 	void LoadTuning();
 	std::string TuneFilePath() const;
+	std::string ModFilePath() const;
 	std::vector<std::pair<const char*, float*>> TuneParamList();
 
 	//===== 派生クラスがコンストラクタで設定する =====
 	// モデル
 	std::string m_bodyPath  = "Asset/Data/Box.gltf";
 	std::string m_wheelPath = "Asset/Data/Box.gltf";
+
+	// 差し替えで選ばれているもの。標準なら ModConst::StockMark。
+	// 上の m_bodyPath とは別に持つ。あちらは「標準は何か」を
+	// 覚えておく場所で、上書きすると標準へ戻せなくなる
+	std::string m_bodyModPath  = "-";
+	std::string m_wheelModPath = "-";
 	std::string m_tuningName = "Car Tuning";   // Hierarchy に並べるときの名前
 	std::string m_saveKey    = "Car";          // 保存ファイルのキー(車種ごと)
 
@@ -332,6 +406,16 @@ protected:
 	float m_camber     = CarConst::CamberAngle;
 	// オフセット(全体 / 前輪 / 後輪 を個別に)
 	float m_offX = 0.0f,      m_offZ = 0.0f;       // 4輪全体
+
+	// 車体モデルの位置合わせ(車の座標での取り付け位置)。
+	//
+	// 外から持ってきたモデルは原点の置き方がバラバラで、
+	// 床に埋まったり浮いたりする。タイヤは接地したままにしたいので、
+	// 車ごと動かすのではなく、車体モデルだけをずらす。
+	//
+	// 規約どおり、まとめて Vector3 で持つ。
+	// x=左右 / y=高さ / z=前後
+	Math::Vector3 m_bodyOffset = Math::Vector3::Zero;
 	float m_frontOffX = 0.0f, m_frontOffZ = 0.0f;  // 前輪のみ
 	float m_rearOffX = 0.0f,  m_rearOffZ = 0.0f;   // 後輪のみ
 
@@ -339,14 +423,6 @@ protected:
 	bool          m_outlineEnabled = true;
 	float         m_outlineWidth   = 0.04f;
 	Math::Vector3 m_outlineColor    = Math::Vector3(0.0f, 0.0f, 0.0f); // 黒
-	// 調整パネルで設定した本来の色。
-	// マルチの見分け色を乗せる前に控えておき、抜けたときに戻す。
-	// 控えておかないと、一度でも見分け色を乗せた時点で
-	// 保存した色が失われる
-	Math::Vector3 m_tuneOutlineColor = Math::Vector3(0.0f, 0.0f, 0.0f);
-	Math::Vector3 m_tuneSmokeColor   = Math::Vector3(1.0f, 1.0f, 1.0f);
-	Math::Vector3 m_tuneSmokeColorB  = Math::Vector3(1.0f, 1.0f, 1.0f);
-	bool          m_tuneColorSaved   = false;
 
 	// ドリフトスモークの色味(白=通常。NFS Unbound風のカラー煙にもできる)
 	// 発生源から離れるほど 色A → 色B へ滑らかにグラデーションする
@@ -384,6 +460,11 @@ private:
 	// 今フレームのサイドブレーキ。操作の読み取りは局所変数なので、
 	// 外へ伝えるために覚えておく(通信で相手へ送る)
 	bool          m_handbrakeNow = false;
+	// 走行を止めているか(観戦中など)
+	bool          m_halted = false;
+	// 通信で受け取った姿勢。設定されていれば角度より優先する
+	Math::Quaternion m_netRotation;
+	bool             m_useNetRotation = false;
 	// 後退へ入るまでSを踏み続けている時間(秒)。
 	// 一瞬の誤判定でギアが切り替わらないようにするためのもの
 	float         m_reverseHold  = 0.0f;

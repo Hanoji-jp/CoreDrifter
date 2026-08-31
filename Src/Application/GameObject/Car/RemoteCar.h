@@ -42,8 +42,18 @@ public:
 
 	// 表示する名前。名簿から貰った値を入れる
 	void SetPlayerName(const std::string& name) { m_playerName = name; }
-	// 見分け用の色。アウトラインと煙に反映される
-	void SetPlayerColor(const Math::Vector3& color) { ApplyPlayerColor(color); }
+	// 持ち主の調整パネルの色。アウトラインと煙に反映される
+	void SetLook(const HjCarLook& look)
+	{
+		ApplyLookColors(look.outline, look.smokeA, look.smokeB,
+		                look.accent, look.neonA, look.neonB,
+		                look.smokeHi, look.smokeGradDist);
+	}
+
+	// この車を観戦しているか。名前札に印を出す。
+	// カメラが動いただけだと「自分がそこへ移動した」ようにも見えるので、
+	// 見られている側の札で区別する
+	void SetSpectated(bool on) { m_spectated = on; }
 
 	// 届いた状態を積む。順番の入れ替わりはセッション側で弾いてある
 	void PushState(const HjNetStatePacket& state);
@@ -65,8 +75,15 @@ private:
 		HjNetStatePacket state;
 	};
 
-	// 描くべき時刻の状態を作る。false=まだ描けるものが無い
-	bool SampleAt(float renderTime, HjNetStatePacket& out) const;
+	// 描くべき時刻の状態を作る。false=まだ描けるものが無い。
+	//
+	// outRot は「坂の傾き × バンク × ヨー」を合成した姿勢。
+	// 角度を1つずつ繋ぐと、3軸が同時に動いたときに本来と違う経路を
+	// 通って車体が揺れるので、合成してから球面で繋ぐ。
+	bool SampleAt(float renderTime, HjNetStatePacket& out, Math::Quaternion& outRot) const;
+
+	// 1つの状態から「坂の傾き × バンク × ヨー」の合成姿勢を作る
+	static Math::Quaternion MakeRotation(const HjNetStatePacket& st);
 
 	// 見た目のタイヤの回転を、今の速度から進める
 	void SpinWheels(float dt, float speed, bool handbrake);
@@ -82,6 +99,7 @@ private:
 	int         m_playerId = -1;
 	bool        m_hasState = false;
 	std::string m_playerName;
+	bool        m_spectated = false;
 
 	// タイヤの転がり角。基底のものは物理が回す前提で外から触れないので、
 	// ここで持って ApplyVisualState へ渡す

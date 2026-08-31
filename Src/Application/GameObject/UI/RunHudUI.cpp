@@ -27,14 +27,7 @@ namespace
 	constexpr int   kSection = 2, kSectionTotal = 4;
 	const char* kSectionNote = "UPHILL";
 
-	constexpr int kClipHit = 2;
 
-	// 走行ライン。コースの形そのものなので、汎用の曲線では代用できない
-	const float kLineFull[] = { 70.0f, 830.0f, 124.0f, 826.0f, 138.0f, 780.0f,
-	                            182.0f, 768.0f, 232.0f, 754.0f, 254.0f, 796.0f,
-	                            304.0f, 784.0f };
-	const float kLineDone[] = { 70.0f, 830.0f, 124.0f, 826.0f, 138.0f, 780.0f,
-	                            182.0f, 768.0f };
 }
 
 
@@ -53,7 +46,12 @@ void RunHudUI::DrawSprite()
 	DrawFrame();
 	DrawRunInfo();
 	DrawDriftAngle(car->GetDriftAngleDegSigned());
-	DrawCourseLine();
+	// ※左下の走行ライン(コースの折れ線とCPチップ)は外した。
+	//   中身が全部固定の仮データで、実際のコース形状とも
+	//   通過判定とも繋がっていなかった。
+	//   動かない情報を画面に置くと、他の数字まで信用されなくなる。
+	//   コースの区間判定を作るときに、本物として作り直すこと。
+
 	DrawTach(car->GetRpmRatio());
 	DrawSpeed(car->GetSpeedKmh(), car->GetGear());
 
@@ -173,28 +171,6 @@ void RunHudUI::DrawDriftAngle(float angleDeg)
 //
 // 通った部分を太くアシッドで、これからの部分を細く薄く描く。
 // 同じ太さで色だけ変えると、どちらが済んだ方か分からない。
-//----------------------------------------------------------
-void RunHudUI::DrawCourseLine()
-{
-	U::TextAt(FontFoot, PadX, ClipLabelY, "CLIPPING POINTS", Paper());
-
-	U::PolylineD(kLineFull, 7, 2.0f, Faint());
-	U::PolylineD(kLineDone, 4, 4.0f, ACID);
-
-	// 通過済みは塗り、まだの点は輪郭だけ
-	U::DiscD(124.0f, 826.0f, 6.0f, ACID);
-	U::DiscD(182.0f, 768.0f, 6.0f, ACID);
-	U::RingD(254.0f, 796.0f, 6.0f, Paper());
-	U::RingD(304.0f, 784.0f, 6.0f, Faint());
-
-	for (int i = 0; i < ClipCount; ++i)
-	{
-		char cp[8];
-		snprintf(cp, sizeof(cp), "CP%d", i + 1);
-		U::Chip(PadX + i * ClipChipGap, ClipChipY, cp, i < kClipHit, Paper());
-	}
-}
-
 //----------------------------------------------------------
 // 中下：伸びているスコアとチェーン倍率。
 //----------------------------------------------------------

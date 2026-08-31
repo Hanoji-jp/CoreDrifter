@@ -190,6 +190,37 @@ void HjAudioSpace::ApplySource(IXAudio2SourceVoice* voice, const Math::Vector3& 
 }
 
 void HjAudioSpace::SetPreset(Preset p) { m_preset = p;  ApplyReverb(); }
+//----------------------------------------------------------
+// 設定画面から来る音量。
+//
+// バスに掛けるので、そのバスへ流している音源が増えても
+// ここを通れば必ず効く。音源ごとに配って回ると、足すたびに
+// 配り忘れが出る。
+//----------------------------------------------------------
+void HjAudioSpace::SetSfxVolume(float v)
+{
+	m_userSfx = std::clamp(v, 0.0f, 1.0f);
+	ApplyBusVolumes();
+}
+
+void HjAudioSpace::SetAmbientVolume(float v)
+{
+	m_userAmbient = std::clamp(v, 0.0f, 1.0f);
+	ApplyBusVolumes();
+}
+
+//----------------------------------------------------------
+// バスへ実際の音量を流し込む。
+// 調整パネルの値(開発用)と設定画面の値(遊ぶ人)を掛け合わせる。
+//----------------------------------------------------------
+void HjAudioSpace::ApplyBusVolumes()
+{
+	// エンジンは「鳴り続ける背景」なので環境音の側
+	if (m_engine) { m_engine->SetVolume(m_volEngine * m_userAmbient); }
+	// タイヤは「出来事として鳴る音」なので効果音の側
+	if (m_tire)   { m_tire->SetVolume(m_volTire * m_userSfx); }
+}
+
 void HjAudioSpace::SetWetness(float w) { m_wetness = std::clamp(w, 0.0f, 1.0f); ApplyReverb(); }
 
 //----------------------------------------------------------
@@ -229,14 +260,8 @@ void HjAudioSpace::DrawImGui()
 	// バスごとの音量。各クラスが個別に持つとバランスが取れない
 	ImGui::SeparatorText(U8("バス音量"));
 	if (ImGui::SliderFloat(U8("全体"),     &m_volMaster, 0.0f, 2.0f)) {}
-	if (ImGui::SliderFloat(U8("エンジン"), &m_volEngine, 0.0f, 2.0f) && m_engine)
-	{
-		m_engine->SetVolume(m_volEngine);
-	}
-	if (ImGui::SliderFloat(U8("タイヤ"),   &m_volTire, 0.0f, 2.0f) && m_tire)
-	{
-		m_tire->SetVolume(m_volTire);
-	}
+	if (ImGui::SliderFloat(U8("エンジン"), &m_volEngine, 0.0f, 2.0f)) { ApplyBusVolumes(); }
+	if (ImGui::SliderFloat(U8("タイヤ"),   &m_volTire, 0.0f, 2.0f)) { ApplyBusVolumes(); }
 
 	ImGui::SeparatorText(U8("3D(距離・定位)"));
 	ImGui::TextWrapped(U8("常に耳元で同じ大きさで鳴っていると距離と方向の手がかりが無く、"

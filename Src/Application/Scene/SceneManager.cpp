@@ -1,5 +1,6 @@
 ﻿#include "SceneManager.h"
 #include "../Util/HjProfiler.h"
+#include "../Audio/HjBgm.h"
 #include "../GameObject/UI/HjCursor.h"
 #include "../Input/HjKeyInput.h"
 
@@ -40,6 +41,13 @@ void SceneManager::Update()
 	if (!HjTransition::Instance().FreezesScene()) { m_currentScene->Update(); }
 	// パネルワイプ遷移を進める(カバー完了時に自動でシーン切替を予約)
 	HjTransition::Instance().Update(KdFPSController::GetDt());
+
+	// メニューのBGM。走行画面だけ止める。
+	// 画面ごとに鳴らし直すと、そのたびに頭から始まって
+	// 「別のゲームに移った」ように感じるので、
+	// タイトル・設定・ルームの間は鳴らし続ける
+	HjBgm::Instance().SetPlaying(m_currentSceneType != SceneType::Game);
+	HjBgm::Instance().Update(KdFPSController::GetDt());
 
 	// 自前のマウスポインタ。位置と、動かしていない時間を見る
 	HjCursor::Instance().Update(KdFPSController::GetDt());

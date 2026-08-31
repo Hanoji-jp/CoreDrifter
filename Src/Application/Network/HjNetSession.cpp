@@ -1,7 +1,6 @@
 ﻿#include "HjNetSession.h"
 #include "HjUdpTransport.h"
 #include "HjSteamTransport.h"
-#include "../GameObject/Score/HjPlayerProfile.h"
 
 namespace
 {
@@ -21,6 +20,20 @@ namespace
 // 開始・終了
 //==========================================================
 
+//----------------------------------------------------------
+// 自分の車の見た目。シーンが毎フレーム入れる。
+//
+// 名簿は参加・退出のときしか配られないので、途中で色を変えても
+// そのままでは相手へ届かない。変わったことに気づいて送り直す。
+//----------------------------------------------------------
+void HjNetSession::SetMyLook(const HjCarLook& look)
+{
+	if (m_myLook == look) { return; }
+
+	m_myLook    = look;
+	m_lookDirty = true;
+}
+
 void HjNetSession::SetLink(Link link)
 {
 	// 繋いでいる最中に切り替えると、開いている口と食い違う。
@@ -39,7 +52,7 @@ std::unique_ptr<HjNetTransport> HjNetSession::MakeTransport() const
 	return std::make_unique<HjUdpTransport>();
 }
 
-bool HjNetSession::StartHost(const char* myName, const Math::Vector3& myColor)
+bool HjNetSession::StartHost(const char* myName)
 {
 	Leave();   // 二重に開かない
 
@@ -94,15 +107,13 @@ bool HjNetSession::StartHost(const char* myName, const Math::Vector3& myColor)
 	m_mode = Mode::Hosting;
 	m_myId = 0;              // ホストは常に0番
 	m_myName  = myName ? myName : "";
-	m_myColor = myColor;
 	m_seq = 0;
 	m_sendTimer = 0.0f;
 	m_lastError[0] = '\0';
 	return true;
 }
 
-bool HjNetSession::StartJoin(const char* address, const char* myName,
-                             const Math::Vector3& myColor)
+bool HjNetSession::StartJoin(const char* address, const char* myName)
 {
 	Leave();
 
@@ -138,7 +149,6 @@ bool HjNetSession::StartJoin(const char* address, const char* myName,
 	m_mode = Mode::Joining;   // 受理されるまでは参加中ではない
 	m_myId = -1;
 	m_myName  = myName ? myName : "";
-	m_myColor = myColor;
 	m_seq = 0;
 	m_sendTimer = 0.0f;
 	m_joinTimer = NetConst::JoinRetry;   // すぐ1回送る
@@ -222,6 +232,16 @@ void HjNetSession::Update(float dt)
 
 	// 状態の送信は回数を絞る。描画のたびに送ると帯域を食うだけで、
 	// 受け取り側は補間で埋めるので滑らかさは変わらない。
+	// 見た目が変わっていたら伝える。
+	// 走行中に色を変えても相手へ届くようにするためのもの。
+	// 変わった時だけなので、ほとんど流れない
+	if (m_lookDirty)
+	{
+		SendLook();
+		m_sentLook  = m_myLook;
+		m_lookDirty = false;
+	}
+
 	m_sendTimer += dt;
 	const float interval = 1.0f / std::max(NetConst::SendRate, 1.0f);
 	if (m_sendTimer >= interval)
@@ -299,6 +319,15 @@ void HjNetSession::ReceiveAll(float dt)
 			}
 			break;
 
+		case HjNetMsg::Look:
+			if (size >= static_cast<int>(sizeof(HjNetLookPacket)))
+			{
+				HjNetLookPacket pkt;
+				memcpy(&pkt, buf, sizeof(pkt));
+				HandleLook(pkt);
+			}
+			break;
+
 		case HjNetMsg::Leave:
 			if (size >= static_cast<int>(sizeof(HjNetLeavePacket)))
 			{
@@ -331,7 +360,14 @@ void HjNetSession::HandleJoin(const HjNetJoinPacket& pkt, const HjNetAddress& fr
 	// そのたびに新しい番号を振ると枠を食い潰す。
 	m_peers[index].addr    = from;
 	m_peers[index].name    = pkt.name;
-	m_peers[index].color   = FromBytes(pkt.colR, pkt.colG, pkt.colB);
+	m_peers[index].look.outline = FromBytes(pkt.outlineR, pkt.outlineG, pkt.outlineB);
+	m_peers[index].look.smokeA = FromBytes(pkt.smokeAR, pkt.smokeAG, pkt.smokeAB);
+	m_peers[index].look.smokeB = FromBytes(pkt.smokeBR, pkt.smokeBG, pkt.smokeBB);
+	m_peers[index].look.accent = FromBytes(pkt.accentR, pkt.accentG, pkt.accentB);
+	m_peers[index].look.neonA = FromBytes(pkt.neonAR, pkt.neonAG, pkt.neonAB);
+	m_peers[index].look.neonB = FromBytes(pkt.neonBR, pkt.neonBG, pkt.neonBB);
+	m_peers[index].look.smokeHi = FromBytes(pkt.smokeHiR, pkt.smokeHiG, pkt.smokeHiB);
+	m_peers[index].look.smokeGradDist = (pkt.smokeGradDist / 255.0f) * HjSmokeGradDistMax;
 	m_peers[index].used    = true;
 	m_peers[index].silence = 0.0f;
 
@@ -366,7 +402,14 @@ void HjNetSession::HandleRoster(const HjNetRosterPacket& pkt)
 		const bool isNew = !m_peers[id].used;
 		m_peers[id].used  = true;
 		m_peers[id].name  = e.name;
-		m_peers[id].color = FromBytes(e.colR, e.colG, e.colB);
+		m_peers[id].look.outline = FromBytes(e.outlineR, e.outlineG, e.outlineB);
+		m_peers[id].look.smokeA = FromBytes(e.smokeAR, e.smokeAG, e.smokeAB);
+		m_peers[id].look.smokeB = FromBytes(e.smokeBR, e.smokeBG, e.smokeBB);
+		m_peers[id].look.accent = FromBytes(e.accentR, e.accentG, e.accentB);
+		m_peers[id].look.neonA = FromBytes(e.neonAR, e.neonAG, e.neonAB);
+		m_peers[id].look.neonB = FromBytes(e.neonBR, e.neonBG, e.neonBB);
+		m_peers[id].look.smokeHi = FromBytes(e.smokeHiR, e.smokeHiG, e.smokeHiB);
+		m_peers[id].look.smokeGradDist = (e.smokeGradDist / 255.0f) * HjSmokeGradDistMax;
 
 		if (id == 0)
 		{
@@ -425,6 +468,63 @@ void HjNetSession::HandleState(const HjNetStatePacket& pkt, const HjNetAddress& 
 	m_inbox.push_back(pkt);
 }
 
+//----------------------------------------------------------
+// 見た目が変わった通知。
+//----------------------------------------------------------
+void HjNetSession::HandleLook(const HjNetLookPacket& pkt)
+{
+	const int id = pkt.id;
+	if (id < 0 || id >= NetConst::MaxPlayers) { return; }
+	if (id == m_myId) { return; }
+
+	m_peers[id].look.outline = FromBytes(pkt.outlineR, pkt.outlineG, pkt.outlineB);
+	m_peers[id].look.smokeA = FromBytes(pkt.smokeAR, pkt.smokeAG, pkt.smokeAB);
+	m_peers[id].look.smokeB = FromBytes(pkt.smokeBR, pkt.smokeBG, pkt.smokeBB);
+	m_peers[id].look.accent = FromBytes(pkt.accentR, pkt.accentG, pkt.accentB);
+	m_peers[id].look.neonA = FromBytes(pkt.neonAR, pkt.neonAG, pkt.neonAB);
+	m_peers[id].look.neonB = FromBytes(pkt.neonBR, pkt.neonBG, pkt.neonBB);
+	m_peers[id].look.smokeHi = FromBytes(pkt.smokeHiR, pkt.smokeHiG, pkt.smokeHiB);
+	m_peers[id].look.smokeGradDist = (pkt.smokeGradDist / 255.0f) * HjSmokeGradDistMax;
+}
+
+//----------------------------------------------------------
+// 見た目の変更を全員へ伝える。
+//
+// 名簿はホストしか配らないので、参加者が色を変えた場合は
+// これが無いと誰にも届かない。P2Pなので全員へ直接送る。
+//----------------------------------------------------------
+void HjNetSession::SendLook()
+{
+	if (m_myId < 0) { return; }
+
+	HjNetLookPacket pkt;
+	pkt.id = static_cast<unsigned char>(m_myId);
+	pkt.outlineR = ToByte(m_myLook.outline.x);
+	pkt.outlineG = ToByte(m_myLook.outline.y);
+	pkt.outlineB = ToByte(m_myLook.outline.z);
+	pkt.smokeAR = ToByte(m_myLook.smokeA.x);
+	pkt.smokeAG = ToByte(m_myLook.smokeA.y);
+	pkt.smokeAB = ToByte(m_myLook.smokeA.z);
+	pkt.smokeBR = ToByte(m_myLook.smokeB.x);
+	pkt.smokeBG = ToByte(m_myLook.smokeB.y);
+	pkt.smokeBB = ToByte(m_myLook.smokeB.z);
+	pkt.accentR = ToByte(m_myLook.accent.x);
+	pkt.accentG = ToByte(m_myLook.accent.y);
+	pkt.accentB = ToByte(m_myLook.accent.z);
+	pkt.neonAR = ToByte(m_myLook.neonA.x);
+	pkt.neonAG = ToByte(m_myLook.neonA.y);
+	pkt.neonAB = ToByte(m_myLook.neonA.z);
+	pkt.neonBR = ToByte(m_myLook.neonB.x);
+	pkt.neonBG = ToByte(m_myLook.neonB.y);
+	pkt.neonBB = ToByte(m_myLook.neonB.z);
+	pkt.smokeHiR = ToByte(m_myLook.smokeHi.x);
+	pkt.smokeHiG = ToByte(m_myLook.smokeHi.y);
+	pkt.smokeHiB = ToByte(m_myLook.smokeHi.z);
+	pkt.smokeGradDist = ToByte(m_myLook.smokeGradDist / HjSmokeGradDistMax);
+
+	SendToAllPeers(&pkt, sizeof(pkt));
+}
+
 void HjNetSession::HandleLeave(const HjNetLeavePacket& pkt)
 {
 	const int id = pkt.id;
@@ -444,9 +544,24 @@ void HjNetSession::SendJoinRequest()
 	if (!m_transport || !m_hostAddr.IsValid()) { return; }
 
 	HjNetJoinPacket pkt;
-	pkt.colR = ToByte(m_myColor.x);
-	pkt.colG = ToByte(m_myColor.y);
-	pkt.colB = ToByte(m_myColor.z);
+	pkt.outlineR = ToByte(m_myLook.outline.x);
+	pkt.outlineG = ToByte(m_myLook.outline.y);
+	pkt.outlineB = ToByte(m_myLook.outline.z);
+	pkt.smokeAR = ToByte(m_myLook.smokeA.x);
+	pkt.smokeAG = ToByte(m_myLook.smokeA.y);
+	pkt.smokeAB = ToByte(m_myLook.smokeA.z);
+	pkt.smokeBR = ToByte(m_myLook.smokeB.x);
+	pkt.smokeBG = ToByte(m_myLook.smokeB.y);
+	pkt.smokeBB = ToByte(m_myLook.smokeB.z);
+	pkt.accentR = ToByte(m_myLook.accent.x);
+	pkt.accentG = ToByte(m_myLook.accent.y);
+	pkt.accentB = ToByte(m_myLook.accent.z);
+	pkt.neonAR = ToByte(m_myLook.neonA.x);
+	pkt.neonAG = ToByte(m_myLook.neonA.y);
+	pkt.neonAB = ToByte(m_myLook.neonA.z);
+	pkt.neonBR = ToByte(m_myLook.neonB.x);
+	pkt.neonBG = ToByte(m_myLook.neonB.y);
+	pkt.neonBB = ToByte(m_myLook.neonB.z);
 	strncpy_s(pkt.name, sizeof(pkt.name), m_myName.c_str(), _TRUNCATE);
 	m_transport->Send(&pkt, sizeof(pkt), m_hostAddr);
 }
@@ -463,9 +578,28 @@ void HjNetSession::SendRoster()
 	// 受け取った側が、繋ぎに行った先の住所で埋める。
 	pkt.peers[0].id   = 0;
 	pkt.peers[0].used = 1;
-	pkt.peers[0].colR = ToByte(m_myColor.x);
-	pkt.peers[0].colG = ToByte(m_myColor.y);
-	pkt.peers[0].colB = ToByte(m_myColor.z);
+	pkt.peers[0].outlineR = ToByte(m_myLook.outline.x);
+	pkt.peers[0].outlineG = ToByte(m_myLook.outline.y);
+	pkt.peers[0].outlineB = ToByte(m_myLook.outline.z);
+	pkt.peers[0].smokeAR = ToByte(m_myLook.smokeA.x);
+	pkt.peers[0].smokeAG = ToByte(m_myLook.smokeA.y);
+	pkt.peers[0].smokeAB = ToByte(m_myLook.smokeA.z);
+	pkt.peers[0].smokeBR = ToByte(m_myLook.smokeB.x);
+	pkt.peers[0].smokeBG = ToByte(m_myLook.smokeB.y);
+	pkt.peers[0].smokeBB = ToByte(m_myLook.smokeB.z);
+	pkt.peers[0].accentR = ToByte(m_myLook.accent.x);
+	pkt.peers[0].accentG = ToByte(m_myLook.accent.y);
+	pkt.peers[0].accentB = ToByte(m_myLook.accent.z);
+	pkt.peers[0].neonAR = ToByte(m_myLook.neonA.x);
+	pkt.peers[0].neonAG = ToByte(m_myLook.neonA.y);
+	pkt.peers[0].neonAB = ToByte(m_myLook.neonA.z);
+	pkt.peers[0].neonBR = ToByte(m_myLook.neonB.x);
+	pkt.peers[0].neonBG = ToByte(m_myLook.neonB.y);
+	pkt.peers[0].neonBB = ToByte(m_myLook.neonB.z);
+	pkt.peers[0].smokeHiR = ToByte(m_myLook.smokeHi.x);
+	pkt.peers[0].smokeHiG = ToByte(m_myLook.smokeHi.y);
+	pkt.peers[0].smokeHiB = ToByte(m_myLook.smokeHi.z);
+	pkt.peers[0].smokeGradDist = ToByte(m_myLook.smokeGradDist / HjSmokeGradDistMax);
 	strncpy_s(pkt.peers[0].name, sizeof(pkt.peers[0].name), m_myName.c_str(), _TRUNCATE);
 
 	for (int i = 1; i < NetConst::MaxPlayers; ++i)
@@ -475,9 +609,28 @@ void HjNetSession::SendRoster()
 		pkt.peers[i].ip     = m_peers[i].addr.ip;
 		pkt.peers[i].port   = m_peers[i].addr.port;
 		pkt.peers[i].userId = m_peers[i].addr.userId;
-		pkt.peers[i].colR   = ToByte(m_peers[i].color.x);
-		pkt.peers[i].colG   = ToByte(m_peers[i].color.y);
-		pkt.peers[i].colB   = ToByte(m_peers[i].color.z);
+		pkt.peers[i].outlineR = ToByte(m_peers[i].look.outline.x);
+		pkt.peers[i].outlineG = ToByte(m_peers[i].look.outline.y);
+		pkt.peers[i].outlineB = ToByte(m_peers[i].look.outline.z);
+		pkt.peers[i].smokeAR = ToByte(m_peers[i].look.smokeA.x);
+		pkt.peers[i].smokeAG = ToByte(m_peers[i].look.smokeA.y);
+		pkt.peers[i].smokeAB = ToByte(m_peers[i].look.smokeA.z);
+		pkt.peers[i].smokeBR = ToByte(m_peers[i].look.smokeB.x);
+		pkt.peers[i].smokeBG = ToByte(m_peers[i].look.smokeB.y);
+		pkt.peers[i].smokeBB = ToByte(m_peers[i].look.smokeB.z);
+		pkt.peers[i].accentR = ToByte(m_peers[i].look.accent.x);
+		pkt.peers[i].accentG = ToByte(m_peers[i].look.accent.y);
+		pkt.peers[i].accentB = ToByte(m_peers[i].look.accent.z);
+		pkt.peers[i].neonAR = ToByte(m_peers[i].look.neonA.x);
+		pkt.peers[i].neonAG = ToByte(m_peers[i].look.neonA.y);
+		pkt.peers[i].neonAB = ToByte(m_peers[i].look.neonA.z);
+		pkt.peers[i].neonBR = ToByte(m_peers[i].look.neonB.x);
+		pkt.peers[i].neonBG = ToByte(m_peers[i].look.neonB.y);
+		pkt.peers[i].neonBB = ToByte(m_peers[i].look.neonB.z);
+		pkt.peers[i].smokeHiR = ToByte(m_peers[i].look.smokeHi.x);
+		pkt.peers[i].smokeHiG = ToByte(m_peers[i].look.smokeHi.y);
+		pkt.peers[i].smokeHiB = ToByte(m_peers[i].look.smokeHi.z);
+		pkt.peers[i].smokeGradDist = ToByte(m_peers[i].look.smokeGradDist / HjSmokeGradDistMax);
 		strncpy_s(pkt.peers[i].name, sizeof(pkt.peers[i].name),
 		          m_peers[i].name.c_str(), _TRUNCATE);
 	}
@@ -608,10 +761,10 @@ const char* HjNetSession::GetPeerName(int id) const
 	return m_peers[id].name.c_str();
 }
 
-Math::Vector3 HjNetSession::GetPeerColor(int id) const
+HjCarLook HjNetSession::GetPeerLook(int id) const
 {
-	if (id < 0 || id >= static_cast<int>(m_peers.size())) { return Math::Vector3(1, 1, 1); }
-	return m_peers[id].color;
+	if (id < 0 || id >= static_cast<int>(m_peers.size())) { return HjCarLook(); }
+	return m_peers[id].look;
 }
 
 std::vector<HjNetSession::PeerView> HjNetSession::BuildPeerList() const
@@ -659,15 +812,9 @@ void HjNetSession::DrawImGui()
 
 	ImGui::InputText(U8("名前"), s_nameInput, sizeof(s_nameInput));
 
-	// 見分け用の色。アウトラインと煙に使われる。
-	// 変えた時点でプロフィールへ保存されるので、次回も同じ色で入れる
-	{
-		Math::Vector3 col = HjPlayerProfile::Instance().GetColor();
-		if (ImGui::ColorEdit3(U8("自分の色"), &col.x))
-		{
-			HjPlayerProfile::Instance().SetColor(col);
-		}
-	}
+	// ※色はここでは設定しない。
+	//   車の見た目は調整パネル(Silvia Tuning)で設定した色をそのまま配る。
+	//   通信側で決めると、せっかく詰めた配色が上書きされる。
 
 	if (m_mode == Mode::Offline)
 	{
@@ -689,7 +836,7 @@ void HjNetSession::DrawImGui()
 
 		if (ImGui::Button(U8("ホストになる")))
 		{
-			StartHost(s_nameInput, HjPlayerProfile::Instance().GetColor());
+			StartHost(s_nameInput);
 		}
 		// 直接IPなら "192.168.0.5"、Steamなら相手のアカウント番号
 		ImGui::InputText(m_link == Link::Steam ? U8("相手のID") : U8("接続先IP"),
@@ -697,7 +844,7 @@ void HjNetSession::DrawImGui()
 		ImGui::SameLine();
 		if (ImGui::Button(U8("参加する")))
 		{
-			StartJoin(s_hostInput, s_nameInput, HjPlayerProfile::Instance().GetColor());
+			StartJoin(s_hostInput, s_nameInput);
 		}
 	}
 	else

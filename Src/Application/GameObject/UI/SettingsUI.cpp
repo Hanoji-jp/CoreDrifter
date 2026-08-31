@@ -1,5 +1,7 @@
 ﻿#include "SettingsUI.h"
 #include "../../Input/HjKeyInput.h"
+#include "../../Audio/HjAudioSettings.h"
+#include "../../Audio/HjAudioSpace.h"
 
 namespace
 {
@@ -23,6 +25,94 @@ namespace
 	const float kToggleW = 124.0f;                                  // トグル幅(segW62×2)
 	const float kToggleX = kPanelX + kPanelW - 24.0f - kToggleW;    // トグルは右端に揃える(右へ)
 	const int   kRowCount = 9;
+
+	//===== AUDIOタブ =====
+	// 遊ぶ人が区別できる単位で分ける。
+	// 「エンジンだけ下げたい」のような細かい調整は求められていない
+	// (それは開発用の調整パネルの仕事)。
+	// AMBIENCE にエンジン音が入る(鳴り続ける音なので)
+	const char* kAudioRows[3] = { "SOUND EFFECTS", "MUSIC", "AMBIENCE" };
+	const int   kAudioRowCount = 3;
+
+	// タブの番号。並び順を変えたときに追いやすいよう名前を付ける
+	const int   kTabAudio = 3;
+
+	// 音量を1回で動かす量。細かすぎると合わせるのが面倒で、
+	// 粗すぎると好みの位置に止まらない
+	const float kVolStep = 0.05f;
+}
+
+//----------------------------------------------------------
+// 今のタブの行数。
+// タブごとに中身が違うので、行数も切り替える。
+//----------------------------------------------------------
+int SettingsUI::RowCount() const
+{
+	if (m_tab == kTabAudio) { return kAudioRowCount; }
+	return kRowCount;
+}
+
+//----------------------------------------------------------
+// 選択中の行を1段階動かす(←→)。
+//----------------------------------------------------------
+void SettingsUI::StepRow(int dir)
+{
+	auto& au = HjAudioSettings::Instance();
+
+	if (m_tab == kTabAudio)
+	{
+		const float d = kVolStep * static_cast<float>(dir);
+		switch (m_row)
+		{
+		case 0:
+			au.SetSfx(au.GetSfx() + d);
+			// 効果音はバスに掛かるので、変えたら渡し直す
+			HjAudioSpace::Instance().SetSfxVolume(au.GetSfx());
+			break;
+		case 1: au.SetMusic(au.GetMusic() + d);     break;
+		case 2:
+			au.SetAmbient(au.GetAmbient() + d);
+			// エンジン音は環境音のバスに乗っている
+			HjAudioSpace::Instance().SetAmbientVolume(au.GetAmbient());
+			break;
+		default: break;
+		}
+		return;
+	}
+
+	const int tg = kToggleOf[m_row];
+	if (tg >= 0) { m_toggles[tg] = (dir > 0); return; }
+
+	switch (m_row)
+	{
+	case 0: m_diff   = (m_diff + dir + 3) % 3;   break;
+	case 1: m_trans  = (m_trans + dir + 2) % 2;  break;
+	case 6: m_damage = (m_damage + dir + 3) % 3; break;
+	case 8: m_units  = (m_units + dir + 2) % 2;  break;
+	default: break;
+	}
+}
+
+//----------------------------------------------------------
+// 音量の行。数字だけだと今どのくらいかが掴めないので、棒も出す。
+//----------------------------------------------------------
+void SettingsUI::DrawVolumeRow(float dx, float dy, float w, float value) const
+{
+	using namespace UIConst;
+
+	// 棒。枠を描いて、中を値のぶんだけ塗る
+	const float barW = w - 52.0f;   // 右に数字を置く場所を空ける
+	const float barH = 10.0f;
+	const float barY = dy + 12.0f;
+
+	HjUI::FrameTL(dx, barY, barW, barH, 2.0f, INK);
+	HjUI::RectTL(dx + 2.0f, barY + 2.0f,
+	             (barW - 4.0f) * std::clamp(value, 0.0f, 1.0f), barH - 4.0f, ACID, true);
+
+	// 数字。%表示のほうが「半分」などが分かりやすい
+	char buf[16];
+	snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(value * 100.0f + 0.5f));
+	HjUI::TextAtR(FontRow, dx + w, dy + 6.0f, buf, INK);
 }
 
 void SettingsUI::Init() {}
@@ -35,24 +125,12 @@ void SettingsUI::Update()
 	const bool lf = key.Pressed(HjKeyInput::Key::Left);
 	const bool rt = key.Pressed(HjKeyInput::Key::Right);
 
-	if (up) { m_row = (m_row + kRowCount - 1) % kRowCount; }
-	if (dn) { m_row = (m_row + 1) % kRowCount; }
+	const int rows = RowCount();
+	if (up) { m_row = (m_row + rows - 1) % rows; }
+	if (dn) { m_row = (m_row + 1) % rows; }
 
-	auto stepRow = [&](int dir)
-	{
-		const int tg = kToggleOf[m_row];
-		if (tg >= 0) { m_toggles[tg] = (dir > 0); }
-		else switch (m_row)
-		{
-		case 0: m_diff   = (m_diff + dir + 3) % 3;   break;
-		case 1: m_trans  = (m_trans + dir + 2) % 2;  break;
-		case 6: m_damage = (m_damage + dir + 3) % 3; break;
-		case 8: m_units  = (m_units + dir + 2) % 2;  break;
-		default: break;
-		}
-	};
-	if (rt) { stepRow(1); }
-	if (lf) { stepRow(-1); }
+	if (rt) { StepRow(1); }
+	if (lf) { StepRow(-1); }
 
 
 	// ── マウス ──
@@ -61,11 +139,40 @@ void SettingsUI::Update()
 	{
 		if (HjUI::Clicked(kTabX - 14.0f, kTabY + i * kTabStep - 6.0f, 200.0f, 38.0f)) { m_tab = i; }
 	}
-	for (int i = 0; i < kRowCount; ++i)
+	for (int i = 0; i < rows; ++i)
 	{
 		const float ry = kPanelY + i * kRowH;
 		if (HjUI::Hover(kPanelX, ry, kPanelW, kRowH)) { m_row = i; }
 		const float cy = ry + kRowH * 0.5f - 17.0f;
+
+		// AUDIOタブは棒をクリックした位置で音量を決める。
+		// 左右キーで刻むより、目当ての値へ一度に行ける
+		if (m_tab == kTabAudio)
+		{
+			const float barX = kCtrlX - 120.0f;
+			const float barW = (kCtrlW + 120.0f) - 52.0f;
+			if (HjUI::Clicked(barX, cy, barW, 34.0f))
+			{
+				const float v = std::clamp((HjUI::MouseX() - barX) / std::max(barW, 1.0f), 0.0f, 1.0f);
+				auto& au = HjAudioSettings::Instance();
+				switch (i)
+				{
+				case 0:
+					au.SetSfx(v);
+					HjAudioSpace::Instance().SetSfxVolume(au.GetSfx());
+					break;
+				case 1: au.SetMusic(v);   break;
+				case 2:
+					au.SetAmbient(v);
+					HjAudioSpace::Instance().SetAmbientVolume(au.GetAmbient());
+					break;
+				default: break;
+				}
+			}
+			continue;
+		}
+
+
 		const int tg = kToggleOf[i];
 		if (tg >= 0)
 		{
@@ -151,8 +258,11 @@ void SettingsUI::DrawSprite()
 	}
 
 	// 右パネル(枠＋行罫線)
-	U::FrameTL(kPanelX, kPanelY, kPanelW, kRowH * kRowCount, 2.0f, INK);
-	for (int i = 0; i < kRowCount; ++i)
+	const int rows = RowCount();
+	const bool audioTab = (m_tab == kTabAudio);
+
+	U::FrameTL(kPanelX, kPanelY, kPanelW, kRowH * rows, 2.0f, INK);
+	for (int i = 0; i < rows; ++i)
 	{
 		const float ry = kPanelY + i * kRowH;
 		if (i == m_row)
@@ -164,9 +274,26 @@ void SettingsUI::DrawSprite()
 		}
 		if (i > 0) { U::LineD(kPanelX, ry, kPanelX + kPanelW, ry, 2.0f, INK); }
 
-		U::Text(FontRow, kPanelX + 24.0f, ry + kRowH * 0.5f - 8.0f, 16.0f, kRows[i], INK);
+		U::Text(FontRow, kPanelX + 24.0f, ry + kRowH * 0.5f - 8.0f, 16.0f,
+		        audioTab ? kAudioRows[i] : kRows[i], INK);
 
 		const float cy = ry + kRowH * 0.5f - 17.0f;
+
+		if (audioTab)
+		{
+			const auto& au = HjAudioSettings::Instance();
+			float v = 0.0f;
+			switch (i)
+			{
+			case 0: v = au.GetSfx();     break;
+			case 1: v = au.GetMusic();   break;
+			case 2: v = au.GetAmbient(); break;
+			default: break;
+			}
+			DrawVolumeRow(kCtrlX - 120.0f, cy, kCtrlW + 120.0f, v);
+			continue;
+		}
+
 		const int tg = kToggleOf[i];
 		if (tg >= 0)
 		{
@@ -182,6 +309,12 @@ void SettingsUI::DrawSprite()
 	}
 
 	// 下部キーキャップ
+	// 下部の操作説明は、タブを変えても同じ高さに置く。
+	//
+	// 行数に合わせて動かすと、行の少ないタブ(AUDIO)で上へ寄って
+	// 左のタブ一覧と重なる。それに、タブを切り替えるたびに
+	// 説明の位置が動くと、目で追う場所が定まらない。
+	// 一番行数の多いタブ(GAMEPLAY)に合わせて固定する。
 	const float fy = kPanelY + kRowH * kRowCount + 60.0f;
 	const float used = U::Keycap(kPADX, fy, "R", "RESET TO DEFAULT");
 	U::Keycap(kPADX + used + 32.0f, fy, "ESC", "BACK");

@@ -1,5 +1,8 @@
 ﻿#include "main.h"
 #include "Util/HjProfiler.h"
+#include "Updater/HjUpdater.h"
+#include "Audio/HjAudioSettings.h"
+#include "Audio/HjAudioSpace.h"
 #include "Util/HjPostFxSettings.h"
 #include "Input/HjKeyInput.h"
 #include "GameObject/Score/HjPlayerProfile.h"
@@ -168,7 +171,7 @@ bool Application::Init(int w, int h)
 	//===================================================================
 	// ウィンドウ作成
 	//===================================================================
-	if (m_window.Create(w, h, "3D GameProgramming", "Window") == false) {
+	if (m_window.Create(w, h, "DRIFT PROJECT", "Window") == false) {
 		MessageBoxA(nullptr, "ウィンドウ作成に失敗", "エラー", MB_OK);
 		return false;
 	}
@@ -232,6 +235,15 @@ bool Application::Init(int w, int h)
 	// フォント初期化
 	//===================================================================
 	KdFontManager::Instance().Init(GetWindowHandle());
+
+	// 更新の確認を始める。
+	//
+	// 別スレッドでやるので、ここで待たされることはない。
+	// 繋がらなくても失敗として残るだけで、ゲームは普通に始まる。
+	//
+	// ※起動のたびに1回だけ。画面ごとに呼ぶと、
+	//   画面を行き来するたびに GitHub へ問い合わせることになる
+	HjUpdater::Instance().StartCheck();
 	// HUD用フォント(No.0)を登録。DrawFont(Pos,color,fmt,...)はNo.0を使う。
 	KdFontManager::Instance().AddFont(0, "Consolas", 22);
 	// 文字流体化(ドリフト演出)用の大フォント(No.1)。太字で垂れ・煙が映える。
@@ -274,6 +286,11 @@ bool Application::Init(int w, int h)
 	//   1つのサイズを拡大して使い回すと、そのぶん粗くなる。
 	KdFontManager::Instance().AddFont(17, "Yu Gothic UI", -47, 700);   // 名前入力(大)
 	KdFontManager::Instance().AddFont(18, "Yu Gothic UI", -12, 700);   // バッジ(小)
+	// MODメニュー用。走行中に開くパネルなので、
+	// 名前入力(47px)は大きすぎ、バッジ(12px)は小さすぎる。
+	// 欧文の行・見出しと同じ見え方になる大きさで登録する
+	KdFontManager::Instance().AddFont(19, "Yu Gothic UI", -15, 700);   // 行
+	KdFontManager::Instance().AddFont(20, "Yu Gothic UI", -17, 700);   // 見出し
 
 	//===================================================================
 	// ゲーム固有の初期化
@@ -288,6 +305,12 @@ bool Application::Init(int w, int h)
 	// 画面演出(アウトライン・ハーフトーン)の調整値。
 	// シェーダー側が持っている値なので、車やステージとは別に読み込む
 	HjPostFxSettings::Instance().Load();
+
+	// 音量の設定。鳴らす側が見に来る形なので、読み込んでおけば効く。
+	// 効果音だけはバスに掛ける必要があるので、ここで一度渡す
+	HjAudioSettings::Instance().Load();
+	HjAudioSpace::Instance().SetSfxVolume(HjAudioSettings::Instance().GetSfx());
+	HjAudioSpace::Instance().SetAmbientVolume(HjAudioSettings::Instance().GetAmbient());
 
 	return true;
 }
@@ -390,7 +413,9 @@ void Application::Execute()
 
 		m_fpsController.Update();
 		//ウィンドウにdpsを表示
-		std::string title = "Kurosaki : FPS " + std::to_string(m_fpsController.m_nowfps);
+		// タイトルバーは作品名で始める。
+		// ここは毎秒書き換わるので、生成時の名前が残らない
+		std::string title = "DRIFT PROJECT  -  FPS " + std::to_string(m_fpsController.m_nowfps);
 		SetWindowTextA(m_window.GetWndHandle(), title.c_str());
 	}
 

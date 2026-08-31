@@ -2,6 +2,7 @@
 #include "../../Util/HjProfiler.h"
 #include "../../Util/HjPostFxSettings.h"
 #include "../../Audio/HjAudioSpace.h"
+#include "../../Mod/HjModCatalog.h"
 
 void CarBase::Init()
 {
@@ -18,6 +19,11 @@ void CarBase::Init()
 
 	// 保存済みの調整値があれば読み込む（コンストラクタの既定値を上書き）
 	LoadTuning();
+
+	// 差し替えが選ばれていれば、その見た目にする。
+	// ※ここは標準を読んだ後。失敗しても標準のまま残るので、
+	//   MODのファイルが消えていてもゲームは動く
+	LoadModChoice();
 
 	// ドリフトスモーク初期化
 	m_smoke.Init();
@@ -300,28 +306,11 @@ void CarBase::UpdateEffectParticles(float dt)
 	m_neon.Update(dt);
 }
 
-void CarBase::ApplyPlayerColor(const Math::Vector3& color)
-{
-	// 本来の色を一度だけ控える。
-	// 上書きしてから控えると、控えた値まで見分け色になってしまう
-	if (!m_tuneColorSaved)
-	{
-		m_tuneOutlineColor = m_outlineColor;
-		m_tuneSmokeColor   = m_smokeColor;
-		m_tuneSmokeColorB  = m_smokeColorB;
-		m_tuneColorSaved   = true;
-	}
-
-	// アウトライン＝一番目立つ輪郭。誰の車かはここで判別する
-	m_outlineColor = color;
-
-	// 煙も同じ色にする。ドリフト中は車体より煙のほうが面積が大きいので、
-	// 遠くからでも誰が滑っているか分かる。
-	// 先端は少し暗くして奥行きを出す(同色べったりだと塊が平たく見える)
-	m_smokeColor  = color;
-	m_smokeColorB = color * 0.55f;
-}
-
+//----------------------------------------------------------
+// 通信で受け取った傾きを反映する。
+// 位置や向きとは別にしてあるのは、こちらは「見た目だけ」で、
+// 当たり判定にも進行方向にも関わらないため。
+//----------------------------------------------------------
 void CarBase::ApplyVisualTilt(float terrainPitch, float terrainRoll,
                               float bodyPitch, float bodyRoll)
 {
@@ -331,14 +320,28 @@ void CarBase::ApplyVisualTilt(float terrainPitch, float terrainRoll,
 	m_rollAngle    = bodyRoll;
 }
 
-void CarBase::ClearPlayerColor()
+void CarBase::ApplyVisualRotation(const Math::Quaternion& rot)
 {
-	if (!m_tuneColorSaved) { return; }
+	m_netRotation    = rot;
+	m_useNetRotation = true;
+}
 
-	m_outlineColor = m_tuneOutlineColor;
-	m_smokeColor   = m_tuneSmokeColor;
-	m_smokeColorB  = m_tuneSmokeColorB;
-	m_tuneColorSaved = false;
+void CarBase::ApplyLookColors(const Math::Vector3& outline,
+                              const Math::Vector3& smokeA, const Math::Vector3& smokeB,
+                              const Math::Vector3& accent,
+                              const Math::Vector3& neonA,  const Math::Vector3& neonB,
+                              const Math::Vector3& smokeHi, float smokeGradDist)
+{
+	// 持ち主が調整パネルで設定した色をそのまま入れる。
+	// 通信側で色を決めると、せっかく詰めた配色が上書きされる
+	m_outlineColor   = outline;
+	m_smokeColor     = smokeA;
+	m_smokeColorB    = smokeB;
+	m_driftTintColor = accent;
+	m_neonColorA     = neonA;
+	m_neonColorB     = neonB;
+	m_smokeHiColor   = smokeHi;
+	m_smokeGradDist  = smokeGradDist;
 }
 
 void CarBase::StopAudio()
@@ -1306,6 +1309,24 @@ void CarBase::Update()
 	const float dt = KdFPSController::GetDt();
 	if (dt <= 0.0f) { return; }
 
+	// 観戦中など、走行を止めているとき。
+	//
+	// 入力を切るだけでは惰性で走り続けるので、見ていない間に
+	// 崖から落ちたり壁に刺さったりする。速度と回転ごと止める。
+	// 車輪の空転も止めないと、置いたまま音が鳴り続ける。
+	if (m_halted)
+	{
+		m_vel        = Math::Vector3::Zero;
+		m_yawRate    = 0.0f;
+		m_driveSpeed = 0.0f;
+		m_driveDiff  = 0.0f;
+		m_velY       = 0.0f;
+
+		// 接地だけは続ける。止めた瞬間に地形へめり込んだままになるのを防ぐ
+		UpdateGroundContact(dt);
+		return;
+	}
+
 	UpdateDebugKeys();
 
 	const DriveInput in = ReadInput();
@@ -1594,16 +1615,23 @@ void CarBase::DrawLit()
 	// 傾きは"車のローカル軸"で掛ける＝ヨー(向き)より先に適用する。後に掛けると
 	// ワールド軸基準になり、車が向きを変えるとピッチとロールが入れ替わってしまう。
 	// 符号：登りでノーズ上げ／左が高い路面で右下がりになるよう反転。
-	const Math::Matrix carWorld =
-		Math::Matrix::CreateRotationX(-m_terrainPitch) *   // 前後(坂)：ローカルX(右)軸まわり
-		Math::Matrix::CreateRotationZ(-m_terrainRoll)  *   // 左右(バンク)：ローカルZ(前)軸まわり
-		Math::Matrix::CreateRotationY(m_yaw) *             // 向き(ヨー)
-		Math::Matrix::CreateTranslation(m_pos);
+	// 通信で姿勢を受け取っているなら、合成済みのものをそのまま使う。
+	// 角度ごとに補間すると3軸が同時に動いたときに経路がずれて車体が揺れる
+	const Math::Matrix carRot = m_useNetRotation
+		? Math::Matrix::CreateFromQuaternion(m_netRotation)
+		: (Math::Matrix::CreateRotationX(-m_terrainPitch) *   // 前後(坂)：ローカルX(右)軸まわり
+		   Math::Matrix::CreateRotationZ(-m_terrainRoll)  *   // 左右(バンク)：ローカルZ(前)軸まわり
+		   Math::Matrix::CreateRotationY(m_yaw));            // 向き(ヨー)
+
+	const Math::Matrix carWorld = carRot * Math::Matrix::CreateTranslation(m_pos);
 
 	//===== 車体の行列(サスのロール/ピッチを反映。タイヤは接地したまま) =====
 	const Math::Matrix bodyW =
 		Math::Matrix::CreateScale(m_bodyScale) *
 		Math::Matrix::CreateRotationY(m_bodyYaw) *
+		// 車体モデルだけをずらす。タイヤは接地したままにしたいので、
+		// 車ごと動かすことはしない
+		Math::Matrix::CreateTranslation(m_bodyOffset) *
 		Math::Matrix::CreateRotationX(m_pitchAngle) *  // ピッチ(前後の沈み込み)
 		Math::Matrix::CreateRotationZ(m_rollAngle) *   // ロール(左右の傾き)
 		carWorld;
@@ -1689,11 +1717,120 @@ void CarBase::DrawLit()
 //----------------------------------------------------------
 // 見た目のライブ調整パネル（決まった値は各車種のコンストラクタへ反映する）
 //----------------------------------------------------------
+//----------------------------------------------------------
+// 見た目の差し替え(調整パネルの中の1区画)
+//
+// ここに置くのは、大きさや向きの調整がすぐ下にあるから。
+// 外から持ってきたモデルは、そのままでは乗らないことがほとんどで、
+// 差し替えた直後に必ず調整することになる。
+// 画面を分けると、選ぶたびに行き来することになる。
+//----------------------------------------------------------
+void CarBase::DrawModImGui()
+{
+	ImGui::SeparatorText(U8("見た目の差し替え(MOD)"));
+
+	auto& cat = HjModCatalog::Instance();
+
+	// 最初に開いたときだけ調べる。
+	// フォルダを見に行くのは遅いので、毎フレームやらない
+	if (!cat.IsScanned()) { cat.Rescan(); }
+
+	if (ImGui::Button(U8("一覧を更新")))
+	{
+		cat.Rescan();
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled(U8("Asset/Mods/Body, /Wheel に置く"));
+
+	if (cat.SkippedCount() > 0)
+	{
+		// 黙って外すと、置いたのに出てこない理由が分からない
+		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+		                   U8("%d 件は形式が違うか大きすぎるため外しました"),
+		                   cat.SkippedCount());
+	}
+
+	// 直前の結果。次に何か選ぶまで出しておく
+	static HjModLoader::Result s_last = HjModLoader::Result::Ok;
+
+	// 1つ分の選択欄。車体とホイールで中身が同じなので、まとめる
+	auto pick = [&](const char* label, HjModCatalog::Kind kind,
+	                const std::string& cur,
+	                HjModLoader::Result (CarBase::*apply)(const std::string&))
+	{
+		const auto& list = cat.List(kind);
+
+		// いま選ばれているものを見出しに出す。
+		// 標準なら「標準」と書く。パスをそのまま出すと長くて読めない
+		const bool stock = (cur == ModConst::StockMark);
+		const char* now  = stock ? U8("標準")
+		                         : (cat.IndexOf(kind, cur) >= 0
+		                            ? list[cat.IndexOf(kind, cur)].name.c_str()
+		                            : U8("(見つかりません)"));
+
+		ImGui::Text("%s : %s", label, now);
+
+		ImGui::PushID(label);
+
+		if (ImGui::Button(U8("標準へ戻す")))
+		{
+			s_last = (this->*apply)(ModConst::StockMark);
+			SaveModChoice();
+		}
+
+		if (list.empty())
+		{
+			ImGui::TextDisabled(U8("  置かれているモデルがありません"));
+			ImGui::PopID();
+			return;
+		}
+
+		// 候補を並べる。数が多いと縦に伸びきってしまうので、
+		// 高さを決めた枠の中で送る
+		if (ImGui::BeginListBox("##list", ImVec2(-FLT_MIN, ImGui::GetTextLineHeightWithSpacing() * 4.5f)))
+		{
+			for (size_t i = 0; i < list.size(); ++i)
+			{
+				const bool sel = (list[i].path == cur);
+				if (ImGui::Selectable(list[i].name.c_str(), sel))
+				{
+					s_last = (this->*apply)(list[i].path);
+
+					// 選んだ時点で覚える。
+					// 別に「保存」を押させると、押し忘れて next 起動で戻る
+					SaveModChoice();
+				}
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::SetTooltip("%s  (%d KB)", list[i].path.c_str(), list[i].sizeKb);
+				}
+			}
+			ImGui::EndListBox();
+		}
+
+		ImGui::PopID();
+	};
+
+	pick(U8("車体"),   HjModCatalog::Kind::Body,  m_bodyModPath,  &CarBase::SetBodyModel);
+	pick(U8("ホイール"), HjModCatalog::Kind::Wheel, m_wheelModPath, &CarBase::SetWheelModel);
+
+	if (s_last != HjModLoader::Result::Ok)
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s",
+		                   HjModLoader::Message(s_last));
+	}
+
+	ImGui::TextDisabled(U8("向きや大きさは下の「見た目」で合わせる"));
+}
+
 void CarBase::DrawTuningImGui()
 {
 	// ※ウィンドウは開かない。Hierarchy が用意した Inspector の中へ描く。
 	//   自前で Begin すると、選ぶたびに別ウィンドウが現れて
 	//   位置もドッキング状態もバラバラになる。
+
+	// ===== 見た目の差し替え(MOD) =====
+	DrawModImGui();
 
 	// ===== ライブ診断 =====
 	{
@@ -1719,6 +1856,8 @@ void CarBase::DrawTuningImGui()
 	ImGui::SeparatorText(U8("車体"));
 	ImGui::DragFloat(U8("車体スケール"), &m_bodyScale, 0.01f, 0.01f, 100.0f);
 	ImGui::DragFloat(U8("車体向き(rad)"), &m_bodyYaw, 0.01f);
+	// 車体モデルだけをずらす(タイヤは接地したまま)
+	ImGui::DragFloat3(U8("車体の位置(x/高さ/前後)"), &m_bodyOffset.x, 0.005f);
 
 	ImGui::SeparatorText(U8("タイヤ配置"));
 	ImGui::DragFloat(U8("トレッド半幅(左右)"), &m_track, 0.01f);
@@ -1935,6 +2074,8 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 		{ "wheelScale", &m_wheelScale }, { "wheelYaw", &m_wheelYaw },
 		{ "track", &m_track }, { "base", &m_base }, { "wheelH", &m_wheelH }, { "camber", &m_camber },
 		{ "offX", &m_offX }, { "offZ", &m_offZ },
+		{ "bodyOffX", &m_bodyOffset.x }, { "bodyOffY", &m_bodyOffset.y },
+		{ "bodyOffZ", &m_bodyOffset.z },
 		{ "frontOffX", &m_frontOffX }, { "frontOffZ", &m_frontOffZ },
 		{ "rearOffX", &m_rearOffX }, { "rearOffZ", &m_rearOffZ },
 		{ "enginePower", &m_enginePower }, { "brakePower", &m_brakePower },
@@ -1995,6 +2136,90 @@ std::vector<std::pair<const char*, float*>> CarBase::TuneParamList()
 	m_tireAudio.CollectTuneParams(list);
 
 	return list;
+}
+
+//----------------------------------------------------------
+// 見た目の差し替え(MOD)
+//----------------------------------------------------------
+std::string CarBase::ModFilePath() const
+{
+	return std::string(ModConst::SavePrefix) + m_saveKey + ModConst::SaveSuffix;
+}
+
+HjModLoader::Result CarBase::SetBodyModel(const std::string& path)
+{
+	// 標準へ戻す。派生クラスがコンストラクタで入れた道が残っているので、
+	// それを読み直せばよい
+	if (path.empty() || path == ModConst::StockMark)
+	{
+		m_body.SetModelData(m_bodyPath);
+		m_bodyModPath = ModConst::StockMark;
+		return HjModLoader::Result::Ok;
+	}
+
+	const HjModLoader::Result r = HjModLoader::Load(m_body, path);
+	if (r == HjModLoader::Result::Ok) { m_bodyModPath = path; }
+	return r;
+}
+
+HjModLoader::Result CarBase::SetWheelModel(const std::string& path)
+{
+	if (path.empty() || path == ModConst::StockMark)
+	{
+		m_wheel.SetModelData(m_wheelPath);
+		m_wheelModPath = ModConst::StockMark;
+		return HjModLoader::Result::Ok;
+	}
+
+	const HjModLoader::Result r = HjModLoader::Load(m_wheel, path);
+	if (r == HjModLoader::Result::Ok) { m_wheelModPath = path; }
+	return r;
+}
+
+std::vector<std::pair<const char*, float*>> CarBase::AppearanceParamList()
+{
+	// 走行中のメニューから触ってよいものだけ。
+	// 順番はそのまま画面に並ぶので、合わせる手順どおりに置く。
+	// まず大きさ、次に向き、最後に位置
+	return {
+		{ U8("車体の大きさ"),   &m_bodyScale },
+		{ U8("車体の向き"),     &m_bodyYaw },
+		{ U8("タイヤの大きさ"), &m_wheelScale },
+		{ U8("タイヤの向き"),   &m_wheelYaw },
+		{ U8("左右の幅"),       &m_track },
+		{ U8("前後の長さ"),     &m_base },
+		{ U8("タイヤの高さ"),   &m_wheelH },
+		{ U8("車体の高さ"),     &m_bodyOffset.y },
+		{ U8("車体の前後"),     &m_bodyOffset.z },
+		{ U8("車体の左右"),     &m_bodyOffset.x },
+	};
+}
+
+void CarBase::SaveModChoice() const
+{
+	std::ofstream ofs(ModFilePath());
+	if (!ofs) { return; }
+
+	// 1行1項目。読み込み側が名前で拾うので、順番は問わない
+	ofs << ModConst::KeyBody  << " " << m_bodyModPath  << "\n";
+	ofs << ModConst::KeyWheel << " " << m_wheelModPath << "\n";
+}
+
+void CarBase::LoadModChoice()
+{
+	std::ifstream ifs(ModFilePath());
+	if (!ifs) { return; }
+
+	std::string key;
+	std::string val;
+	while (ifs >> key >> val)
+	{
+		// 読み込めなくても止めない。
+		// MODのファイルが消えていることは普通に起きるので、
+		// そのときは標準のまま進む
+		if (key == ModConst::KeyBody)       { SetBodyModel(val); }
+		else if (key == ModConst::KeyWheel) { SetWheelModel(val); }
+	}
 }
 
 void CarBase::SaveTuning()

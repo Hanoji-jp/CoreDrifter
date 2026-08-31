@@ -8,6 +8,8 @@
 //   自作の再利用クラスなので Hj 接頭辞(基盤エンジンのKdと区別)。
 //   毎フレーム先頭で Update() を呼び、以降はゲッターで参照する。
 //
+//   使う番号は固定しない。繋がっているものを探して使う(詳細は PadConst.h)。
+//
 //   マッピング(ドリフト操作向け):
 //     左スティックX  … ステア(アナログ)
 //     右トリガー(RT) … アクセル
@@ -20,6 +22,18 @@ public:
 	void Update();   // 毎フレーム先頭で呼ぶ(XInput状態を取得)
 
 	bool IsConnected() const { return m_connected; }
+
+	// 実際に使っている番号。繋がっていなければ PadConst::InvalidSlot。
+	// 反応しないときに、そもそも見つかっているのかを確かめる用
+	int  UsingSlot() const { return m_slot; }
+
+	// 調べ用の表示(F2のパネル)。
+	//
+	// 反応しないときに、どこで止まっているのかを目で見る。
+	//   ・1台も見つからない      → 外の何かが横取りしている
+	//   ・見つかるが値が動かない → 割り当ての側の問題
+	// 推測で直す前に、これを見て切り分ける
+	void DrawImGui();
 
 	// 左スティック (-1..1, デッドゾーン適用済み)
 	float LeftStickX() const { return m_lx; }
@@ -46,4 +60,9 @@ private:
 	float          m_rx = 0.0f, m_ry = 0.0f;
 	float          m_rt = 0.0f, m_lt = 0.0f;
 	bool           m_connected = false;
+
+	// 使っている番号と、探し直しまでの残りフレーム。
+	// 繋がっていない番号への問い合わせは遅いので、毎フレーム全部は見ない
+	int            m_slot        = PadConst::InvalidSlot;
+	int            m_rescanCount = 0;
 };

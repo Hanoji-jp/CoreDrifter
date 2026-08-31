@@ -115,6 +115,8 @@ namespace UIConst
 	// 描画側は字の大きさを変えられないので、用途ごとにサイズを分けて登録する
 	const int   FontCJK      = 17;   // 名前入力(大)
 	const int   FontCJKSmall = 18;   // バッジ(小)  // Archivo 34/900    (カード見出し・中サイズ)
+	const int   FontCJKRow   = 19;   // 走行中のパネルの行
+	const int   FontCJKHead  = 20;   // 走行中のパネルの見出し
 
 	//===== フォントIDごとの実際の大きさ(px) =====
 	// HjUI::Text の pxH は「縦位置を決める値」であって、
@@ -143,6 +145,8 @@ namespace UIConst
 		case 16: return 30.0f;    // FontCard
 		case 17: return 47.0f;    // FontCJK
 		case 18: return 12.0f;    // FontCJKSmall
+		case 19: return 15.0f;    // FontCJKRow
+		case 20: return 17.0f;    // FontCJKHead
 		default: return 14.0f;
 		}
 	}

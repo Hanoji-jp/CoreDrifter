@@ -62,6 +62,16 @@ public:
 	// 音源の位置を反映する。距離減衰・定位・遠くの音の鈍りが掛かる
 	void ApplySource(IXAudio2SourceVoice* voice, const Math::Vector3& worldPos);
 
+	//===== 設定画面から来る音量 =====
+	// バス(サブミックス)に掛けるので、そのバスへ流している音源が
+	// 増えても、ここを通れば必ず効く。
+	//
+	// エンジン音を環境音の側に置いているのは、あれが
+	// 「鳴り続けている背景」だから。タイヤの鳴きや衝突音のような
+	// 出来事として鳴る音とは、下げたい理由が違う。
+	void SetSfxVolume(float v);       // タイヤなど、出来事として鳴る音
+	void SetAmbientVolume(float v);   // エンジンなど、鳴り続ける音
+
 	void SetPreset(Preset p);
 	void SetWetness(float w);
 
@@ -92,6 +102,13 @@ private:
 	float m_volEngine = 1.0f;
 	float m_volTire   = 1.0f;
 	float m_volMaster = 1.0f;
+	// 設定画面から来る音量。調整パネルの値とは別に持つ。
+	// 一緒にすると、遊ぶ人が下げた値を開発中の調整で上書きしてしまう
+	float m_userSfx     = 1.0f;
+	float m_userAmbient = 1.0f;
+
+	// バスへ実際の音量を流し込む(調整値 × 設定値)
+	void ApplyBusVolumes();
 
 	// 3D
 	float m_refDistance = 6.0f;    // この距離までは減衰しない(m)
