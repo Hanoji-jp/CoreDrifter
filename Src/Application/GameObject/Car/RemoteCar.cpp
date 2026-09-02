@@ -18,8 +18,41 @@ void RemoteCar::Init()
 //----------------------------------------------------------
 void RemoteCar::PushState(const HjNetStatePacket& state)
 {
+	// 送り主の時計へ直す。
+	//
+	// 受け取った時刻で並べてはいけない。送り主は一定の間隔で
+	// 送っているのに、届く間隔は回線の都合でばらつく。
+	// 受信時刻で並べると、そのばらつきがそのまま点の間隔になり、
+	// 区間ごとに速さが変わって見える。
+	//
+	// 連番は毎秒 SendRate 回ぶん増えるので、そこから送信時刻が出る
+	const float senderTime =
+		static_cast<float>(state.seq) / std::max(NetConst::SendRate, 1.0f);
+
+	// 自分の時間軸へ移すためのずれ
+	const float ideal = m_time - senderTime;
+
+	if (!m_clockSet)
+	{
+		m_clockOffset = ideal;
+		m_clockSet    = true;
+	}
+	else if (fabsf(ideal - m_clockOffset) > NetConst::ClockResync)
+	{
+		// 相手が入り直して連番が振り直された、または長く止まっていた。
+		// 少しずつ寄せていては追いつかないので合わせ直す
+		m_clockOffset = ideal;
+		m_history.clear();
+	}
+	else
+	{
+		// 時計は少しずつずれるので合わせ続ける。
+		// 急に合わせると、その瞬間に相手の車が飛ぶ
+		m_clockOffset += (ideal - m_clockOffset) * NetConst::ClockBlend;
+	}
+
 	Sample s;
-	s.time  = m_time;   // 送り主の時刻ではなく、受け取った自分の時刻で並べる
+	s.time  = senderTime + m_clockOffset;
 	s.state = state;
 	m_history.push_back(s);
 

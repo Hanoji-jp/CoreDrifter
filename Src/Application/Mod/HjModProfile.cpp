@@ -5,31 +5,6 @@
 
 using Json = nlohmann::json;
 
-namespace
-{
-	// 項目の名前と、Entry のどこに入れるか。
-	// 読みと書きで同じ一覧を使う。別々に書くと、
-	// 片方に足してもう片方を忘れる、が必ず起きる
-	using Field = std::pair<const char*, float HjModProfile::Entry::*>;
-
-	const std::vector<Field>& Fields()
-	{
-		static const std::vector<Field> list = {
-			{ "bodyScale",  &HjModProfile::Entry::bodyScale  },
-			{ "bodyYaw",    &HjModProfile::Entry::bodyYaw    },
-			{ "wheelScale", &HjModProfile::Entry::wheelScale },
-			{ "wheelYaw",   &HjModProfile::Entry::wheelYaw   },
-			{ "track",      &HjModProfile::Entry::track      },
-			{ "base",       &HjModProfile::Entry::base       },
-			{ "wheelH",     &HjModProfile::Entry::wheelH     },
-			{ "bodyOffY",   &HjModProfile::Entry::bodyOffY   },
-			{ "bodyOffZ",   &HjModProfile::Entry::bodyOffZ   },
-			{ "bodyOffX",   &HjModProfile::Entry::bodyOffX   },
-		};
-		return list;
-	}
-}
-
 //----------------------------------------------------------
 void HjModProfile::Load()
 {
@@ -49,13 +24,12 @@ void HjModProfile::Load()
 		if (!it.value().is_object()) { continue; }
 
 		Entry e;
-		for (const auto& f : Fields())
+		for (auto f = it.value().begin(); f != it.value().end(); ++f)
 		{
-			const auto v = it.value().find(f.first);
-			if (v != it.value().end() && v->is_number())
-			{
-				e.*(f.second) = v->get<float>();
-			}
+			// 数でないものは読み飛ばす。
+			// 手で書き換えたときに文字が混じることがある
+			if (!f.value().is_number()) { continue; }
+			e[f.key()] = f.value().get<float>();
 		}
 		m_map[it.key()] = e;
 	}
@@ -69,10 +43,7 @@ void HjModProfile::Save() const
 	for (const auto& kv : m_map)
 	{
 		Json obj = Json::object();
-		for (const auto& f : Fields())
-		{
-			obj[f.first] = kv.second.*(f.second);
-		}
+		for (const auto& f : kv.second) { obj[f.first] = f.second; }
 		root[kv.first] = obj;
 	}
 

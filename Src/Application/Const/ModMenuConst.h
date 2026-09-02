@@ -34,7 +34,7 @@ namespace ModMenuConst
 
 	// 一度に見せる行数。これを超えたら送る。
 	// 画面の高さに対して長くなりすぎると、選んでいる所を見失う
-	constexpr int   VisibleRows = 11;
+	constexpr int   VisibleRows = 14;
 
 	//===== 選択の示し方 =====
 	// 選んでいる行は面で塗る。

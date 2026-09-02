@@ -7,6 +7,8 @@
 #include "../Effect/SkidMark.h"          // 路面に残るタイヤ痕
 #include "../../Input/HjGamePad.h"       // コントローラー入力(XInput)
 #include "../../Mod/HjModLoader.h"      // 見た目の差し替え(MOD)
+class HjHeightField;
+class HjRoad;
 #include "../../Audio/HjEngineAudio.h"   // エンジン音
 #include "../../Audio/HjTireAudio.h"     // タイヤのスキール音・ブレーキ鳴き
 
@@ -22,6 +24,25 @@
 class CarBase : public KdGameObject
 {
 public:
+	//===== 1フレームの運転操作 =====
+	// キーボードとコントローラーを合成した結果。
+	//
+	// CPUが運転する車は、ここを自分で埋めて返す。
+	// 追走では、前を走る車が出した値を手本として借りるので、
+	// 外から見える所に置いてある
+	struct DriveInput
+	{
+		float throttle  = 0.0f;   // -1(ブレーキ/後退) 〜 +1(アクセル)
+		float steer     = 0.0f;   // -1(左) 〜 +1(右)
+		bool  handbrake = false;
+		bool  clutch    = false;
+		bool  shiftUp   = false;  // 押した瞬間のみ
+		bool  shiftDown = false;
+	};
+
+	// 直前に出した運転操作。追走のCPUが手本として読む
+	const DriveInput& GetLastInput() const { return m_lastInput; }
+
 	void Init()    override;
 	void Update()  override;
 	// 増えたタイヤ痕を焼き付けマップへ書き込む。
@@ -70,6 +91,31 @@ public:
 
 	//===== 通信で相手へ送る値 =====
 	// 前輪の切れ角(rad)。相手の画面でもタイヤが同じ向きを向くように送る
+	// ヨー角速度(rad/s)。回っている速さ。
+	// 追走のCPUが、行き過ぎる前に舵を戻すのに要る
+	float GetYawRate() const { return m_yawRate; }
+
+	// 前輪の最大切れ角(rad)。
+	// CPUが出す舵を割合へ直すのに要る(この角度で頭打ち)
+	float GetMaxSteerAngle() const { return m_maxSteerAngle; }
+
+	//===== 地形(高さマップ) =====
+	// 高さを聞く先。渡されていればこちらを使う。
+	//
+	// メッシュへ光線を飛ばすのに比べて桁違いに軽い。
+	// サスペンションを入れると4輪ぶんを細かい刻みで解くので、
+	// 1フレームに何十回も聞くことになる。光線では持たない。
+	//
+	// 借りているだけ。持ち主は場面の側
+	void SetHeightField(const HjHeightField* field) { m_pHeightField = field; }
+
+	// 道。地形より先にこちらを聞く。
+	//
+	// 高さマップは真上から見た格子なので、路面のカントや
+	// 中央の盛り上がりを表現できない。道はスプラインの断面から
+	// 厳密に求まるので、道の上ならそちらが正しい
+	void SetRoad(const HjRoad* road) { m_pRoad = road; }
+
 	float GetSteerAngle() const { return m_steer; }
 	// サイドブレーキ中か。相手側で後輪の転がりを止めるのに使う
 	bool  IsHandbrake()   const { return m_handbrakeNow; }
@@ -126,12 +172,27 @@ public:
 	// 選んだものの保存 / 読込。
 	// 車の調整(CarTune)とは別のファイルにする。
 	// あちらは数値だけを並べる作りなので、パスを混ぜると読み込みが壊れる
+	// 見た目合わせの1項目。
+	//
+	// 保存に使う名前と、画面に出す名前を分けて持つ。
+	// 画面の文言は読みやすさで直したくなるが、そのたびに
+	// 保存済みの値が読めなくなるのでは困る。
+	struct AppearanceParam
+	{
+		const char* key;    // 保存に使う名前(一度決めたら変えない)
+		const char* label;  // 画面に出す名前(いつ変えてもよい)
+		float*      value;  // 動かす先。持ち主は車なので借りるだけ
+	};
+
 	// 見た目合わせの調整値。MODメニューが左右で動かす。
 	//
 	// TuneParamList は物理まで全部返すので、そのまま見せると
 	// 走行中のメニューから車の性能まで変えられてしまう。
-	// 見た目に関わるものだけを別に返す
-	std::vector<std::pair<const char*, float*>> AppearanceParamList();
+	// 見た目に関わるものだけを別に返す。
+	//
+	// ※項目を足すのはここだけでよい。
+	//   保存も画面も、この一覧を舐めて作る
+	std::vector<AppearanceParam> AppearanceParamList();
 
 	// ※見た目の調整をここから書き出す口は置かない。
 	//   差し替えたモデルの合わせ込みを車の調整へ書くと、
@@ -180,18 +241,13 @@ public:
 
 protected:
 	//===== Update() の分割 =====
-	// 1フレームの運転操作。キーボードとコントローラーを合成した結果。
-	struct DriveInput
-	{
-		float throttle  = 0.0f;   // -1(ブレーキ/後退) 〜 +1(アクセル)
-		float steer     = 0.0f;   // -1(左) 〜 +1(右)
-		bool  handbrake = false;
-		bool  clutch    = false;
-		bool  shiftUp   = false;  // 押した瞬間のみ
-		bool  shiftDown = false;
-	};
-
-	DriveInput ReadInput();        // 運転操作の読み取り(キーボード＋パッド)
+	// 1フレームの運転操作を作る。
+	//
+	// 人が運転するときはキーボードとパッドを読む。
+	// CPUが運転する車は、ここを差し替えて自分で作った値を返す。
+	// 物理側はどちらから来た値かを知らないので、
+	// 「CPUだけ挙動が違う」ということが起きない
+	virtual DriveInput ReadInput();
 	void UpdateDebugKeys();        // F1〜F4のデバッグトグル(運転とは無関係)
 
 	// 車体アライン：アクセルオフで車体を進行方向へ寄せるアシスト。
@@ -283,6 +339,17 @@ protected:
 	// 差し替えで選ばれているもの。標準なら ModConst::StockMark。
 	// 上の m_bodyPath とは別に持つ。あちらは「標準は何か」を
 	// 覚えておく場所で、上書きすると標準へ戻せなくなる
+	// 差し替えを読み込むか。
+	//
+	// 保存ファイルは車種ごと(CarMod_Silvia.txt)なので、
+	// 同じ車種を継いだ車は全部これを読んでしまう。
+	// 通信で来た他人の車まで自分の差し替えになってしまうので、
+	// 読むかどうかを持ち主が決められるようにする。
+	//
+	// ※他人の車のモデルは、まだ受け取る仕組みが無い。
+	//   出来たらここを通して当てる
+	bool m_useModChoice = true;
+
 	std::string m_bodyModPath  = "-";
 	std::string m_wheelModPath = "-";
 	std::string m_tuningName = "Car Tuning";   // Hierarchy に並べるときの名前
@@ -515,6 +582,20 @@ private:
 
 	// コントローラー入力(接続時のみアナログ操作を反映)
 	HjGamePad     m_pad;
+
+	// 地形の格子。渡されていれば、接地はここから取る。
+	// 無ければ従来どおりメッシュへ光線を飛ばす
+	const HjHeightField* m_pHeightField = nullptr;
+
+	// 道。地形より先に聞く。借りているだけ
+	const HjRoad* m_pRoad = nullptr;
+
+	// 直前に出した運転操作。
+	//
+	// 追走で後追いのCPUが手本として借りる。
+	// 位置と向きだけ渡しても、CPUは釣り合う踏み量を自分で探すことになる。
+	// 前を走っている人が既に正解を出しているので、それをそのまま貸す
+	DriveInput m_lastInput;
 
 	// エンジン音。RPMとアクセル開度から波形を組み立てて鳴らす
 	HjEngineAudio m_engineAudio;

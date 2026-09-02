@@ -31,7 +31,18 @@ class RemoteCar : public Silvia
 {
 public:
 	// プレイヤー番号(名簿と対応)。どの車が誰かを見分けるのに使う
-	explicit RemoteCar(int playerId) : m_playerId(playerId) {}
+	explicit RemoteCar(int playerId) : m_playerId(playerId)
+	{
+		// 自分の差し替えを読み込まない。
+		//
+		// 保存ファイルは車種ごと(CarMod_Silvia.txt)なので、
+		// そのまま読むと相手の車まで自分のモデルになる。
+		// しかも合わせ込みは自分の車にしか当てていないので、
+		// 相手だけ標準の寸法で別のモデルが出ることになる。
+		//
+		// ※相手のモデルを受け取る仕組みが出来たら、ここで当てる
+		m_useModChoice = false;
+	}
 
 	void Init()   override;
 	void Update() override;
@@ -108,6 +119,14 @@ private:
 
 	// 自分の時計。届いた時刻を刻むのと、描く時刻を決めるのに使う
 	float m_time = 0.0f;
+
+	// 送り主の時計と自分の時計のずれ。
+	//
+	// 届いた時刻で並べると、回線のばらつきがそのまま
+	// 点の間隔になって、区間ごとに速さが変わって見える。
+	// 連番から送信時刻を組み直し、このずれを足して自分の時間軸へ移す
+	float m_clockOffset = 0.0f;
+	bool  m_clockSet    = false;
 
 	std::vector<Sample> m_history;
 };

@@ -54,9 +54,13 @@ void HjUpdateNotice::DrawSprite()
 
 	const bool busy = (st == HjUpdater::State::Downloading);
 
+	// 出るときは下から持ち上げる。
+	// その場で濃くなるより、下辺から立ち上がるほうが
+	// 「下に張り付いているもの」として読める
+	const float rise = UN::RiseY * (1.0f - m_appear);
+
 	// 明るさの行き来。
-	// パッと消えて出る点滅は視界の端で気が散るので、
-	// 波で滑らかに往復させる。
+	// パッと消えて出る点滅は視界の端で気が散るので、波で滑らかに往復させる。
 	// 受け取り中は止める(進んだ量が読めなくなるため)
 	float glow = UN::BusyGlow;
 	if (!busy)
@@ -70,50 +74,62 @@ void HjUpdateNotice::DrawSprite()
 		glow = UN::GlowMin + (UN::GlowMax - UN::GlowMin) * wave;
 	}
 
-	//===== 文字 =====
-	Math::Color text = UN::Text;
-	text.w *= m_appear;
-	// 試し表示のときは、まだ何も起きていないので仮の文言を出す
+	//===== 出す文字を決める =====
 	const char* label = up.StateText();
 	if (UN::ForceShow && (label == nullptr || label[0] == 0)) { label = UN::ForceText; }
 
-	HjUI::TextAt(UIConst::FontCJKRow, UN::X, UN::TextY, label, text);
+	const std::string from = HjUpdater::GetCurrentVersion();
+	std::string to = up.GetLatestVersion();
 
-	//===== 帯 =====
+	// 試し表示のときは仮の番号を出す。
+	// 空のままだと、一番見せたい所が抜ける
+	if (UN::ForceShow && to.empty()) { to = UN::ForceToVer; }
+
+	//===== 帯(画面の下端に張り付く) =====
 	// 下地を先に敷く。
 	// これが無いと、明るさが下がったときに帯そのものが消えて、
 	// どこに何があったのか分からなくなる
 	Math::Color track = UN::Glow;
 	track.w = UN::TrackAlpha * m_appear;
-	HjUI::RectTL(UN::X, UN::BarY, UN::BarW, UN::BarH, track);
+	HjUI::RectTL(UN::BarX, UN::BarY + rise, UN::BarW, UN::BarH, track);
 
-	// 受け取り中は、進んだぶんだけ伸ばす。
+	// 受け取り中は進んだぶんだけ伸ばす。
 	// それ以外は全長で、明るさだけを動かす
 	const float ratio = busy ? std::clamp(up.GetProgress(), 0.0f, 1.0f) : 1.0f;
 
 	Math::Color bar = UN::Glow;
 	bar.w = glow * m_appear;
-	HjUI::RectTL(UN::X, UN::BarY, UN::BarW * ratio, UN::BarH, bar);
+	HjUI::RectTL(UN::BarX, UN::BarY + rise, UN::BarW * ratio, UN::BarH, bar);
 
-	//===== 添え字 =====
-	// 版の番号。何が新しくなるのかが分かる
+	//===== 一言 =====
+	Math::Color lab = UN::Label;
+	lab.w *= m_appear;
+	HjUI::TextAt(UIConst::FontCJKRow, UN::TextX, UN::LabelY + rise, label, lab);
+
+	//===== 版の番号(一番見せたいもの) =====
+	if (to.empty()) { return; }
+
+	Math::Color ver = UN::Ver;
+	ver.w *= m_appear;
+
+	// フォントに無い大きさなので、伸ばして出す。
+	// 版の番号は英数字だけなので、欧文の書体で通る
+	HjUI::TextScaled(UIConst::FontCard, UN::TextX, UN::VerY + rise,
+	                 UN::VerPx, to.c_str(), ver);
+
+	// いまの版を右へ小さく添える。どこから上がるのかが分かる。
+	// 伸ばした後の幅は、元の幅に倍率を掛けたもの
+	const float srcW  = HjUI::Measure(UIConst::FontCard, to.c_str(), 0.0f);
+	const float srcPx = UIConst::FontPx(UIConst::FontCard);
+	const float wDesign = (srcPx > 0.0f)
+		? (srcW / UIConst::Scale) * (UN::VerPx / srcPx) : 0.0f;
+
 	Math::Color sub = UN::Sub;
 	sub.w *= m_appear;
 
-	std::string from = HjUpdater::GetCurrentVersion();
-	std::string latest = up.GetLatestVersion();
-
-	// 試し表示のときは仮の番号を出す。
-	// 空のままだと、帯の下が抜けて間延びして見える
-	if (UN::ForceShow && latest.empty())
-	{
-		from   = UN::ForceFromVer;
-		latest = UN::ForceToVer;
-	}
-
-	if (!latest.empty())
-	{
-		const std::string line = from + "  >  " + latest;
-		HjUI::TextAt(UIConst::FontFoot, UN::X, UN::SubY, line.c_str(), sub);
-	}
+	const std::string fromLine = std::string("FROM ") + from;
+	HjUI::TextAt(UIConst::FontFoot,
+	             UN::TextX + wDesign + UN::FromGap,
+	             UN::VerY + UN::FromDy + rise,
+	             fromLine.c_str(), sub);
 }

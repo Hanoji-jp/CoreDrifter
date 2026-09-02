@@ -160,6 +160,9 @@ void KdStandardShader::BeginOutline()
 		KdShaderManager::Instance().SetPSConstantBuffer(2, m_cb2_Material.GetAddress());
 	}
 
+	// ここから輪郭。材質の色を掛けないようにする
+	m_outlinePass = true;
+
 	// 表面を省略して背面のみ描画（押し出した背面がシルエットになる）
 	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullFront);
 	// 深度テスト有効・書き込みなし：手前のオブジェクトに隠れる（＝他オブジェクトに
@@ -169,6 +172,9 @@ void KdStandardShader::BeginOutline()
 
 void KdStandardShader::EndOutline()
 {
+	// 戻し忘れると、この後に描くものまで材質の色を失う
+	m_outlinePass = false;
+
 	KdShaderManager::Instance().UndoDepthStencilState();
 	KdShaderManager::Instance().UndoRasterizerState();
 }
@@ -653,7 +659,12 @@ void KdStandardShader::WriteMaterial(const KdMaterial& material, const Math::Vec
 	//-----------------------
 	// マテリアル情報を定数バッファへ書き込む
 	//-----------------------
-	m_cb2_Material.Work().BaseColor = material.m_baseColorRate * colRate;
+	// 輪郭のときは掛けずに、指定した色をそのまま出す。
+	// 掛けると、モデルの色が黒いときに何色を指定しても黒になる
+	//
+	m_cb2_Material.Work().BaseColor = m_outlinePass
+		? colRate
+		: (material.m_baseColorRate * colRate);
 	m_cb2_Material.Work().Emissive = material.m_emissiveRate * emiRate;
 	m_cb2_Material.Work().Metallic = material.m_metallicRate;
 	m_cb2_Material.Work().Roughness = material.m_roughnessRate;

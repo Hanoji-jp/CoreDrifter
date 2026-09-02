@@ -1,0 +1,21 @@
+{
+  "Asset/Mods/Body/scene.gltf|-": {
+    "base": 1.4900000095367432,
+    "bodyOffX": 0.0,
+    "bodyOffY": 0.0,
+    "bodyOffZ": 0.0,
+    "bodyScale": 1.6799999475479126,
+    "bodyYaw": 3.141590118408203,
+    "camber": 0.0700000673532486,
+    "frontOffX": 0.0,
+    "frontOffZ": -0.06999998539686203,
+    "offX": 0.0,
+    "offZ": -0.019999999552965164,
+    "rearOffX": 0.0,
+    "rearOffZ": 0.0,
+    "track": 0.9699999690055847,
+    "wheelH": 0.3499999940395355,
+    "wheelScale": 1.1399999856948853,
+    "wheelYaw": 0.0
+  }
+}

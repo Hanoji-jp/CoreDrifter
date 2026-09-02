@@ -3,6 +3,8 @@
 #include "../../Util/HjPostFxSettings.h"
 #include "../../Audio/HjAudioSpace.h"
 #include "../../Mod/HjModCatalog.h"
+#include "../Stage/HjHeightField.h"
+#include "../Stage/HjRoad.h"
 
 void CarBase::Init()
 {
@@ -22,8 +24,12 @@ void CarBase::Init()
 
 	// 差し替えが選ばれていれば、その見た目にする。
 	// ※ここは標準を読んだ後。失敗しても標準のまま残るので、
-	//   MODのファイルが消えていてもゲームは動く
-	LoadModChoice();
+	//   MODのファイルが消えていてもゲームは動く。
+	//
+	// 通信で来た他人の車は読まない。
+	// 保存ファイルは車種ごとなので、読むと相手の車まで
+	// 自分の差し替えになってしまう
+	if (m_useModChoice) { LoadModChoice(); }
 
 	// ドリフトスモーク初期化
 	m_smoke.Init();
@@ -970,6 +976,42 @@ void CarBase::UpdateGroundContact(float dt)
 		ray.m_type  = KdCollider::TypeGround;
 
 		float bestY = -FLT_MAX; bool hit = false;
+
+		// 道を先に見る。
+		//
+		// 高さマップは真上から見た格子なので、路面のカントや
+		// 中央の盛り上がりを表現できない。
+		// 道の上なら、スプラインの断面から求めたほうが正しい
+		if (m_pRoad)
+		{
+			float rh = 0.0f;
+			Math::Vector3 rn = Math::Vector3::Up;
+			if (m_pRoad->SampleAt(wpos.x, wpos.z, rh, rn))
+			{
+				contactHit[i] = true;
+				contactY[i]   = rh;
+				++hitCount;
+				continue;
+			}
+		}
+
+		// 地形の格子があれば、そこから直接取る。
+		//
+		// 光線を飛ばすのは、どの面に当たるか分からないから。
+		// 格子なら位置からどのマス目かが決まるので、探す必要がない。
+		// 4点読んで混ぜるだけで済む
+		if (m_pHeightField)
+		{
+			const float h = m_pHeightField->HeightAt(wpos.x, wpos.z);
+			if (h > TerrainConst::OutsideHeight)
+			{
+				contactHit[i] = true;
+				contactY[i]   = h;
+				++hitCount;
+				continue;
+			}
+		}
+
 		for (auto& wp : m_wpHitList)
 		{
 			std::shared_ptr<KdGameObject> obj = wp.lock();
@@ -1330,6 +1372,8 @@ void CarBase::Update()
 	UpdateDebugKeys();
 
 	const DriveInput in = ReadInput();
+	// 追走のCPUが手本として借りる。物理へ渡す前の値をそのまま覚える
+	m_lastInput = in;
 	m_handbrakeNow = in.handbrake;   // 通信で相手へ送るので覚えておく
 	float throttle       = in.throttle;
 	float steerInput     = in.steer;
@@ -1704,10 +1748,40 @@ void CarBase::DrawLit()
 		// 寄せる先は車体の塗りとは別指定。縁だけ違う色で光らせられる
 		const Math::Vector3 ocv = Math::Vector3::Lerp(m_outlineColor, m_boostOutlineColor, tintAmt);
 		const Math::Color oc(ocv.x, ocv.y, ocv.z, 1.0f);
+
+		// ブースト中は太らせる＝縁が発光して見える
+		const float baseW = m_outlineWidth * (1.0f + tintAmt * 1.6f);
+
 		shader.BeginOutline();
-		shader.SetOutlineWidth(m_outlineWidth * (1.0f + tintAmt * 1.6f));
-		shader.DrawModel(m_body, bodyW, oc);
-		for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, oc); }
+
+		// 1本にまとめて描く。車体と4輪で同じことをするので
+		auto drawAll = [&](float width, const Math::Color& col)
+		{
+			shader.SetOutlineWidth(width);
+			shader.DrawModel(m_body, bodyW, col);
+			for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, col); }
+		};
+
+		if (CarConst::OutlineTwoLayer)
+		{
+			// 外側(色)を先。
+			// 後に描いたほうが上に乗るので、内側の黒が色の内周を
+			// 上書きして二層に見える。逆にすると色が黒を覆って1本になる
+			drawAll(baseW * CarConst::OutlineOuterMul, oc);
+
+			// 内側(黒)。
+			// 色だけだと、明るい路面や空を背にしたとき車体との境目が溶ける。
+			// 黒を1本入れると背景が何色でも形が立つ
+			const Math::Color inner(CarConst::OutlineInnerR,
+			                        CarConst::OutlineInnerG,
+			                        CarConst::OutlineInnerB, 1.0f);
+			drawAll(baseW, inner);
+		}
+		else
+		{
+			drawAll(baseW, oc);
+		}
+
 		shader.EndOutline();
 		shader.BeginLit();   // 後続オブジェクトのためにLitへ戻す
 	}
@@ -2176,22 +2250,35 @@ HjModLoader::Result CarBase::SetWheelModel(const std::string& path)
 	return r;
 }
 
-std::vector<std::pair<const char*, float*>> CarBase::AppearanceParamList()
+std::vector<CarBase::AppearanceParam> CarBase::AppearanceParamList()
 {
 	// 走行中のメニューから触ってよいものだけ。
 	// 順番はそのまま画面に並ぶので、合わせる手順どおりに置く。
-	// まず大きさ、次に向き、最後に位置
+	// まず全体の大きさと向き、次に車体の位置、最後にタイヤの配置。
+	//
+	// 左の名前は保存に使うので変えないこと。
+	// 右の名前は画面に出るだけなので、いつ変えてもよい
 	return {
-		{ U8("車体の大きさ"),   &m_bodyScale },
-		{ U8("車体の向き"),     &m_bodyYaw },
-		{ U8("タイヤの大きさ"), &m_wheelScale },
-		{ U8("タイヤの向き"),   &m_wheelYaw },
-		{ U8("左右の幅"),       &m_track },
-		{ U8("前後の長さ"),     &m_base },
-		{ U8("タイヤの高さ"),   &m_wheelH },
-		{ U8("車体の高さ"),     &m_bodyOffset.y },
-		{ U8("車体の前後"),     &m_bodyOffset.z },
-		{ U8("車体の左右"),     &m_bodyOffset.x },
+		{ "bodyScale",  U8("車体の大きさ"),   &m_bodyScale },
+		{ "bodyYaw",    U8("車体の向き"),     &m_bodyYaw },
+		{ "bodyOffY",   U8("車体の高さ"),     &m_bodyOffset.y },
+		{ "bodyOffZ",   U8("車体の前後"),     &m_bodyOffset.z },
+		{ "bodyOffX",   U8("車体の左右"),     &m_bodyOffset.x },
+
+		{ "wheelScale", U8("タイヤの大きさ"), &m_wheelScale },
+		{ "wheelYaw",   U8("タイヤの向き"),   &m_wheelYaw },
+		{ "camber",     U8("キャンバー"),     &m_camber },
+
+		{ "track",      U8("左右の幅"),       &m_track },
+		{ "base",       U8("前後の長さ"),     &m_base },
+		{ "wheelH",     U8("タイヤの高さ"),   &m_wheelH },
+
+		{ "offX",       U8("4輪まとめて左右"), &m_offX },
+		{ "offZ",       U8("4輪まとめて前後"), &m_offZ },
+		{ "frontOffX",  U8("前輪だけ左右"),   &m_frontOffX },
+		{ "frontOffZ",  U8("前輪だけ前後"),   &m_frontOffZ },
+		{ "rearOffX",   U8("後輪だけ左右"),   &m_rearOffX },
+		{ "rearOffZ",   U8("後輪だけ前後"),   &m_rearOffZ },
 	};
 }
 

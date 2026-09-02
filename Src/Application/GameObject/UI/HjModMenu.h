@@ -34,6 +34,18 @@ public:
 	// 開いているか。開いている間は車の操作を止めたいので、外から見る
 	bool IsOpen() const { return m_open; }
 
+	// 車種が替わったか。
+	//
+	// 車は場面が持っているので、ここでは作り直せない。
+	// 「替わった」とだけ伝えて、作り直しは持ち主にやってもらう。
+	// 一度読んだら下ろす(何度も作り直さないように)
+	bool ConsumeCarChanged()
+	{
+		const bool c = m_carChanged;
+		m_carChanged = false;
+		return c;
+	}
+
 private:
 	// いまどの階層にいるか
 	enum class Page
@@ -42,6 +54,7 @@ private:
 		BodyList,    // 車体のモデル候補
 		WheelList,   // ホイールのモデル候補
 		Adjust,      // 向き・大きさ・位置合わせ
+		CarList,     // 車種を選ぶ
 	};
 
 	// 1行の種類。
@@ -63,6 +76,7 @@ private:
 		SaveProf,   // いまの合わせ込みを書き出す
 		RevertProf, // 書き出した所まで戻す
 		ResetProf,  // 合わせ込みを捨てて、置いたままの状態へ
+		PickCar,    // 車種を選ぶ(選ぶと作り直しが要る)
 	};
 
 	// 画面に並べる1行。
@@ -95,6 +109,7 @@ private:
 	void BuildRoot(std::shared_ptr<CarBase>& car);
 	void BuildList(std::shared_ptr<CarBase>& car, bool body);
 	void BuildAdjust(std::shared_ptr<CarBase>& car);
+	void BuildCarList(std::shared_ptr<CarBase>& car);
 
 	// 入力
 	void UpdateInput();
@@ -132,6 +147,9 @@ private:
 	float m_slide = 0.0f;   // 開閉の進み(0=閉, 1=開)
 
 	// 左右の押しっぱなし用
+	// 車種が替わった。場面が読み取るまで立てておく
+	bool m_carChanged = false;
+
 	float m_holdL = 0.0f;
 	float m_holdR = 0.0f;
 

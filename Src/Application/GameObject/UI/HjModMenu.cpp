@@ -4,6 +4,7 @@
 #include "../Car/CarBase.h"
 #include "../../Mod/HjModCatalog.h"
 #include "../../Mod/HjModProfile.h"
+#include "../Car/HjCarChoice.h"
 #include "../../Input/HjKeyInput.h"
 
 namespace MM = ModMenuConst;
@@ -52,6 +53,7 @@ void HjModMenu::BuildRows()
 	case Page::BodyList:  BuildList(car, true);   break;
 	case Page::WheelList: BuildList(car, false);  break;
 	case Page::Adjust:    BuildAdjust(car);       break;
+	case Page::CarList:   BuildCarList(car);      break;
 	}
 
 	// 選んでいる行が消えることがある(一覧を更新した後など)。
@@ -76,6 +78,16 @@ void HjModMenu::BuildRoot(std::shared_ptr<CarBase>& car)
 		if (i < 0) { return U8("見つかりません"); }
 		return cat.List(kind)[i].name;
 	};
+
+	// 一番上に車種。
+	// モデルの差し替えは「いま乗っている車の見た目を変える」ものなので、
+	// どの車に乗るかが先に決まっていないと順番が逆になる
+	Row carRow;
+	carRow.kind  = RowKind::Submenu;
+	carRow.label = U8("車種");
+	carRow.value = HjCarChoice::Instance().Name();
+	carRow.to    = Page::CarList;
+	m_rows.push_back(carRow);
 
 	Row body;
 	body.kind  = RowKind::Submenu;
@@ -154,27 +166,29 @@ void HjModMenu::BuildAdjust(std::shared_ptr<CarBase>& car)
 	{
 		Row r;
 		r.kind   = RowKind::Slider;
-		r.label  = p.first;
-		r.target = p.second;
-		r.value  = NumText(*p.second);
+		r.label  = p.label;
+		r.target = p.value;
+		r.value  = NumText(*p.value);
 
-		// 名前で動かす幅を決める。
-		// 大きさは100倍のモデルまで来るので広く、
-		// 向きは1周ぶん、位置は車の寸法ぶんあれば足りる
-		// 名前で動かす幅を決める。
-		// ※「車体の大きさ」と「車体の高さ」を取り違えないよう、
-		//   先に「大きさ」を見てから位置へ倒す
-		const std::string label = p.first;
-		if (label.find(U8("向き")) != std::string::npos)
+		// 動かす幅は、保存に使う名前で見分ける。
+		//
+		// 画面に出る文言で見分けると、読みやすさのために言い回しを
+		// 直した瞬間に、幅の当たり方が変わってしまう。
+		// 保存名は変えない決まりなので、こちらを見る
+		const std::string key = p.key;
+
+		if (key == "bodyYaw" || key == "wheelYaw" || key == "camber")
 		{
 			r.min = MM::AngleMin; r.max = MM::AngleMax; r.step = MM::AngleStep;
 		}
-		else if (label.find(U8("大きさ")) != std::string::npos)
+		else if (key == "bodyScale" || key == "wheelScale")
 		{
+			// 100倍のモデルも1/100のモデルも来るので広く取る
 			r.min = MM::ScaleMin; r.max = MM::ScaleMax; r.step = MM::ScaleStep;
 		}
 		else
 		{
+			// 残りは全部、車の寸法ぶんあれば足りる位置合わせ
 			r.min = MM::OffsetMin; r.max = MM::OffsetMax; r.step = MM::OffsetStep;
 		}
 
@@ -208,6 +222,27 @@ void HjModMenu::BuildAdjust(std::shared_ptr<CarBase>& car)
 	m_rows.push_back(reset);
 }
 
+void HjModMenu::BuildCarList(std::shared_ptr<CarBase>& car)
+{
+	(void)car;
+
+	const auto now = HjCarChoice::Instance().Get();
+
+	for (int i = 0; i < static_cast<int>(CarChoiceConst::Kind::Count); ++i)
+	{
+		const auto k = static_cast<CarChoiceConst::Kind>(i);
+
+		Row r;
+		r.kind   = RowKind::Action;
+		r.act    = ActionKind::PickCar;
+		r.label  = HjCarChoice::NameOf(k);
+		r.choice = i;
+		if (k == now) { r.value = U8("使用中"); }
+
+		m_rows.push_back(r);
+	}
+}
+
 //----------------------------------------------------------
 // モデルごとの合わせ込み
 //----------------------------------------------------------
@@ -239,18 +274,21 @@ void HjModMenu::ApplyProfile(const std::string& path)
 	if (!HjModProfile::Instance().Has(path)) { return; }
 
 	const auto e = HjModProfile::Instance().Get(path);
-	const auto params = car->AppearanceParamList();
 
-	// 並びは AppearanceParamList と揃えてある。
-	// 名前で引くと、文言を直した瞬間に効かなくなる
-	const float vals[] = {
-		e.bodyScale, e.bodyYaw, e.wheelScale, e.wheelYaw,
-		e.track, e.base, e.wheelH,
-		e.bodyOffY, e.bodyOffZ, e.bodyOffX,
-	};
+	// 名前で引き当てる。
+	// 並び順で対応させると、調整の項目を1つ足しただけで
+	// ずれた値が黙って入る
+	for (const auto& p : car->AppearanceParamList())
+	{
+		const auto it = e.find(p.key);
 
-	const size_t n = std::min(params.size(), std::size(vals));
-	for (size_t i = 0; i < n; ++i) { *params[i].second = vals[i]; }
+		// 記録に無い項目は触らない。
+		// 古い記録を読んだときに、後から足した項目を
+		// 0へ倒してしまわないように
+		if (it == e.end()) { continue; }
+
+		*p.value = it->second;
+	}
 }
 
 void HjModMenu::CaptureProfile()
@@ -261,17 +299,8 @@ void HjModMenu::CaptureProfile()
 	const std::string key = ProfileKey();
 	if (key.empty()) { return; }
 
-	const auto params = car->AppearanceParamList();
-
 	HjModProfile::Entry e;
-	float* const dst[] = {
-		&e.bodyScale, &e.bodyYaw, &e.wheelScale, &e.wheelYaw,
-		&e.track, &e.base, &e.wheelH,
-		&e.bodyOffY, &e.bodyOffZ, &e.bodyOffX,
-	};
-
-	const size_t n = std::min(params.size(), std::size(dst));
-	for (size_t i = 0; i < n; ++i) { *dst[i] = *params[i].second; }
+	for (const auto& p : car->AppearanceParamList()) { e[p.key] = *p.value; }
 
 	HjModProfile::Instance().Set(key, e);
 }
@@ -411,6 +440,19 @@ void HjModMenu::Decide()
 			HjModProfile::Instance().Erase(ProfileKey());
 			HjModProfile::Instance().Save();
 			break;
+		case ActionKind::PickCar:
+		{
+			const auto k = static_cast<CarChoiceConst::Kind>(r.choice);
+			if (k != HjCarChoice::Instance().Get())
+			{
+				HjCarChoice::Instance().Set(k);
+
+				// 車そのものは場面が持っているので、ここでは作り直せない。
+				// 替わったことだけ伝える
+				m_carChanged = true;
+			}
+			break;
+		}
 		case ActionKind::None:       break;
 		}
 		break;
@@ -621,6 +663,7 @@ const char* HjModMenu::PageTitle() const
 	case Page::BodyList:  return U8("車体のモデル");
 	case Page::WheelList: return U8("ホイールのモデル");
 	case Page::Adjust:    return U8("向きと大きさ");
+	case Page::CarList:   return U8("車種");
 	case Page::Root:      break;
 	}
 	return U8("MOD MENU");

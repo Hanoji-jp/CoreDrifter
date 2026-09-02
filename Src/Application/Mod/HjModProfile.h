@@ -23,28 +23,19 @@
 //   その途中の値を毎回ファイルへ書くと、
 //   「やっぱり前のほうが良かった」が効かない。
 //   触った値は手元に持っておき、書き出すのは指示されたときだけにする。
+//
+//   ■ なぜ項目を名前で持つか
+//   決まった形(構造体)で持つと、調整の項目を1つ足すたびに
+//   ここと、書き出しと、受け渡しの3か所を揃えて直すことになる。
+//   1か所でも忘れると、ずれた値が黙って入る。
+//
+//   名前と値の対で持てば、足す場所は車の一覧だけで済む。
 //==========================================================
 class HjModProfile
 {
 public:
-	// 1モデル分の合わせ込み。
-	// 名前は車の調整と同じにしておく。片方だけ名前を変えると、
-	// どちらの値の話をしているのか追えなくなる
-	struct Entry
-	{
-		float bodyScale  = 1.0f;
-		float bodyYaw    = 0.0f;
-		float wheelScale = 1.0f;
-		float wheelYaw   = 0.0f;
-		float track      = 0.0f;
-		float base       = 0.0f;
-		float wheelH     = 0.0f;
-
-		// 車体モデルだけの位置合わせ(タイヤは接地したまま)
-		float bodyOffY   = 0.0f;   // 高さ
-		float bodyOffZ   = 0.0f;   // 前後
-		float bodyOffX   = 0.0f;   // 左右
-	};
+	// 1モデル分の合わせ込み。名前 → 値
+	using Entry = std::unordered_map<std::string, float>;
 
 	static HjModProfile& Instance()
 	{
@@ -60,7 +51,7 @@ public:
 	// この道の合わせ込みがあるか
 	bool Has(const std::string& path) const;
 
-	// 取り出す。無ければ既定値(そのまま置いた状態)を返す。
+	// 取り出す。無ければ空を返す。
 	// 「無い」を呼ぶ側で分岐させると、その判定が各所に散る
 	Entry Get(const std::string& path) const;
 

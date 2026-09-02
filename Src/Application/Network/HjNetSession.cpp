@@ -246,7 +246,18 @@ void HjNetSession::Update(float dt)
 	const float interval = 1.0f / std::max(NetConst::SendRate, 1.0f);
 	if (m_sendTimer >= interval)
 	{
-		m_sendTimer = 0.0f;
+		// 0に戻さず引く。
+		//
+		// 戻すと、超えたぶんの端数を毎回捨てることになり、
+		// 実際の送信間隔がフレーム時間に引きずられる。
+		// 受け取り側は連番から送信時刻を組み直すので、
+		// ここが揺れると相手の車の速さが揺れて見える。
+		m_sendTimer -= interval;
+
+		// 大きく遅れたときに、溜まったぶんを一気に送らない。
+		// 追いつこうとして連射しても、詰まった帯域が余計に詰まるだけ
+		if (m_sendTimer > interval) { m_sendTimer = 0.0f; }
+
 		SendState();
 	}
 }

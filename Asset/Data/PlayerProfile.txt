@@ -1,4 +1,4 @@
 name HarukinGames
-total 920054
+total 920395
 best 482523
-runs 9
+runs 11

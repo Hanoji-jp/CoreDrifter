@@ -189,6 +189,30 @@ namespace CarConst
 	constexpr float TransitionSlipBand = 0.01f;
 
 	//===== 車両モデル(silvia_body) =====
+	//===== 輪郭を二層にする =====
+	// 内側に黒、外側に色。
+	//
+	// 色だけの輪郭だと、明るい路面や空を背にしたときに
+	// 車体との境目が溶けて、形が読めなくなる。
+	// 内側へ黒を1本入れると、背景が何色でも形が立つ。
+	//
+	// 外側の色は「誰の車か」を見分けるためのもの。
+	// 黒は形を見せるためのもので、役割が違うので2本要る。
+	//
+	// ※外側を先に、内側を後に描く。
+	//   後に描いたほうが上に乗るので、内側の黒が
+	//   色の内周を上書きして、二層に見える。
+	constexpr bool  OutlineTwoLayer = true;
+
+	// 外側(色)の太さ。内側の何倍にするか。
+	// 差が小さいと2本に見えず、太らせただけになる
+	constexpr float OutlineOuterMul = 2.1f;
+
+	// 内側(黒)の色。完全な黒にすると沈むので、わずかに浮かせる
+	constexpr float OutlineInnerR = 0.04f;
+	constexpr float OutlineInnerG = 0.04f;
+	constexpr float OutlineInnerB = 0.05f;
+
 	constexpr float CarModelScale     = 1.0f;               // ボディの表示スケール(要調整)
 	constexpr float CarModelYawOffset = 3.14159265f;        // ボディの向き補正(前後が逆なので180度)
 
