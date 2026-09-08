@@ -1,4 +1,14 @@
 ﻿#include "Stage.h"
+
+//==========================================================
+// ※ いまは何も置いていない。
+//
+//   借りていたマップは他所のゲームの吸い出しだったので消した。
+//   表記でどうにかなるものではないので、配る形には残せない。
+//
+//   仕組みは残してある(StageConst::ModelPath を差し替えれば動く)。
+//   素性のはっきりしたモデルが用意できたら、そこへ入れる。
+//==========================================================
 #include "../Effect/SkidMark.h"   // 路面へタイヤ痕の焼き付けマップを適用する
 
 void Stage::Init()
@@ -184,7 +194,7 @@ void Stage::LoadNoCollision()
 	m_manualExclude.clear();
 	m_extraKeywords.clear();
 
-	std::ifstream ifs(StageConst::NoCollisionPath);
+	KdAssetIStream ifs(StageConst::NoCollisionPath);
 	if (!ifs) { return; }
 
 	std::string line;
@@ -698,7 +708,8 @@ std::vector<std::pair<const char*, float*>> Stage::ConfigParamList()
 		{ "offX", &m_offset.x }, { "offY", &m_offset.y }, { "offZ", &m_offset.z },
 		{ "yaw",  &m_yaw },
 		{ "spawnX", &m_spawnPos.x }, { "spawnY", &m_spawnPos.y }, { "spawnZ", &m_spawnPos.z },
-		{ "spawnYaw", &m_spawnYaw }, { "excludeSmallerThan", &m_excludeSmallerThan },
+		{ "spawnYaw", &m_spawnYaw }, { "spawnSet", &m_spawnSet },
+		{ "excludeSmallerThan", &m_excludeSmallerThan },
 	};
 }
 
@@ -711,7 +722,7 @@ void Stage::SaveConfig()
 
 void Stage::LoadConfig()
 {
-	std::ifstream ifs(StageConst::ConfigPath);
+	KdAssetIStream ifs(StageConst::ConfigPath);
 	if (!ifs) { return; }
 	auto params = ConfigParamList();
 	std::string key;

@@ -56,6 +56,21 @@ public:
 	// ここでゲームは閉じる。あとはバッチが引き継ぐ
 	void Apply();
 
+	// 自動で先へ進める。タイトル画面から毎フレーム呼ぶ。
+	//
+	// ■ なぜタイトルからだけか
+	// 入れ替えるとゲームは閉じる。走っている最中に閉じられたら
+	// たまったものではない。タイトルに居るときだけ進める。
+	//
+	// ■ 何をするか
+	// 新しいものがあれば落とし始め、
+	// 支度ができたら少し待ってから入れ替える
+	void AutoStep(float dt);
+
+	// あと何秒で入れ替えるか。0以下なら待っていない。
+	// 画面に出すと、いきなり閉じたように見えない
+	float GetApplyCountdown() const;
+
 	State GetState()    const { return m_state; }
 	float GetProgress() const { return m_progress; }   // 0〜1
 
@@ -109,6 +124,9 @@ private:
 	std::string m_latestVersion;
 	std::string m_downloadUrl;
 	std::string m_errorMsg;
+
+	// 入れ替えるまでの待ち。知らせを見せておく時間
+	float m_applyWait = 0.0f;
 
 	std::thread        m_thread;
 	mutable std::mutex m_mutex;

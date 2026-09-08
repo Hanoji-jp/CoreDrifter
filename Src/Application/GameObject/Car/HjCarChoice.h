@@ -40,6 +40,12 @@ public:
 	// 選ばれている車を作る。
 	// 場面ごとに種類で分岐を書くと、車を足すたびに全部直すことになる
 	static std::shared_ptr<CarBase> Create(Kind k);
+
+	// 既にある車へ、車種ごとの設定を当てる。
+	//
+	// 相手の車は「作ってから車種が分かる」ので、
+	// 作り方(Create)とは別に、当てるほうも要る
+	static void ApplySpec(CarBase& car, Kind k);
 	std::shared_ptr<CarBase> Create() const { return Create(m_kind); }
 
 private:

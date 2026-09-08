@@ -43,6 +43,41 @@ private:
 	void WorldToMap(const Math::Vector3& w, const HjHeightField& field,
 	                float& outU, float& outV) const;
 
+	// 拡大を挟んだ、地図の中の位置 ↔ パネルの中の位置(0〜1)
+	float ToViewU(float u) const { return (u - m_viewU) * m_zoom + 0.5f; }
+	float ToViewV(float v) const { return (v - m_viewV) * m_zoom + 0.5f; }
+	float FromViewU(float x) const { return (x - 0.5f) / m_zoom + m_viewU; }
+	float FromViewV(float y) const { return (y - 0.5f) / m_zoom + m_viewV; }
+
+	// 道を辿って、急すぎるコーナーを拾う
+	void ScanRoad(const HjRoad& road);
+
+	// 拡大と移動。ホイールと中ボタンで動かす
+	void UpdateView(const ImVec2& origin, float size, bool hovered);
+
+	//===== 急すぎるコーナー =====
+	// 道の1点。ワールド座標と、そこの曲がりの半径
+	struct ScanPoint
+	{
+		float x = 0.0f;
+		float z = 0.0f;
+		float radius = 0.0f;
+	};
+	std::vector<ScanPoint> m_scan;
+
+	// 何箇所ひっかかったか。数を出さないと直したか分からない
+	int m_broken = 0;
+	int m_tight  = 0;
+
+	// 道が変わったら拾い直す。毎フレーム辿ると重い
+	bool m_scanDirty = true;
+
+	//===== 見ている範囲 =====
+	// 地図の中心(0〜1)と、何倍に拡大しているか
+	float m_viewU = 0.5f;
+	float m_viewV = 0.5f;
+	float m_zoom  = RoadMapConst::ZoomMin;
+
 	// 陰影の絵。地形の格子を間引いて作る
 	std::shared_ptr<KdTexture> m_spTex;
 

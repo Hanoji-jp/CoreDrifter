@@ -62,6 +62,13 @@ namespace TerrainConst
 	//   float32 高さ …… 北西から東へ、行ごとに南下
 	constexpr const char* HeightPath = "Asset/Data/terrain/height.r32";
 
+	// 手で彫った形。筆が書き出すのはこちら。
+	//
+	// DEM とは必ず分ける。同じ名前にすると、
+	// 保存したときに取り込んだ標高データが消える。
+	// 実際に一度消した
+	constexpr const char* EditPath = "Asset/Data/terrain/height_edit.r32";
+
 	//===== 切り出し =====
 	// 標高データは実測の範囲そのままなので、11km四方ある。
 	// 全部を格子とメッシュにすると、まとまりが5000個を超えて
@@ -80,7 +87,31 @@ namespace TerrainConst
 	//===== 大きさ =====
 	// マス目1つの間隔(m)。
 	// 国土地理院の5mメッシュをそのまま使うなら5.0
-	constexpr float CellSize = 5.0f;
+	// ■ なぜ 1.25m か
+	// 道を地形へ埋め込むには、道幅より十分細かくないと成立しない。
+	//
+	// 5m だったときは、幅7mの裾を切り抜こうとすると、角が1つ内側に
+	// 入っただけで最大5mの穴が開いた。裾の縁がそこを覆いきれず空が
+	// 見えるので、切り抜きの余白(CoverMargin)を7.5mまで広げるしかなく、
+	// 結果として1マスも切り抜かれず、裾と地形が全幅で重なっていた。
+	// 見えていた境界線はその重なりと0.12mの段差。
+	//
+	// Unreal の Landscape が1m四方を標準にしているのは同じ理由。
+	// 1.25m なら余白は1.9m相当で、切り抜きが実際に働く
+	constexpr float CellSize = 1.25f;
+
+	//===== 読み込んだ格子を細かくし直すか =====
+	// 保存済みの高さマップは、粗かった頃のマス目のまま入っている。
+	// 読んだ後に上の CellSize まで引き伸ばす。
+	//
+	// 引き伸ばすのは「広さを変えずに点を増やす」だけなので、
+	// 彫った形はそのまま残る。次に保存すれば細かい方で書かれるので、
+	// この作り直しは1回きり
+	constexpr bool RefineOnLoad = true;
+
+	// 引き伸ばした後の上限(マス目の総数)。
+	// 壊れたファイルや広すぎる範囲で、確保だけで固まるのを防ぐ
+	constexpr long long RefineMaxCells = 8LL * 1024 * 1024;
 
 	// 画像の明るさ(0〜1)を標高(m)へ直す幅。
 	//   標高 = 明るさ * HeightScale + HeightBase
@@ -104,7 +135,12 @@ namespace TerrainConst
 	//===== 仮の地形 =====
 	// 実データが無いときに作る山。
 	// これで「車が地面に乗るか」を先に確かめる
-	constexpr int   TestSize   = 257;    // 1辺のマス目数
+	// 仮の地形の広さ(m)。
+	//
+	// マス目の数で持たない。マス目を細かくした途端に地面が縮んで、
+	// 走れる範囲の外が全部空白になる
+	constexpr float TestWorld  = 1280.0f;
+	constexpr int   TestSize   = static_cast<int>(TestWorld / CellSize) + 1;
 	constexpr float TestHeight = 90.0f;  // 山の高さ(m)
 
 	// 谷の底の幅(マス目)。ここを道が通る想定で、平らにしておく。

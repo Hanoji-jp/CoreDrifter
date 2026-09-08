@@ -1,4 +1,5 @@
 ﻿#include "HjPlayerProfile.h"
+#include "../../Util/HjSaveFile.h"
 
 using namespace PlayerConst;
 
@@ -73,7 +74,7 @@ void HjPlayerProfile::AddRun(double score)
 
 void HjPlayerProfile::Load()
 {
-	std::ifstream ifs(ProfilePath);
+	HjSaveIStream ifs("profile");
 	if (!ifs) { return; }   // 無ければ既定値のまま
 
 	std::string key;
@@ -92,7 +93,7 @@ void HjPlayerProfile::Load()
 
 void HjPlayerProfile::Save() const
 {
-	std::ofstream ofs(ProfilePath);
+	HjSaveOStream ofs("profile");
 	if (!ofs) { return; }
 
 	// 空の名前は既定値へ戻す(空欄で確定されると誰なのか分からなくなる)

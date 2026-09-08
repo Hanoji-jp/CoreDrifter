@@ -8,6 +8,8 @@ class DriftScore;
 #include "../../GameObject/Car/HjCarTrail.h"   // 追走の手本(規約上constヘッダはinclude可)
 #include "../../GameObject/Stage/HjRoadEditor.h"   // 道の制御点を掴む(3D)
 #include "../../GameObject/Stage/HjRoadMap.h"      // 上から見て線を引く
+#include "../../GameObject/Stage/HjTerrainBrush.h" // 地形を筆で彫る
+#include "../../GameObject/Car/HjNoClip.h"        // 車ごと飛ばす
 
 class GameScene : public BaseScene
 {
@@ -42,6 +44,9 @@ private:
 	std::shared_ptr<class HjTerrain> m_spTerrain;
 	std::shared_ptr<class HjRoad>    m_spRoad;
 
+	// 道に沿うガードレール。地形の落ち方から自動で置く
+	std::shared_ptr<class HjGuardRail> m_spRail;
+
 	// 道を編集しているか。編集中だけ制御点をギズモで掴める
 	bool m_roadEditing = false;
 
@@ -61,6 +66,15 @@ private:
 	// 地図の上ならマウスの位置がそのまま座標になるので、
 	// 3Dのように狙いが外れることがない
 	HjRoadMap m_roadMap;
+
+	// 地形を筆で彫る。書くのは素地で、道は毎回そこから削り直す
+	HjTerrainBrush m_terrainBrush;
+
+	// 車ごと飛ばす。カメラだけ動かすと車が置き去りになる
+	HjNoClip m_noClip;
+
+	// 相手の位置を地形の向こうからでも見せる
+	std::weak_ptr<class HjEsp> m_wpEsp;
 
 	// 編集中の自由カメラ。
 	//
@@ -86,6 +100,9 @@ private:
 private:
 	// 道の制御点をエディタへ登録する。
 	// 既にあるエディタ基盤へ乗せるので、ギズモもUndoもそのまま使える
+	// 走りながら使う小細工(自由に飛ぶ / 相手を透かす)
+	void UpdateCheats();
+
 	void UpdateRoadEdit();
 
 public:

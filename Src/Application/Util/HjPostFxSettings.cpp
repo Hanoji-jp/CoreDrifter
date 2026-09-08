@@ -1,4 +1,5 @@
 ﻿#include "HjPostFxSettings.h"
+#include "HjSaveFile.h"
 
 namespace
 {
@@ -60,14 +61,14 @@ void HjPostFxSettings::Save() const
 	// ParamList は今の状態を取り出す都合で非constにしてある
 	auto params = const_cast<HjPostFxSettings*>(this)->ParamList();
 
-	std::ofstream ofs(SettingsPath);
+	HjSaveOStream ofs("postfx");
 	if (!ofs) { return; }
 	for (const auto& p : params) { ofs << p.first << " " << *p.second << "\n"; }
 }
 
 void HjPostFxSettings::Load()
 {
-	std::ifstream ifs(SettingsPath);
+	HjSaveIStream ifs("postfx", SettingsPath);
 	if (!ifs) { return; }   // 無ければ既定値のまま
 
 	auto params = ParamList();

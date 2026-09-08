@@ -28,7 +28,9 @@ namespace UpdateNoticeConst
 	// 位置や明るさが決まったら false に戻すこと。
 	//
 	// ※true のままだと、更新が無くても出続ける
-	constexpr bool ForceShow = true;
+	// 見た目を決めている間だけ入れる。
+	// 入れっぱなしだと、更新が無くても知らせが出続ける
+	constexpr bool ForceShow = false;
 	constexpr const char* ForceText  = "新しい版があります";
 	constexpr const char* ForceToVer = "v1.1.0";
 

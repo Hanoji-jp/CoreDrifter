@@ -1,6 +1,7 @@
 ﻿#pragma once
 
-#include "Silvia.h"
+#include "CarBase.h"
+#include "HjCarChoice.h"
 #include "../../Network/HjNetProtocol.h"
 
 //==========================================================
@@ -27,12 +28,19 @@
 //     PushState(届いたパケット)   受け取るたび
 //     あとは通常のオブジェクトとして Update / Draw される
 //==========================================================
-class RemoteCar : public Silvia
+class RemoteCar : public CarBase
 {
 public:
 	// プレイヤー番号(名簿と対応)。どの車が誰かを見分けるのに使う
-	explicit RemoteCar(int playerId) : m_playerId(playerId)
+	// 車種は相手が選んだもの。
+	// 決め打ちにすると、相手がNSXでもシルビアで出る
+	RemoteCar(int playerId, CarChoiceConst::Kind kind)
+		: m_playerId(playerId)
 	{
+		// 相手の車種を当てる。
+		// 作ってから車種が分かるので、作り方ではなくここで当てる
+		HjCarChoice::ApplySpec(*this, kind);
+
 		// 自分の差し替えを読み込まない。
 		//
 		// 保存ファイルは車種ごと(CarMod_Silvia.txt)なので、

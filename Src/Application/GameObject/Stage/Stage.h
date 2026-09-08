@@ -31,7 +31,21 @@ public:
 	const Math::Vector3& GetSpawnPos() const { return m_spawnPos; }
 	float                GetSpawnYaw() const { return m_spawnYaw; }
 	// 現在の車位置などをスポーンとして設定(GameSceneのボタンから呼ぶ)
-	void SetSpawn(const Math::Vector3& pos, float yaw) { m_spawnPos = pos; m_spawnYaw = yaw; }
+	void SetSpawn(const Math::Vector3& pos, float yaw)
+	{
+		m_spawnPos = pos;
+		m_spawnYaw = yaw;
+		m_spawnSet = 1.0f;
+	}
+
+	// 決めたスポーンを捨てて、道の始点へ任せる
+	void ClearSpawn() { m_spawnSet = 0.0f; }
+
+	// 自分で決めたスポーンを持っているか。
+	//
+	// 持っていなければ道の始点から出す。道は制御点を動かすたびに
+	// 始点も動くので、何も決めていない間はそれに乗っておくのが正しい
+	bool HasSpawn() const { return m_spawnSet > 0.5f; }
 
 	// マップ配置(大きさ・座標・向き)＋スポーンをファイルへ保存/読込
 	void SaveConfig();
@@ -119,4 +133,8 @@ private:
 	// プレイヤーの初期スポーン(位置＋向き)
 	Math::Vector3 m_spawnPos = Math::Vector3(StageConst::SpawnX, StageConst::SpawnY, StageConst::SpawnZ);
 	float         m_spawnYaw = StageConst::SpawnYaw;
+
+	// スポーンを自分で決めたか。
+	// 保存が名前→float* の並びなので、旗も float で持つ
+	float         m_spawnSet = 0.0f;
 };

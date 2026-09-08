@@ -228,6 +228,19 @@ namespace HjUI
 	// 2pxの罫線に至っては 0.83 → 0 で消えてしまう。
 	// 四捨五入したうえで、最低1pxは残す。
 	//----------------------------------------------------------
+	void TexRectTL(const KdTexture* tex, float dx, float dy, float w, float h, const Math::Color& col)
+	{
+		if (!tex) { return; }
+
+		const int ws = std::max(1, static_cast<int>(w * UIConst::Scale + 0.5f));
+		const int hs = std::max(1, static_cast<int>(h * UIConst::Scale + 0.5f));
+
+		SP().DrawTex(tex,
+		             static_cast<int>(MapX(dx + w * 0.5f) + 0.5f),
+		             static_cast<int>(MapY(dy + h * 0.5f) + 0.5f),
+		             ws, hs, nullptr, &col);
+	}
+
 	void RectTL(float dx, float dy, float w, float h, const Math::Color& col, bool fill)
 	{
 		const int hw = std::max(1, static_cast<int>(w * UIConst::Scale * 0.5f + 0.5f));

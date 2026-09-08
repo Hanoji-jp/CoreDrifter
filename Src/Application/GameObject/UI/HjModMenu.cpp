@@ -1,4 +1,6 @@
 ﻿#include "HjModMenu.h"
+#include "../Stage/HjStageChoice.h"
+#include "HjCheats.h"
 
 #include "HjUI.h"
 #include "../Car/CarBase.h"
@@ -54,6 +56,8 @@ void HjModMenu::BuildRows()
 	case Page::WheelList: BuildList(car, false);  break;
 	case Page::Adjust:    BuildAdjust(car);       break;
 	case Page::CarList:   BuildCarList(car);      break;
+	case Page::StageList: BuildStageList();       break;
+	case Page::Tools:     BuildTools();           break;
 	}
 
 	// 選んでいる行が消えることがある(一覧を更新した後など)。
@@ -72,14 +76,29 @@ void HjModMenu::BuildRoot(std::shared_ptr<CarBase>& car)
 	// 潜らないと分からないと、確かめるだけで往復することになる
 	auto nameOf = [&](HjModCatalog::Kind kind, const std::string& cur) -> std::string
 	{
-		if (cur == ModConst::StockMark) { return U8("標準"); }
+		// その車のモデルなら、そのモデル名を出す。
+		// 「標準」と呼び分けると、別物のように見える
+		if (cur == ModConst::StockMark)
+		{
+			return (kind == HjModCatalog::Kind::Body)
+				? car->GetOwnBodyName() : car->GetOwnWheelName();
+		}
 
 		const int i = cat.IndexOf(kind, cur);
 		if (i < 0) { return U8("見つかりません"); }
 		return cat.List(kind)[i].name;
 	};
 
-	// 一番上に車種。
+	// 一番上にステージ。
+	// どこを走るかが決まらないと、車も見た目も試しようがない
+	Row stageRow;
+	stageRow.kind  = RowKind::Submenu;
+	stageRow.label = U8("ステージ");
+	stageRow.value = HjStageChoice::Instance().Name();
+	stageRow.to    = Page::StageList;
+	m_rows.push_back(stageRow);
+
+	// 次に車種。
 	// モデルの差し替えは「いま乗っている車の見た目を変える」ものなので、
 	// どの車に乗るかが先に決まっていないと順番が逆になる
 	Row carRow;
@@ -113,8 +132,16 @@ void HjModMenu::BuildRoot(std::shared_ptr<CarBase>& car)
 	scan.kind  = RowKind::Action;
 	scan.act   = ActionKind::Rescan;
 	scan.label = U8("一覧を読み直す");
-	scan.value = U8("Asset/Mods");
+	scan.value = U8("Mods");
 	m_rows.push_back(scan);
+
+	// 走りながら使うもの。一番下に置く。
+	// 見た目の調整とは目的が違うので、混ぜない
+	Row tools;
+	tools.kind  = RowKind::Submenu;
+	tools.label = U8("小細工");
+	tools.to    = Page::Tools;
+	m_rows.push_back(tools);
 }
 
 void HjModMenu::BuildList(std::shared_ptr<CarBase>& car, bool body)
@@ -123,11 +150,16 @@ void HjModMenu::BuildList(std::shared_ptr<CarBase>& car, bool body)
 	const auto kind = body ? HjModCatalog::Kind::Body : HjModCatalog::Kind::Wheel;
 	const std::string& cur = body ? car->GetBodyModPath() : car->GetWheelModPath();
 
-	// 先頭は必ず「標準」。
+	// 先頭は、その車が持っているモデル。
+	//
+	// 「標準」でも「最初のモデル」でもない。
+	// シルビアならシルビアの車体で、継承している車種そのもの。
+	// MOD の候補と同じくファイル名で並べる。
+	//
 	// 差し替えて形が崩れたとき、一番上に戻り道が無いと不安になる
 	Row stock;
 	stock.kind   = RowKind::Choice;
-	stock.label  = U8("標準");
+	stock.label  = body ? car->GetOwnBodyName() : car->GetOwnWheelName();
 	stock.choice = -1;
 	if (cur == ModConst::StockMark) { stock.value = U8("使用中"); }
 	m_rows.push_back(stock);
@@ -151,8 +183,8 @@ void HjModMenu::BuildList(std::shared_ptr<CarBase>& car, bool body)
 	{
 		Row none;
 		none.kind  = RowKind::Action;
-		none.label = body ? U8("Asset/Mods/Body に置く")
-		                  : U8("Asset/Mods/Wheel に置く");
+		none.label = body ? U8("Mods/Body に置く")
+		                  : U8("Mods/Wheel に置く");
 		none.value = U8("空");
 		m_rows.push_back(none);
 	}
@@ -195,8 +227,8 @@ void HjModMenu::BuildAdjust(std::shared_ptr<CarBase>& car)
 		m_rows.push_back(r);
 	}
 
-	// 標準の車は、車の調整(CarTune)が受け持つ。
-	// こちらで書き出す先が無いので、保存の行は出さない
+	// 鍵が作れないのは車が居ないときだけ。
+	// 「標準」という区分は無いので、どのモデルでも記録する
 	if (ProfileKey().empty()) { return; }
 
 	// 触った値はすぐには書かない。
@@ -220,6 +252,55 @@ void HjModMenu::BuildAdjust(std::shared_ptr<CarBase>& car)
 	reset.act   = ActionKind::ResetProf;
 	reset.label = U8("合わせ込みを捨てる");
 	m_rows.push_back(reset);
+}
+
+//----------------------------------------------------------
+// 走りながら使う小細工
+//
+// 見た目の調整とは目的が違うので、別のページにしてある
+//----------------------------------------------------------
+void HjModMenu::BuildTools()
+{
+	auto& ch = HjCheats::Instance();
+
+	Row fly;
+	fly.kind  = RowKind::Action;
+	fly.act   = ActionKind::FreeFly;
+	fly.label = U8("自由に飛ぶ");
+	fly.value = ch.IsFreeFly() ? U8("入") : U8("切");
+	m_rows.push_back(fly);
+
+	Row esp;
+	esp.kind  = RowKind::Action;
+	esp.act   = ActionKind::Esp;
+	esp.label = U8("相手を透かす");
+	esp.value = ch.IsEsp() ? U8("入") : U8("切");
+	m_rows.push_back(esp);
+}
+
+//----------------------------------------------------------
+// ステージの候補
+//----------------------------------------------------------
+void HjModMenu::BuildStageList()
+{
+	const auto now = HjStageChoice::Instance().Get();
+
+	for (int i = 0; i < static_cast<int>(StageChoiceConst::Kind::Count); ++i)
+	{
+		const auto k = static_cast<StageChoiceConst::Kind>(i);
+
+		Row r;
+		r.kind   = RowKind::Action;
+		r.act    = ActionKind::PickStage;
+		r.label  = HjStageChoice::NameOf(k);
+		r.choice = i;
+
+		// 使用中なら、そう出す。
+		// でなければ、何が違うのかを一言だけ添える
+		r.value = (k == now) ? U8("走行中") : HjStageChoice::NoteOf(k);
+
+		m_rows.push_back(r);
+	}
 }
 
 void HjModMenu::BuildCarList(std::shared_ptr<CarBase>& car)
@@ -253,14 +334,21 @@ std::string HjModMenu::ProfileKey() const
 
 	// 車体とホイールをまとめて1つの鍵にする。
 	// 別々に持つと、組み合わせを変えるたびに片方だけ合っている、
-	// という中途半端な状態になる
-	const std::string& b = car->GetBodyModPath();
-	const std::string& w = car->GetWheelModPath();
-
-	// どちらも標準なら記録しない。車の調整が受け持つ
-	if (b == ModConst::StockMark && w == ModConst::StockMark) { return ""; }
-
-	return b + "|" + w;
+	// という中途半端な状態になる。
+	//
+	// ■ 標準という区分は持たない
+	// 最初から積んであるモデルも、あとから足したモデルも、
+	// 同じ「そのモデル」として記録する。
+	// 分けると、最初のモデルだけ車のセッティング側で持つことになり、
+	// 同じものを2か所で管理することになる。
+	//
+	// ■ 車種も入れる
+	// 同じホイールモデルでも、合う寸法は車ごとに違う。
+	// トレッドもホイールベースも別なので、片方で合わせた値を
+	// もう片方へ当てるとタイヤがはみ出すか埋まる
+	return car->GetSaveKey() + "|"
+	     + car->GetBodyAsset() + "|"
+	     + car->GetWheelAsset();
 }
 
 void HjModMenu::ApplyProfile(const std::string& path)
@@ -440,6 +528,27 @@ void HjModMenu::Decide()
 			HjModProfile::Instance().Erase(ProfileKey());
 			HjModProfile::Instance().Save();
 			break;
+		case ActionKind::FreeFly:
+			HjCheats::Instance().SetFreeFly(!HjCheats::Instance().IsFreeFly());
+			break;
+
+		case ActionKind::Esp:
+			HjCheats::Instance().SetEsp(!HjCheats::Instance().IsEsp());
+			break;
+
+		case ActionKind::PickStage:
+		{
+			const auto k = static_cast<StageChoiceConst::Kind>(r.choice);
+			if (k != HjStageChoice::Instance().Get())
+			{
+				HjStageChoice::Instance().Set(k);
+
+				// ステージは場面が丸ごと持っているので、ここでは作り直せない。
+				// 替わったことだけ伝える
+				m_stageChanged = true;
+			}
+			break;
+		}
 		case ActionKind::PickCar:
 		{
 			const auto k = static_cast<CarChoiceConst::Kind>(r.choice);
@@ -664,6 +773,8 @@ const char* HjModMenu::PageTitle() const
 	case Page::WheelList: return U8("ホイールのモデル");
 	case Page::Adjust:    return U8("向きと大きさ");
 	case Page::CarList:   return U8("車種");
+	case Page::StageList: return U8("ステージ");
+	case Page::Tools:     return U8("小細工");
 	case Page::Root:      break;
 	}
 	return U8("MOD MENU");

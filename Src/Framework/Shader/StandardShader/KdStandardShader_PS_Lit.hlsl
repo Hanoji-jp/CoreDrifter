@@ -26,6 +26,50 @@ SamplerComparisonState g_ssCmp : register(s1); // 比較サンプラ（シャド
 static const float PI = 3.14159265358979f;
 
 //-------------------------------------------------------------
+// 値ノイズ(3次元)
+//
+// 地形の塗り分けで使う。画像を貼らずにここで模様を作る。
+//
+// ■ なぜ画像を貼らないか
+// 地形は数キロ四方ある。1枚の絵を繰り返すと必ず継ぎ目が見えるし、
+// 継ぎ目を隠すために大きく貼ると解像度が足りない。
+// ワールド座標から作れば、どこまで行っても模様が続く。
+//
+// ■ なぜ値ノイズか
+// パーリンより安いうえ、地面の斑には十分。
+// 見分けが付くほどの差は、この距離では出ない
+//-------------------------------------------------------------
+float SplatHash(float3 p)
+{
+	return frac(sin(dot(p, float3(12.9898f, 78.233f, 37.719f))) * 43758.5453f);
+}
+
+float SplatNoise(float3 p)
+{
+	float3 i = floor(p);
+	float3 f = frac(p);
+
+	// 滑らかに繋ぐ。線形のままだと格子が縞になって見える
+	f = f * f * (3.0f - 2.0f * f);
+
+	float n000 = SplatHash(i + float3(0, 0, 0));
+	float n100 = SplatHash(i + float3(1, 0, 0));
+	float n010 = SplatHash(i + float3(0, 1, 0));
+	float n110 = SplatHash(i + float3(1, 1, 0));
+	float n001 = SplatHash(i + float3(0, 0, 1));
+	float n101 = SplatHash(i + float3(1, 0, 1));
+	float n011 = SplatHash(i + float3(0, 1, 1));
+	float n111 = SplatHash(i + float3(1, 1, 1));
+
+	float nx00 = lerp(n000, n100, f.x);
+	float nx10 = lerp(n010, n110, f.x);
+	float nx01 = lerp(n001, n101, f.x);
+	float nx11 = lerp(n011, n111, f.x);
+
+	return lerp(lerp(nx00, nx10, f.y), lerp(nx01, nx11, f.y), f.z);
+}
+
+//-------------------------------------------------------------
 // 宇宙空間の見た目強化パラメータ
 //-------------------------------------------------------------
 // リムライト（縁光）：シルエットを光で縁取り、宇宙の浮遊感を出す
@@ -268,6 +312,47 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	{
 		baseColor = g_baseTex.Sample(g_ss, In.UV) * g_BaseColor * In.Color;
 	}
+	//------------------------------------------
+	// 地形の塗り分け(オートマテリアル)
+	//
+	// 頂点色は「色」ではなく4層の重み。
+	//   R=岩  G=土  B=草  A=舗装
+	//
+	// 重みはCPUが出す。傾きも道からの距離も、当たり判定を持っている
+	// 側にしかない情報なので、ここで作り直すと
+	// 見えている塗り分けと走れる場所がずれる
+	//------------------------------------------
+	float splatRough = 0.0f;
+	if (g_SplatEnable > 0.5f)
+	{
+		float4 w = In.Color;
+		w /= max(w.r + w.g + w.b + w.a, 1e-5f);
+
+		float3 col = g_SplatRockCol  * w.r
+		           + g_SplatDirtCol  * w.g
+		           + g_SplatGrassCol * w.b
+		           + g_SplatRoadCol  * w.a;
+
+		splatRough = g_SplatRockRough  * w.r
+		           + g_SplatDirtRough  * w.g
+		           + g_SplatGrassRough * w.b
+		           + g_SplatRoadRough  * w.a;
+
+		// 細かい粒と、大きな色ムラ。
+		// 粒だけだと砂紙のように均一で、遠くから見ると単色に戻る。
+		// 大きいうねりを重ねると、離れても地面の起伏として読める
+		float grain = SplatNoise(In.wPos * g_SplatGrainFreq) - 0.5f;
+		float macro = SplatNoise(In.wPos * g_SplatMacroFreq) - 0.5f;
+
+		// 舗装は粒を抑える。土や草と同じだけ荒れると、
+		// 舗装に見えず地面の続きになる
+		float amp = g_SplatGrain * (1.0f - w.a * 0.7f);
+
+		col *= 1.0f + grain * amp * 2.0f + macro * g_SplatGrain * 1.2f;
+
+		baseColor = float4(saturate(col), 1.0f);
+	}
+
 	if (baseColor.a < 0.05f)
 		discard;
 
@@ -421,6 +506,11 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	float4 mr       = g_metalRoughTex.Sample(g_ss, In.UV);
 	float  metallic  = saturate(mr.b * g_Metallic);
 	float  roughness = saturate(mr.g * g_Roughness);
+
+	// 塗り分けのときは層ごとの粗さを使う。
+	// 材質テクスチャは1枚しか無いので、岩も舗装も同じ艶になってしまう
+	if (g_SplatEnable > 0.5f) { roughness = saturate(splatRough); }
+
 	roughness = max(roughness, 0.04f); // 完全鏡面防止
 
 	// タイヤ痕の焼き付けマップ。コースを真上から見た1枚に痕が書き溜めてあるので、

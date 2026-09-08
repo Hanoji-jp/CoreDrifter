@@ -1,4 +1,5 @@
 ﻿#include "HjNetSession.h"
+#include "../GameObject/Car/HjCarChoice.h"
 #include "HjUdpTransport.h"
 #include "HjSteamTransport.h"
 
@@ -379,6 +380,7 @@ void HjNetSession::HandleJoin(const HjNetJoinPacket& pkt, const HjNetAddress& fr
 	m_peers[index].look.neonB = FromBytes(pkt.neonBR, pkt.neonBG, pkt.neonBB);
 	m_peers[index].look.smokeHi = FromBytes(pkt.smokeHiR, pkt.smokeHiG, pkt.smokeHiB);
 	m_peers[index].look.smokeGradDist = (pkt.smokeGradDist / 255.0f) * HjSmokeGradDistMax;
+	m_peers[index].carKind = pkt.carKind;
 	m_peers[index].used    = true;
 	m_peers[index].silence = 0.0f;
 
@@ -413,6 +415,7 @@ void HjNetSession::HandleRoster(const HjNetRosterPacket& pkt)
 		const bool isNew = !m_peers[id].used;
 		m_peers[id].used  = true;
 		m_peers[id].name  = e.name;
+		m_peers[id].carKind = e.carKind;
 		m_peers[id].look.outline = FromBytes(e.outlineR, e.outlineG, e.outlineB);
 		m_peers[id].look.smokeA = FromBytes(e.smokeAR, e.smokeAG, e.smokeAB);
 		m_peers[id].look.smokeB = FromBytes(e.smokeBR, e.smokeBG, e.smokeBB);
@@ -573,6 +576,9 @@ void HjNetSession::SendJoinRequest()
 	pkt.neonBR = ToByte(m_myLook.neonB.x);
 	pkt.neonBG = ToByte(m_myLook.neonB.y);
 	pkt.neonBB = ToByte(m_myLook.neonB.z);
+	// 乗っている車種。送らないと、相手の画面では既定の車で出る
+	pkt.carKind = static_cast<unsigned char>(HjCarChoice::Instance().Get());
+
 	strncpy_s(pkt.name, sizeof(pkt.name), m_myName.c_str(), _TRUNCATE);
 	m_transport->Send(&pkt, sizeof(pkt), m_hostAddr);
 }
@@ -589,6 +595,7 @@ void HjNetSession::SendRoster()
 	// 受け取った側が、繋ぎに行った先の住所で埋める。
 	pkt.peers[0].id   = 0;
 	pkt.peers[0].used = 1;
+	pkt.peers[0].carKind = static_cast<unsigned char>(HjCarChoice::Instance().Get());
 	pkt.peers[0].outlineR = ToByte(m_myLook.outline.x);
 	pkt.peers[0].outlineG = ToByte(m_myLook.outline.y);
 	pkt.peers[0].outlineB = ToByte(m_myLook.outline.z);
@@ -617,6 +624,7 @@ void HjNetSession::SendRoster()
 	{
 		pkt.peers[i].id     = static_cast<unsigned char>(i);
 		pkt.peers[i].used   = m_peers[i].used ? 1 : 0;
+		pkt.peers[i].carKind = m_peers[i].carKind;
 		pkt.peers[i].ip     = m_peers[i].addr.ip;
 		pkt.peers[i].port   = m_peers[i].addr.port;
 		pkt.peers[i].userId = m_peers[i].addr.userId;
@@ -776,6 +784,18 @@ HjCarLook HjNetSession::GetPeerLook(int id) const
 {
 	if (id < 0 || id >= static_cast<int>(m_peers.size())) { return HjCarLook(); }
 	return m_peers[id].look;
+}
+
+//----------------------------------------------------------
+// 番号から車種を引く
+//
+// 相手の車を作るときに使う。
+// 決め打ちにすると、相手がNSXでもシルビアで出る
+//----------------------------------------------------------
+int HjNetSession::GetPeerCarKind(int id) const
+{
+	if (id < 0 || id >= static_cast<int>(m_peers.size())) { return 0; }
+	return static_cast<int>(m_peers[id].carKind);
 }
 
 std::vector<HjNetSession::PeerView> HjNetSession::BuildPeerList() const

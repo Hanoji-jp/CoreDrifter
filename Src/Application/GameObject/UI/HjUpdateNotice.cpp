@@ -78,6 +78,21 @@ void HjUpdateNotice::DrawSprite()
 	const char* label = up.StateText();
 	if (UN::ForceShow && (label == nullptr || label[0] == 0)) { label = UN::ForceText; }
 
+	// 入れ替えるまでの残り。
+	// 出さないと、いきなり閉じたように見える
+	std::string labelBuf;
+	const float left = up.GetApplyCountdown();
+
+	if (left > 0.0f)
+	{
+		char buf[64] = {};
+		sprintf_s(buf, U8("あと %d 秒で入れ替えて開き直します"),
+		          static_cast<int>(left) + 1);
+
+		labelBuf = buf;
+		label = labelBuf.c_str();
+	}
+
 	const std::string from = HjUpdater::GetCurrentVersion();
 	std::string to = up.GetLatestVersion();
 

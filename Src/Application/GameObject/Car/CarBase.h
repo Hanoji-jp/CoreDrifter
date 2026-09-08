@@ -169,6 +169,31 @@ public:
 	const std::string& GetBodyModPath()  const { return m_bodyModPath; }
 	const std::string& GetWheelModPath() const { return m_wheelModPath; }
 
+	// いま実際に使っているモデルの場所。
+	//
+	// このゲームに「標準の車体」という区分は無い。
+	// 最初から積んであるモデルも、あとから足したモデルも、
+	// 同じ「そのモデル」として扱う。
+	//
+	// 合わせ込みの記録もこれで引く。区分を分けると、
+	// 最初のモデルだけ別の仕組みで管理することになる
+	// 車が持っているモデルの名前(拡張子なし)。
+	//
+	// MOD の候補と同じ形で並べるために使う。
+	// 「標準」でも「最初のモデル」でもなく、
+	// この車のモデルというだけ。継承している車種そのもの
+	std::string GetOwnBodyName()  const { return AssetName(m_bodyPath); }
+	std::string GetOwnWheelName() const { return AssetName(m_wheelPath); }
+
+	const std::string& GetBodyAsset() const
+	{
+		return (m_bodyModPath == ModConst::StockMark) ? m_bodyPath : m_bodyModPath;
+	}
+	const std::string& GetWheelAsset() const
+	{
+		return (m_wheelModPath == ModConst::StockMark) ? m_wheelPath : m_wheelModPath;
+	}
+
 	// 選んだものの保存 / 読込。
 	// 車の調整(CarTune)とは別のファイルにする。
 	// あちらは数値だけを並べる作りなので、パスを混ぜると読み込みが壊れる
@@ -203,6 +228,36 @@ public:
 	void LoadModChoice();
 
 	void DrawPadImGui() { m_pad.DrawImGui(); }
+
+	// コントローラー。飛ばすときなど、車の外から入力を見たい所がある。
+	// 読むだけ。持ち主は車のまま
+	// 車種の鍵。保存を車ごとに分けるのに使う
+	const std::string& GetSaveKey() const { return m_saveKey; }
+
+	//===== 性能の値を読む =====
+	// 車庫の画面が棒グラフに使う。
+	//
+	// 画面側に数字を書き写すと、車を触るたびに食い違う。
+	// 設定を当てた車から直接読ませる
+	//===== 車庫の見せ札 =====
+	// 止まった姿だけを描く。走行中の演出は乗せない
+	void DrawPortrait(const Math::Matrix& world);
+
+	// 絵を出すのに要るモデルだけ読む(Init は呼ばない)
+	void LoadPreviewModels();
+
+	// 車体が占める大きさ。車庫のカメラを合わせるのに使う。
+	// 中心は車のローカル(原点=接地面の中央)、半径はそれを包む球。
+	// モデルが読めていなければ false
+	bool GetBodyBounds(Math::Vector3& outCenter, float& outRadius) const;
+
+	float GetMaxSpeedSpec()    const { return m_maxSpeed; }
+	float GetEnginePowerSpec() const { return m_enginePower; }
+	float GetBrakePowerSpec()  const { return m_brakePower; }
+	float GetMuFrontSpec()     const { return m_muFront; }
+	float GetMuRearSpec()      const { return m_muRear; }
+
+	const HjGamePad& GetPad() const { return m_pad; }
 
 	void SetHalted(bool halted) { m_halted = halted; }
 	bool IsHalted() const { return m_halted; }
@@ -327,9 +382,24 @@ protected:
 	// 調整値の保存/読込（車種ごとのファイルへ）
 	void SaveTuning();
 	void LoadTuning();
+	// 道から、拡張子なしのファイル名だけ取り出す
+	static std::string AssetName(const std::string& path);
+
+	// 車体と4輪の行列を組む。DrawLit と DrawPortrait で共有する
+	void BuildPose(const Math::Matrix& carWorld,
+	               Math::Matrix& outBody, Math::Matrix outWheel[4]) const;
+
 	std::string TuneFilePath() const;
 	std::string ModFilePath() const;
 	std::vector<std::pair<const char*, float*>> TuneParamList();
+
+	// 車種ごとの設定は、それぞれの車種クラスが持つ。
+	//
+	// 相手の車は後から車種が決まるので、設定を「作り方」から
+	// 切り離してある。切り離すと外から protected を触ることになるので、
+	// その2つだけ通す
+	friend class Silvia;
+	friend class Nsx;
 
 	//===== 派生クラスがコンストラクタで設定する =====
 	// モデル

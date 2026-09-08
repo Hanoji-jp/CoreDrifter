@@ -491,3 +491,48 @@ void HjUpdater::Apply()
 	// ここでゲームを閉じる。あとはバッチが引き継ぐ
 	Application::Instance().End();
 }
+
+//----------------------------------------------------------
+// 自動で先へ進める
+//
+// ■ なぜタイトルからだけ呼ぶか
+// 入れ替えるとゲームは閉じる。走っている最中に閉じられたら
+// たまったものではない。タイトルに居るときだけ進める。
+//
+// ■ 手で押す形では結局古いままになる
+// 更新に気づいても押さないまま走り続ける。
+// 裏で落として、支度ができた所で入れ替えるほうが行き渡る
+//----------------------------------------------------------
+void HjUpdater::AutoStep(float dt)
+{
+	if (!UpdaterConst::AutoEnabled) { return; }
+
+	switch (m_state)
+	{
+	case State::Available:
+		// 落とし始める。二重に走らないよう、状態で見張られている
+		StartDownload();
+		break;
+
+	case State::Ready:
+		// 少し見せてから入れ替える。
+		// いきなり閉じると、何が起きたのか分からない
+		m_applyWait += dt;
+		if (m_applyWait >= UpdaterConst::ApplyDelay) { Apply(); }
+		break;
+
+	default:
+		m_applyWait = 0.0f;
+		break;
+	}
+}
+
+//----------------------------------------------------------
+// あと何秒で入れ替えるか
+//----------------------------------------------------------
+float HjUpdater::GetApplyCountdown() const
+{
+	if (m_state != State::Ready) { return 0.0f; }
+
+	return std::max(UpdaterConst::ApplyDelay - m_applyWait, 0.0f);
+}

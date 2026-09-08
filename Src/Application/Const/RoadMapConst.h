@@ -56,6 +56,33 @@ namespace RoadMapConst
 	// 別に太い線を薄く重ねる
 	constexpr float RoadBandWidth = 7.0f;
 
+	//===== 拡大 =====
+	// 地形1499mを520pxに収めると、1ピクセルが約2.9m。
+	// クリックの1〜2ピクセルの震えが、そのまま20〜40mの折れになる。
+	// 拡大できないと、そもそも滑らかな線が引けない。
+	constexpr float ZoomMin = 1.0f;
+	constexpr float ZoomMax = 24.0f;
+
+	// ホイール1目盛りで何倍にするか
+	constexpr float ZoomStep = 1.25f;
+
+	//===== 急すぎるコーナーの警告 =====
+	// 道の外端(中心から4.7m)より曲がりの半径が小さいと、
+	// 内側のふちの半径が負になる。面が裏返って、道が作れない。
+	//
+	// 内側を絞って逃げられるのは、半径が 4.7/0.62 = 7.6m まで。
+	// それ以下は絞っても足りない。
+	//
+	// 実際の峠のヘアピンは半径8〜12mなので、
+	// 15mを下回ったら「きつい」と見てよい。
+	constexpr float RadiusBroken = 4.7f;    // 裏返る
+	constexpr float RadiusTight  = 7.6f;    // 絞っても足りない
+	constexpr float RadiusWarn   = 15.0f;   // ヘアピン相当
+
+	// 道を何メートルおきに調べるか。
+	// 細かくすると地図を出すだけで重くなるので、点は控えておく
+	constexpr float ScanStep = 3.0f;
+
 	//===== 色 =====
 	// 点と線。地形の灰色の上で目立つ色にする
 	constexpr unsigned int ColLine    = 0xFFE0C060;   // 水色寄りの線(ABGR)
@@ -63,4 +90,12 @@ namespace RoadMapConst
 	constexpr unsigned int ColPoint   = 0xFFFF9040;
 	constexpr unsigned int ColPointHot= 0xFF40A0FF;
 	constexpr unsigned int ColCar     = 0xFF40FF40;   // 車の位置
+
+	// 急すぎるコーナー。赤へ寄せるほど深刻
+	constexpr unsigned int ColBroken  = 0xFF3030FF;   // 裏返る(赤)
+	constexpr unsigned int ColTight   = 0xFF3090FF;   // 絞っても足りない(橙)
+	constexpr unsigned int ColWarn    = 0xFF40D0FF;   // ヘアピン相当(黄)
+
+	// 警告の線の太さ。普通の線より太くして目に付かせる
+	constexpr float WarnWidth = 5.0f;
 }

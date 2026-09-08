@@ -10,4 +10,10 @@ class Silvia : public CarBase
 {
 public:
 	Silvia();
+
+	// 車種ごとの設定を当てる。
+	//
+	// 作り方(コンストラクタ)に閉じ込めておくと、
+	// 相手の車のように「後から車種が決まる」場合に当てられない
+	static void Setup(CarBase& car);
 };

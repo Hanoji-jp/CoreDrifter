@@ -10,6 +10,7 @@
 #include "SettingsScene/SettingsScene.h"
 #include "ElementsScene/ElementsScene.h"
 #include "PlayModeScene/PlayModeScene.h"
+#include "GarageScene/GarageScene.h"
 #include "RoomScene/RoomScene.h"
 #include "LobbyScene/LobbyScene.h"
 #include "MatchmakingScene/MatchmakingScene.h"
@@ -114,6 +115,9 @@ void SceneManager::ChangeScene(SceneType _sceneType)
 		break;
 	case SceneType::PlayMode:
 		m_currentScene = std::make_shared<PlayModeScene>();
+		break;
+	case SceneType::Garage:
+		m_currentScene = std::make_shared<GarageScene>();
 		break;
 	case SceneType::Room:
 		m_currentScene = std::make_shared<RoomScene>();

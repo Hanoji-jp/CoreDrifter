@@ -91,6 +91,25 @@ cbuffer cbObject : register(b0)
 	float g_MarkPad0;
 	float g_MarkPad1;
 	float g_MarkPad2;
+
+	// 地形の塗り分け(オートマテリアル)。
+	// 頂点色を「色」ではなく4層の重み(R=岩 G=土 B=草 A=舗装)として読む
+	float g_SplatEnable;
+	float g_SplatGrain;			// 細かい粒の振れ幅
+	float g_SplatGrainFreq;		// 粒の細かさ(1/m)
+	float g_SplatMacroFreq;		// 大きな色ムラの細かさ(1/m)
+
+	float3 g_SplatRockCol;
+	float  g_SplatRockRough;
+
+	float3 g_SplatDirtCol;
+	float  g_SplatDirtRough;
+
+	float3 g_SplatGrassCol;
+	float  g_SplatGrassRough;
+
+	float3 g_SplatRoadCol;
+	float  g_SplatRoadRough;
 };
 
 // 定数バッファ(メッシュ単位)

@@ -113,6 +113,9 @@ public:
 	// 番号から車の見た目を引く
 	HjCarLook GetPeerLook(int id) const;
 
+	// 番号から車種を引く。相手の車を作るときに使う
+	int GetPeerCarKind(int id) const;
+
 	// 相手が抜けた/タイムアウトした番号を取り出す。false=もう無い
 	bool PopRemovedId(int& outId);
 
@@ -133,6 +136,7 @@ private:
 		int          id       = -1;
 		bool         used     = false;
 		HjCarLook    look;   // 持ち主の調整パネルの色
+		unsigned char carKind = 0;      // 乗っている車種
 		float        silence  = 0.0f;   // 最後に何か届いてからの秒数
 		unsigned int lastSeq  = 0;      // 受け取った中で一番新しい連番
 	};

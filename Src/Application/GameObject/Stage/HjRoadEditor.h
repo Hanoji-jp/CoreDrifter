@@ -24,6 +24,13 @@ class KdDebugWireFrame;
 class HjRoadEditor
 {
 public:
+	// 画面の位置から光線を作る。
+	//
+	// 地形の筆でも使う。同じ計算を2つ持つと、
+	// 片方だけ直したときに狙いが食い違う
+	static bool ScreenRay(float u, float v,
+	                      Math::Vector3& outOrigin, Math::Vector3& outDir);
+
 	// 掴む・動かす。毎フレーム
 	void Update(HjRoad& road, const HjHeightField& field);
 
@@ -44,8 +51,6 @@ private:
 	enum class Axis { None, X, Y, Z };
 
 	// ゲーム画像内の位置からワールドの視線を作る
-	static bool ScreenRay(float u, float v,
-	                      Math::Vector3& outOrigin, Math::Vector3& outDir);
 
 	// 軸ハンドルのピック
 	static Axis PickAxis(const Math::Vector3& ro, const Math::Vector3& rd,

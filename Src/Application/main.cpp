@@ -1,5 +1,9 @@
 ﻿#include "main.h"
 #include "Util/HjProfiler.h"
+#include "Util/AssetVault.h"
+#include "Util/HjSaveDirs.h"
+#include "Util/HjSaveFile.h"
+#include "Const/WindowConst.h"
 #include "Updater/HjUpdater.h"
 #include "Audio/HjAudioSettings.h"
 #include "Audio/HjAudioSpace.h"
@@ -221,6 +225,27 @@ bool Application::Init(int w, int h)
 	//===================================================================
 	// シェーダー初期化
 	//===================================================================
+	// 埋め込んだアセットを開く。
+	//
+	// 配布ビルドでは Asset/ がフォルダとして無い。
+	// 何かを読み込むより先に開いておかないと、
+	// 最初のテクスチャで既に見つからないことになる
+	AssetVault::Init();
+
+	// 書き込む先を用意する。
+	//
+	// 保存物の置き場が Asset/Data/ の下にある。
+	// 配布ビルドは Asset/ を exe へ埋め込むので実体が無く、
+	// ofstream が黙って失敗する
+	HjSaveDirs::Ensure();
+
+	// 遊ぶ側の保存物を読む。
+	//
+	// 設定も成績も車のセッティングも、save.dat 1つにまとめてある。
+	// Asset/ の下へ散らばらせると、配布ビルドで exe の隣に
+	// Asset/Data/ が生えて、消していいのか分からなくなる
+	HjSaveFile::Load();
+
 	KdShaderManager::Instance().Init();
 
 	// モーションブラーはOFF（車ゲームでは追従カメラで常時ブレるため）
@@ -320,13 +345,30 @@ bool Application::Init(int w, int h)
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
 void Application::Execute()
 {
-	KdCSVData windowData("Asset/Data/WindowSettings.csv");
-	const std::vector<std::string>& sizeData = windowData.GetLine(0);
+	// 窓の大きさ。
+	//
+	// 読めなかったときは既定で開く。
+	// 行が無いのに sizeData[0] を触ると、起動した瞬間に落ちる。
+	// 配布ビルドで1つ入れ忘れただけで、何も出ないまま終わることになる
+	int winW = WindowConst::DefaultW;
+	int winH = WindowConst::DefaultH;
+	{
+		KdCSVData windowData("Asset/Data/WindowSettings.csv");
+		const std::vector<std::string>& sizeData = windowData.GetLine(0);
+
+		if (sizeData.size() >= 2)
+		{
+			const int w = atoi(sizeData[0].c_str());
+			const int h = atoi(sizeData[1].c_str());
+
+			if (w > 0 && h > 0) { winW = w; winH = h; }
+		}
+	}
 
 	//===================================================================
 	// 初期設定(ウィンドウ作成、Direct3D初期化など)
 	//===================================================================
-	if (Application::Instance().Init(atoi(sizeData[0].c_str()), atoi(sizeData[1].c_str())) == false) {
+	if (Application::Instance().Init(winW, winH) == false) {
 		return;
 	}
 

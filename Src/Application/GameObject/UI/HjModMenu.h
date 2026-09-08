@@ -39,6 +39,17 @@ public:
 	// 車は場面が持っているので、ここでは作り直せない。
 	// 「替わった」とだけ伝えて、作り直しは持ち主にやってもらう。
 	// 一度読んだら下ろす(何度も作り直さないように)
+	// ステージが替わったか。一度読むと下りる。
+	//
+	// ステージは場面が丸ごと持っているので、ここでは作り直せない。
+	// 場面の側で読んで、入り直してもらう
+	bool ConsumeStageChanged()
+	{
+		const bool c = m_stageChanged;
+		m_stageChanged = false;
+		return c;
+	}
+
 	bool ConsumeCarChanged()
 	{
 		const bool c = m_carChanged;
@@ -55,6 +66,8 @@ private:
 		WheelList,   // ホイールのモデル候補
 		Adjust,      // 向き・大きさ・位置合わせ
 		CarList,     // 車種を選ぶ
+		StageList,   // ステージを選ぶ
+		Tools,       // 走りながら使う小細工
 	};
 
 	// 1行の種類。
@@ -77,6 +90,9 @@ private:
 		RevertProf, // 書き出した所まで戻す
 		ResetProf,  // 合わせ込みを捨てて、置いたままの状態へ
 		PickCar,    // 車種を選ぶ(選ぶと作り直しが要る)
+		PickStage,  // ステージを選ぶ(選ぶと場面ごと作り直す)
+		FreeFly,    // 車から離れて自由に動く
+		Esp,        // 相手の位置を透かす
 	};
 
 	// 画面に並べる1行。
@@ -110,6 +126,12 @@ private:
 	void BuildList(std::shared_ptr<CarBase>& car, bool body);
 	void BuildAdjust(std::shared_ptr<CarBase>& car);
 	void BuildCarList(std::shared_ptr<CarBase>& car);
+
+	// ステージの候補を並べる
+	void BuildStageList();
+
+	// 走りながら使う小細工
+	void BuildTools();
 
 	// 入力
 	void UpdateInput();
@@ -149,6 +171,9 @@ private:
 	// 左右の押しっぱなし用
 	// 車種が替わった。場面が読み取るまで立てておく
 	bool m_carChanged = false;
+
+	// ステージが替わった。場面ごと作り直す必要がある
+	bool m_stageChanged = false;
 
 	float m_holdL = 0.0f;
 	float m_holdR = 0.0f;

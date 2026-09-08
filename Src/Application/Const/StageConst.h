@@ -3,8 +3,15 @@
 // ステージ(コースマップ)の定数
 namespace StageConst
 {
-	// マップモデルのパス(Sketchfab: burnout dominator bushido peak / CC-BY 4.0)
-	constexpr const char* ModelPath = "Asset/Data/burnout_dominator_bushido_peak/scene.gltf";
+	// マップモデルの場所。
+	//
+	// いまは何も置いていない。
+	// 借りていたモデルは他所のゲームの吸い出しだったので消した。
+	// 表記でどうにかなるものではないので、配る形には残せない。
+	//
+	// Stage の仕組みそのものは残してある。
+	// 素性のはっきりしたモデルが用意できたら、ここを差し替える
+	constexpr const char* ModelPath = "";
 
 	// 初期スケール(gltfの実寸に合わせて調整する。ImGuiで詰める)
 	constexpr float ModelScale = 1.0f;

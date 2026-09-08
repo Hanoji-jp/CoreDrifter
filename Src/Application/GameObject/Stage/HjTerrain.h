@@ -37,7 +37,23 @@ public:
 	// 頂点バッファを毎フレーム作ることになり、操作が固まる。
 	// 削れたのは道の周りだけなので、そこだけ作り直せばよい
 	void RebuildInArea(const Math::Vector3& mn, const Math::Vector3& mx);
+
+	// 道を覚えておく。
+	//
+	// 裾に完全に覆われた所は地形を張らない。
+	// 重ねて張ると、同じ高さで深度が争ってちらつくうえ、
+	// テクスチャを貼ると模様が入れ替わって見える。
+	//
+	// 借りるだけなので弱参照。持ち主は場面
+	void SetRoad(const std::shared_ptr<class HjRoad>& road) { m_wpRoad = road; }
 	void DrawLit() override;
+
+	// 塗り分けの設定をシェーダーへ送る。
+	//
+	// 道の裾も同じ規則で塗るので、道の側からも呼ぶ。
+	// 色や粒を2か所に書くと、継ぎ目で必ず食い違う
+	static void ApplySplat(class KdStandardShader& shader);
+
 	void GenerateDepthMapFromLight() override;
 
 	// 場面側のオブジェクト単位のカリングから外す。
@@ -89,6 +105,9 @@ private:
 	void Cull();
 
 	bool BuildOneChunk(int cellX, int cellZ, Chunk& out);
+
+	// 裾に覆われた所は張らない。持ち主は場面なので借りるだけ
+	std::weak_ptr<class HjRoad> m_wpRoad;
 
 	HjHeightField      m_field;
 	std::vector<Chunk> m_chunks;

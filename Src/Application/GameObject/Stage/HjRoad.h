@@ -3,6 +3,7 @@
 #include "HjRoadSpline.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 class HjHeightField;
 
@@ -51,12 +52,53 @@ public:
 
 	const HjRoadSpline& Spline() const { return m_spline; }
 
+	// このマス目を道がどれだけ持っているか(0〜1)。
+	//
+	// 筆の覆いに使う。1は路面そのもので、そこを盛ると突き抜ける。
+	// 削りの端に向けて0へ落ちるので、境目に段差ができない
+	// このマス目が裾に完全に覆われているか。
+	//
+	// 地形はここを描かない。裾と重ねて描くと、同じ高さで
+	// 深度が争ってちらつく。テクスチャを貼ると模様が入れ替わる
+	bool IsCoveredCell(int cellIndex) const
+	{
+		return m_coverCells.find(cellIndex) != m_coverCells.end();
+	}
+
+	float OwnWeightAt(int cellIndex) const
+	{
+		const auto it = m_deformWeight.find(cellIndex);
+		return (it == m_deformWeight.end()) ? 0.0f : it->second;
+	}
+
+	//===== 道に沿って物を並べるための断面 =====
+	// ガードレールなどが使う。
+	//
+	// 刻みの決め方(曲がりに合わせる)と断面の向き(ミター)は
+	// 道で作ったものをそのまま借りる。
+	// 別に作ると、ヘアピンで道と柵がずれる
+	int   StationCount() const { return StepCount() + 1; }
+	float StationAt(int i) const { return StationS(i); }
+
+	// この刻みの中心・断面の向き・ミターの伸び
+	void  CrossAt(int i, Math::Vector3& outCenter,
+	              Math::Vector3& outRight, float& outMiter) const;
+
+	// この刻みの、中心線から offset ずれた所の路面の高さ
+	float HeightAtOffset(int i, float offset) const { return SurfaceY(i, offset); }
+
 	//===== 編集 =====
 	// 点を動かしたら、道と地形を作り直す。
 	//
 	// 地形は道に合わせて削るので、元の形を控えておかないと
 	// 削った跡の上へさらに削ることになり、掘り進んでいく
 	void Rebuild();
+
+	// 地形の高さを制御点へ取り込む。
+	//
+	// 一度きりの操作。以後、道は制御点の高さで決まるので、
+	// 地形を彫っても道は動かない
+	void BakeHeightFromTerrain(const HjHeightField* field);
 
 	int  PointCount() const { return m_spline.PointCount(); }
 	Math::Vector3 GetPoint(int i) const;
@@ -67,6 +109,15 @@ public:
 	// 道から離れた所に印が出る。道の実際の高さへ乗せる
 	Math::Vector3 GetPointDisplayPos(int i) const;
 	void MovePoint(int i, const Math::Vector3& pos);
+
+	// 制御点ごとの裾の幅。区間ごとに伸ばすために使う
+	// side は 0 が左、1 が右
+	float GetApronAt(int i, int side) const { return m_spline.ApronAt(i, side); }
+	void  SetApronAt(int i, int side, float w);
+
+	// 制御点ごとの平場の幅。道と平行に伸ばす部分
+	float GetFlatAt(int i, int side) const { return m_spline.FlatAt(i, side); }
+	void  SetFlatAt(int i, int side, float w);
 	void InsertAfter(int i);
 	void AppendPoint(const Math::Vector3& pos);
 	void ErasePoint(int i);
@@ -84,14 +135,18 @@ private:
 	// 断面の形。中心からの横のずれに対する、高さの差
 	static float CrossHeight(float offset);
 
-	// スプラインからメッシュを組む
-	void BuildMesh();
-
-	// 地形へ溶ける裾。
+	// 断面を置く向きと、ミターの伸び。
 	//
-	// 地形の格子は道の縁に沿えないので、地形だけで境目を作ると
-	// 階段状になる。道から生やせば、境目がスプラインの縁になる
-	void BuildApron(const HjHeightField* field);
+	// 接線に直交させて置くと、角の所で隣り合う区間の平行線が
+	// ぴたりと交わらず、幅がわずかに足りなくなる。
+	// 二等分線の向きに 1/cos(θ/2) だけ伸ばすと交点で出会う
+	void CrossFrame(int step, Math::Vector3& outRight, float& outMiter) const;
+
+	// スプラインからメッシュを組む。
+	//
+	// 路面と裾を1枚で作る。別々にすると幅方向の刻みが揃わず、
+	// 折り返しを削った跡の穴埋めが境目を越えられない
+	void BuildMesh(const HjHeightField* field);
 
 	// 中心線の高さを、地形へ沿わせて決める
 	// 道の高さを決める。
@@ -117,13 +172,6 @@ private:
 	// 別々に計算すると、傾きを足したときに片方だけ直すことになる
 	float SurfaceY(int step, float offset) const;
 
-	// この地点で内側へ使ってよい幅(m)。
-	//
-	// ヘアピンでは、曲がりの半径が道幅より小さくなる。
-	// そのまま断面を並べると、内側が前後で追い越して面が折り返す。
-	// 半径より内へ収めれば折り返さない
-	float InnerLimit(int step) const;
-
 	// 道の周りの地形を、道の高さへ寄せる。
 	// これをやらないと、道が地形へ埋まったり宙に浮いたりする
 	void DeformTerrain(HjHeightField* field);
@@ -145,8 +193,23 @@ private:
 	// 掘り進んでいく。毎回ここから戻す。
 	//
 	// 地形を丸ごと控えると、戻すだけで数百万マスを舐めることになる。
-	// 触った所だけ覚えておけば、道の周りの数万マスで済む
-	std::unordered_map<int, float> m_deformedOriginal;
+	// 道が削ったマス目と、その強さ(0〜1)。
+	//
+	// 次に動かすとき、ここを素地へ戻してから削り直す。
+	// 戻さずに削ると、動かすたびに掘り進んでいく。
+	//
+	// 強さは筆の覆いにも使う。1なら道が完全に持っている場所で、
+	// そこを盛ると路面を突き抜ける
+	std::unordered_map<int, float> m_deformWeight;
+
+	// 裾に完全に覆われたマス目。地形はここを描かない
+	std::unordered_set<int> m_coverCells;
+
+	// 刻みごと・左右ごとに、実際に生き残った一番外の位置(m)。
+	//
+	// 指定した幅ではなく、折り返しや交差の判定を通ったあとの値。
+	// 指定から穴を開けると、面が落ちた所で空が見える
+	std::vector<float> m_coverReach[2];
 
 	// 前回削った範囲(ワールド)。
 	// 地形のメッシュを組み直す所を、この範囲だけに絞る
@@ -173,11 +236,33 @@ public:
 
 private:
 
+	// メッシュを組んだ結果。
+	//
+	// 見た目だけで原因を当てるのは無理があった。
+	// 落とした数と、一点へ集まった三角の枚数を出す
+	struct BuildStat
+	{
+		int verts   = 0;   // 頂点の数
+		int dropped = 0;   // 折り返し・潰れで落とした頂点
+		int faces   = 0;   // 張った面
+		int   cols    = 0;     // 幅方向の列数
+		int   minCols = 0;     // 一番細くなった所の生きている列数
+		float minAtS  = 0.0f;  // それが起きた道のり(m)
+	};
+	BuildStat m_statRoad;
+
+	// 折り返しの除去を切る。
+	//
+	// 切って道が戻るなら、削りすぎが原因だと確かめられる
+	bool m_trimFold = false;
+
+	// 線だけで描く。
+	// 塗り潰しだと、面が切れているのか繋がっているのか分からない
+	bool m_wireframe = false;
+
 	std::shared_ptr<KdMesh>  m_spMesh;
 
 	// 地形へ溶ける裾。路面とは別の材質で塗る
-	std::shared_ptr<KdMesh>  m_spApron;
-	std::vector<KdMaterial>  m_apronMaterials;
 	std::vector<KdMaterial>  m_materials;
 
 	// 中心線の高さ。刻みごとに持つ。
@@ -189,6 +274,19 @@ private:
 	// 中心線の高さだけだと路面が常に水平になり、山肌を横切る道が
 	// 不自然になる。縦断で坂を扱うのと同じことを左右にもやる
 	std::vector<float> m_centerRoll;
+
+
+
+	// 刻みごと・左右ごとの裾の幅(m)。[0]=左 [1]=右
+	//
+	// 制御点ごとの指定と、向かいの裾との重なりで決まる
+	std::vector<float> m_apronSpan[2];
+
+	// 刻みごと・左右ごとの平場の幅(m)。
+	// 道と平行に伸ばす部分。裾と同じく重なりで詰まる
+	std::vector<float> m_apronFlatSpan[2];
+
+	// 刻みごとの裾の幅(m)。左右で別。[0]=左 [1]=右
 	// 刻みごとの道のり(m)。
 	//
 	// 刻みは一定ではない。曲がりのきつい所は細かく、直線は粗くする。
@@ -215,10 +313,43 @@ private:
 	// 刻みの位置を決める。曲がりのきつい所を細かくする
 	void BuildStations();
 
+	// 刻みごとの裾の幅を決める。
+	//
+	// 制御点ごとの指定を引いたうえで、
+	// 向かい合った裾と重なるなら、互いの真ん中で止める
+	void ResolveApronSpan();
+
+	// 裾に覆われたマス目を出す。地形はそこを描かない
+	// 真上から見て、道の面に覆われたマス目を出す。
+	//
+	// 半径では決めない。ヘアピンでは折り目で面が削られて帯に穴が開くので、
+	// 半径で消すと面の無い所まで地形が消えて空白になる
+	void MarkCover(const HjHeightField* field,
+	               const std::vector<KdMeshVertex>& verts,
+	               const std::vector<KdMeshFace>& faces);
+
+
 	// 触りながら決める値。
 	//
 	// 定数のままだと、変えるたびにビルドし直すことになる。
 	// 道は見ながら決めるものなので、それでは道具にならない。
+	// 平場の幅を全部の点へ一度に入れるときの値(m)。
+	//
+	// 幅そのものは制御点が持つ。ここは「全部これにする」ための入れ物
+	float m_apronFlat = RoadConst::ApronFlat;
+
+	// 平場を広げたぶん、斜面の降りる先も外へ伸ばす割合
+	float m_apronFollowFlat = RoadConst::ApronFollowFlat;
+
+	// 裾が路面から離れてよい高さ(m)。
+	//
+	// 道のすぐ横に高い山があると、裾は山の中を通って
+	// 先だけ表へ出る。そこがちらつく
+	float m_apronMaxRise = RoadConst::ApronMaxRise;
+	float m_apronMaxDrop = RoadConst::ApronMaxDrop;
+
+
+
 	// 初期値は RoadConst から取る
 	float m_maxGrade    = RoadConst::MaxGrade;
 	float m_lift        = RoadConst::Lift;

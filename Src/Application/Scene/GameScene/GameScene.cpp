@@ -11,10 +11,15 @@
 #include "../../GameObject/Score/DriftScore.h"
 #include "../../GameObject/UI/RunHudUI.h"
 #include "../../GameObject/UI/HjModMenu.h"
+#include "../../GameObject/UI/HjCheats.h"
+#include "../../GameObject/UI/HjEsp.h"
+#include "../../GameObject/Car/HjNoClip.h"
 #include "../../GameObject/Car/HjCarChoice.h"
 #include "../../GameObject/Car/CpuCar.h"
 #include "../../GameObject/Stage/HjTerrain.h"
 #include "../../GameObject/Stage/HjRoad.h"
+#include "../../GameObject/Stage/HjGuardRail.h"
+#include "../../GameObject/Stage/HjStageChoice.h"
 #include "../../GameObject/Stage/HjRoadEditor.h"
 #include "../../Input/HjKeyInput.h"
 #include "../../GameObject/Camera/HjEditorCamera.h"
@@ -35,6 +40,23 @@
 
 void GameScene::Event()
 {
+	// 走りながら使う小細工。
+	// 車から離れて見回る、相手の位置を透かす
+	UpdateCheats();
+
+	// ステージが替わったら、場面ごと入り直す。
+	//
+	// 地形も道も車の置き場所も全部変わるので、
+	// この場面のまま差し替えるより作り直すほうが確実
+	if (auto menu = m_wpModMenu.lock())
+	{
+		if (menu->ConsumeStageChanged())
+		{
+			SceneManager::Instance().SetNextScene(SceneManager::SceneType::Game);
+			return;
+		}
+	}
+
 	// 道の制御点を編集する。
 	//
 	// 座標を手で打つのでは道具にならない。掴んで動かして、
@@ -195,7 +217,13 @@ void GameScene::Init()
 	std::shared_ptr<HjTerrain> terrain;
 	std::shared_ptr<HjRoad>    road;
 
-	if (TerrainConst::UseTerrain)
+	// どのステージを走るか。
+	//
+	// もとは定数で分けていたので、組み直さないと切り替えられなかった。
+	// 見比べができないと、どちらを詰めるかも決められない
+	HjStageChoice::Instance().Load();
+
+	if (HjStageChoice::Instance().UsesTerrain())
 	{
 		terrain = std::make_shared<HjTerrain>();
 		terrain->Init();
@@ -209,13 +237,24 @@ void GameScene::Init()
 		road->Init(&terrain->WorkField());
 		AddObject(road);
 
+		// 裾に覆われた所は地形を張らない。
+		// 重ねて張ると、同じ高さで深度が争ってちらつく
+		terrain->SetRoad(road);
+
 		// 地形のメッシュは、道が地形を寄せたあとに組む。
 		// 先に組むと、寄せる前の形で頂点と法線を作ってしまう
 		terrain->BuildChunks();
 
+		// ガードレール。地形の落ち方から自動で置く。
+		// 道と地形が決まってからでないと、置き場所が出せない
+		auto rail = std::make_shared<HjGuardRail>();
+		rail->Build(*road, &terrain->Field());
+		AddObject(rail);
+
 		// 編集で触り続けるので持っておく
 		m_spTerrain = terrain;
 		m_spRoad    = road;
+		m_spRail    = rail;
 	}
 	else
 	{
@@ -237,9 +276,17 @@ void GameScene::Init()
 	if (terrain) { car->SetHeightField(&terrain->Field()); }
 	else         { car->AddCollisionTarget(stage); }
 	if (road)    { car->SetRoad(road.get()); }
-	// 保存済みスポーン位置へ配置(StageConfig.txtから読まれた値)
-	// 道があれば、その始点へ置く。地形の谷底より確実
-	if (road)         { car->SetSpawn(road->GetStartPos(), road->GetStartYaw()); }
+	//===== スポーン =====
+	// 自分で決めた場所があれば、何より先にそれを使う。
+	//
+	// 道の始点を無条件で優先していたので、決めても上書きされて
+	// 変えられなかった。道は制御点を動かすたびに始点も動くので、
+	// 何も決めていない間だけ道に任せる
+	if (stage && stage->HasSpawn())
+	{
+		car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw());
+	}
+	else if (road)    { car->SetSpawn(road->GetStartPos(), road->GetStartYaw()); }
 	else if (terrain) { car->SetSpawn(terrain->GetSpawnPos(), 0.0f); }
 	else              { car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw()); }
 	AddObject(car);
@@ -289,6 +336,12 @@ void GameScene::Init()
 	modMenu->Init();
 	modMenu->SetCar(car);
 	m_wpModMenu = modMenu;
+
+	// 相手の位置を透かす。
+	// デバッグ線は物からしか出せないので、物として置く
+	auto esp = std::make_shared<HjEsp>();
+	AddObject(esp);
+	m_wpEsp = esp;
 	AddObject(modMenu);
 
 	// 走行中の通知。前の走行のぶんが残っていると混ざるので空にしてから始める
@@ -339,6 +392,38 @@ void GameScene::Init()
 			{
 				if (stage) { car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw()); }
 			}
+
+			// いまどちらが使われているかを出す。
+			// 決めたのに道の始点から出る、を見えるようにしておく
+			if (stage)
+			{
+				if (stage->HasSpawn())
+				{
+					ImGui::TextUnformatted(U8("スポーン: 自分で決めた場所"));
+					ImGui::SameLine();
+					if (ImGui::Button(U8("道の始点に任せる")))
+					{
+						stage->ClearSpawn();
+						stage->SaveConfig();
+					}
+
+					// 数値でも動かせるようにする。
+					// 車を置きに行くほどでもない微調整のため
+					Math::Vector3 pos = stage->GetSpawnPos();
+					float yaw = stage->GetSpawnYaw();
+					bool edited = ImGui::DragFloat3(U8("スポーン位置"), &pos.x, 0.1f);
+					edited |= ImGui::DragFloat(U8("スポーン向き(rad)"), &yaw, 0.01f);
+					if (edited)
+					{
+						stage->SetSpawn(pos, yaw);
+						stage->SaveConfig();
+					}
+				}
+				else
+				{
+					ImGui::TextUnformatted(U8("スポーン: 道の始点"));
+				}
+			}
 		});
 
 		// 車が今ぶつかっているノードを渡す。
@@ -386,6 +471,32 @@ void GameScene::Init()
 
 					if (m_roadEditing)
 					{
+						// 地形を筆で彫る。
+						// 道より先に置く。地面が無いと道の載る場所が決まらない
+						if (terrain)
+						{
+							ImGui::SeparatorText(U8("地形を彫る"));
+							m_terrainBrush.DrawGui(terrain->WorkField());
+						}
+
+						// ガードレール
+						if (m_spRail)
+						{
+							ImGui::SeparatorText(U8("ガードレール"));
+
+							bool vis = m_spRail->IsVisible();
+							if (ImGui::Checkbox(U8("出す"), &vis)) { m_spRail->SetVisible(vis); }
+
+							ImGui::SameLine();
+							if (ImGui::Button(U8("置き直す")) && terrain)
+							{
+								m_spRail->Build(*road, &terrain->Field());
+							}
+
+							ImGui::Text(U8("全長 %.0f m / 支柱 %d 本"),
+							            m_spRail->GetLength(), m_spRail->GetPostCount());
+						}
+
 						// 一覧から選んで、数値で動かす。
 						// 選んでいる点は3Dの側で球と縦線が出る
 						// 上から見て線を引く。
@@ -398,6 +509,68 @@ void GameScene::Init()
 
 						ImGui::SeparatorText(U8("一覧と数値"));
 						m_roadEditor.DrawGui(*road);
+
+						//===== 選んでいる点の裾の幅 =====
+						// 区間ごとに裾を伸ばしたいので、制御点に持たせている。
+						//
+						// 左右で別に持つ。谷側だけ伸ばして山側は詰める、
+						// という使い方をするので、1つの値だと片側に合わせるしかない
+						{
+							const int sel = (m_roadEditor.GetSelected() >= 0)
+							              ? m_roadEditor.GetSelected()
+							              : m_roadMap.GetSelected();
+
+							if (sel >= 0 && sel < road->PointCount())
+							{
+								ImGui::TextDisabled(U8("点 %d の裾と平場(進む向きに対して)"), sel);
+
+								float wl = road->GetApronAt(sel, 0);
+								if (ImGui::DragFloat(U8("左の裾(m)"), &wl, 0.1f,
+								                     0.0f, RoadConst::ApronWidthMax))
+								{
+									road->SetApronAt(sel, 0, wl);
+								}
+
+								float wr = road->GetApronAt(sel, 1);
+								if (ImGui::DragFloat(U8("右の裾(m)"), &wr, 0.1f,
+								                     0.0f, RoadConst::ApronWidthMax))
+								{
+									road->SetApronAt(sel, 1, wr);
+								}
+
+								float fl = road->GetFlatAt(sel, 0);
+								if (ImGui::DragFloat(U8("左の平場(m)"), &fl, 0.05f,
+								                     0.0f, RoadConst::ApronFlatMax))
+								{
+									road->SetFlatAt(sel, 0, fl);
+								}
+
+								float fr = road->GetFlatAt(sel, 1);
+								if (ImGui::DragFloat(U8("右の平場(m)"), &fr, 0.05f,
+								                     0.0f, RoadConst::ApronFlatMax))
+								{
+									road->SetFlatAt(sel, 1, fr);
+								}
+
+								// 片側だけ触ると左右がちぐはぐになりやすい。
+								// 揃えたいときのために一手で戻せるようにする
+								if (ImGui::Button(U8("左右を揃える")))
+								{
+									road->SetApronAt(sel, 1, wl);
+									road->SetFlatAt(sel, 1, fl);
+								}
+								ImGui::SetItemTooltip(U8("右を左に合わせる"));
+
+								ImGui::SetItemTooltip(U8(
+									"制御点の間はなめらかに繋がる。"
+									"向かいの裾と重なる所は、互いの真ん中で止まる"));
+							}
+							else
+							{
+								ImGui::TextDisabled(U8("点を選ぶと、その区間の裾の幅を変えられる"));
+							}
+						}
+
 						road->DrawEditImGui();
 					}
 
@@ -554,6 +727,53 @@ bool GameScene::IsFrozen() const
 }
 
 //----------------------------------------------------------
+// 走りながら使う小細工
+//
+// ■ 自由に飛ぶ
+// 道の編集で使っている自由カメラをそのまま借りる。
+// 別に作ると、操作の癖が2つになる。
+//
+// ■ 相手を透かす
+// 出す相手を毎フレーム入れ直す。
+// HjEsp が相手一覧の持ち方を知ると、通信の作りに縛られる
+//----------------------------------------------------------
+void GameScene::UpdateCheats()
+{
+	auto& ch = HjCheats::Instance();
+
+	//===== 車ごと飛ばす =====
+	// カメラだけ動かすと、車は元の場所に残る。
+	// 見に行った先で走り出せないし、多人数のときは
+	// 相手からは動いていないように見える。
+	//
+	// 道の編集中は触らない。あちらは車を置いたまま見て回るもの
+	if (auto car = m_wpCar.lock())
+	{
+		m_noClip.Update(*car, ch.IsFreeFly() && !m_roadEditing,
+		                KdFPSController::GetDt());
+	}
+
+		//===== 相手を透かす =====
+	if (auto esp = m_wpEsp.lock())
+	{
+		esp->Clear();
+
+		if (ch.IsEsp())
+		{
+			for (const auto& wp : m_wpRemoteCars)
+			{
+				if (!wp.expired()) { esp->Add(wp); }
+			}
+
+			// 追走のCPUも出す。相手には違いない
+			if (!m_wpCpuCar.expired()) { esp->Add(m_wpCpuCar); }
+
+			if (auto car = m_wpCar.lock()) { esp->SetEye(car->GetPos()); }
+		}
+	}
+}
+
+//----------------------------------------------------------
 // 道の制御点の編集
 //
 // 既にあるエディタ基盤へ登録するだけで、ギズモもUndoも乗る。
@@ -587,6 +807,7 @@ void GameScene::UpdateRoadEdit()
 	{
 		h->SetCamera(m_spEditCam);
 		h->SetRoad(m_spRoad.get(), &m_roadEditor);
+		h->SetBrush(&m_terrainBrush);
 		h->SetEnabled(true);
 	}
 
@@ -597,7 +818,26 @@ void GameScene::UpdateRoadEdit()
 	// 軸の反対側を掴むことになっていた
 	if (m_spTerrain)
 	{
-		m_roadEditor.Update(*m_spRoad, m_spTerrain->Field());
+		// 筆が動いている間は、点を掴む処理を止める。
+		// 両方が同じ左ボタンを見ているので、混ざると地面を彫りながら
+		// 制御点を動かすことになる
+		if (m_terrainBrush.IsEnabled())
+		{
+			m_terrainBrush.Update(m_spTerrain->WorkField(), *m_spTerrain, m_spRoad.get());
+
+			// 地形を彫ったら道も作り直す。
+			//
+			// 裾は地形に沿って溶けるので、彫る前の形のままだと
+			// 浮くか埋まる。柵の置き場所も地形の落ち方で決まる
+			if (m_terrainBrush.ConsumeTerrainChanged())
+			{
+				m_spRoad->Rebuild();
+			}
+		}
+		else
+		{
+			m_roadEditor.Update(*m_spRoad, m_spTerrain->Field());
+		}
 	}
 
 	// 地図に車の位置を出す。どこを走っているか分かる
@@ -620,6 +860,9 @@ void GameScene::UpdateRoadEdit()
 		Math::Vector3 mn, mx;
 		if (m_spRoad->GetDirtyArea(mn, mx)) { m_spTerrain->RebuildInArea(mn, mx); }
 		else                                { m_spTerrain->BuildChunks(); }
+
+		// 柵も置き直す。道が動けば、谷の位置も縁の高さも変わる
+		if (m_spRail) { m_spRail->Build(*m_spRoad, &m_spTerrain->Field()); }
 	}
 }
 
@@ -742,7 +985,12 @@ std::shared_ptr<RemoteCar> GameScene::EnsureRemoteCar(int playerId)
 
 	if (auto exist = m_wpRemoteCars[playerId].lock()) { return exist; }
 
-	auto car = std::make_shared<RemoteCar>(playerId);
+	// 相手が選んだ車種で作る。
+	// 決め打ちにすると、相手がNSXでもシルビアで出る
+	const int kindNo = HjNetSession::Instance().GetPeerCarKind(playerId);
+
+	auto car = std::make_shared<RemoteCar>(
+		playerId, static_cast<CarChoiceConst::Kind>(kindNo));
 	car->Init();
 	// 地形は登録しない。物理を回さないので接地も壁判定も使わない
 	AddObject(car);

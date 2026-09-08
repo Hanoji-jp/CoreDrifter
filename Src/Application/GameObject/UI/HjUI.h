@@ -71,6 +71,11 @@ namespace HjUI
 	void RectTL(float dx, float dy, float w, float h, const Math::Color& col, bool fill = true);
 	void FrameTL(float dx, float dy, float w, float h, float px, const Math::Color& col);   // 太さpx(screen)の枠
 	void LineD(float x1, float y1, float x2, float y2, float px, const Math::Color& col);
+	// 画像。デザイン座標の左上基準で、指定した枠いっぱいに引き伸ばす。
+	// レンダーターゲットに描いた3Dの絵をUIへ貼るのに使う
+	void TexRectTL(const KdTexture* tex, float dx, float dy, float w, float h,
+	               const Math::Color& col = kWhiteColor);
+
 	void DotField(float dx, float dy, float w, float h, const Math::Color& col);            // ハーフトーン点
 	void DotFieldTwinkle(float dx, float dy, float w, float h, const Math::Color& base, float phase);  // 明滅するドット
 	// 波打つドット・ディゾルブ(矩形を密なドットで埋め、各ドットのサイズが波で0↔最大に=溶ける)

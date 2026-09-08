@@ -1,4 +1,5 @@
 ﻿#include "HjModProfile.h"
+#include "../Util/HjSaveFile.h"
 
 #include <fstream>
 #include "json.hpp"
@@ -11,7 +12,7 @@ void HjModProfile::Load()
 	m_map.clear();
 	m_dirty = false;
 
-	std::ifstream ifs(ModConst::ProfilePath);
+	HjSaveIStream ifs("modprofiles");
 	if (!ifs) { return; }   // まだ無いのは異常ではない
 
 	// 壊れたファイルで落とさない。
@@ -47,7 +48,7 @@ void HjModProfile::Save() const
 		root[kv.first] = obj;
 	}
 
-	std::ofstream ofs(ModConst::ProfilePath);
+	HjSaveOStream ofs("modprofiles");
 	if (!ofs) { return; }
 
 	// 字下げして書く。手で開いて直せるほうが、

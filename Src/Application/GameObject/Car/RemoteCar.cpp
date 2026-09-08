@@ -4,7 +4,7 @@
 
 void RemoteCar::Init()
 {
-	Silvia::Init();
+	CarBase::Init();
 
 	// 音は鳴らさない。
 	// 他人の車ぶんまで自前で音を作ると、台数だけエンジンが増えて

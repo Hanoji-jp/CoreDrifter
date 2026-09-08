@@ -17,8 +17,15 @@ namespace ModConst
 	//===== 置き場所 =====
 	// Asset の下に置く。フレームワークが pak へまとめる経路も
 	// このパスを鍵に使うので、相対パスで統一する
-	constexpr const char* BodyDir  = "Asset/Mods/Body";
-	constexpr const char* WheelDir = "Asset/Mods/Wheel";
+	// exe と同じ場所の Mods/ に置く。Asset/ の下ではない。
+	//
+	// 配布ビルドは Asset/ を exe へ埋め込むので、
+	// Asset/Mods だけ実体のあるフォルダとして残ると
+	// 「アセットが素で置いてある」ように見えて紛らわしい。
+	//
+	// MOD は遊ぶ側が入れるものなので、外に出しておくほうが分かりやすい
+	constexpr const char* BodyDir  = "Mods/Body";
+	constexpr const char* WheelDir = "Mods/Wheel";
 
 	// 選んだものを覚えておくファイル。
 	// 車の調整とは別にする。あちらは数値だけを並べる作りで、

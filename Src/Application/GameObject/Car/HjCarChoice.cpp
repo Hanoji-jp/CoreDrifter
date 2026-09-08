@@ -1,4 +1,5 @@
 ﻿#include "HjCarChoice.h"
+#include "../../Util/HjSaveFile.h"
 
 #include "Silvia.h"
 #include "Nsx.h"
@@ -20,7 +21,7 @@ namespace
 
 void HjCarChoice::Load()
 {
-	std::ifstream ifs(CC::SavePath);
+	HjSaveIStream ifs("car");
 	if (!ifs) { return; }   // まだ無いのは異常ではない
 
 	std::string key;
@@ -33,7 +34,7 @@ void HjCarChoice::Load()
 
 void HjCarChoice::Save() const
 {
-	std::ofstream ofs(CC::SavePath);
+	HjSaveOStream ofs("car");
 	if (!ofs) { return; }
 
 	ofs << CC::SaveKey << " " << static_cast<int>(m_kind) << "\n";
@@ -71,4 +72,21 @@ std::shared_ptr<CarBase> HjCarChoice::Create(Kind k)
 	case CC::Kind::Count:  break;
 	}
 	return std::make_shared<Silvia>();
+}
+
+//----------------------------------------------------------
+// 既にある車へ、車種ごとの設定を当てる
+//
+// 相手の車は「作ってから車種が分かる」ので、
+// 作り方(Create)とは別に、当てるほうも要る
+//----------------------------------------------------------
+void HjCarChoice::ApplySpec(CarBase& car, Kind k)
+{
+	switch (k)
+	{
+	case CC::Kind::Nsx:    Nsx::Setup(car);    return;
+	case CC::Kind::Silvia: break;
+	case CC::Kind::Count:  break;
+	}
+	Silvia::Setup(car);
 }

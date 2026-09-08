@@ -1,4 +1,5 @@
 ﻿#include "CarBase.h"
+#include "../../Util/HjSaveFile.h"
 #include "../../Util/HjProfiler.h"
 #include "../../Util/HjPostFxSettings.h"
 #include "../../Audio/HjAudioSpace.h"
@@ -1647,6 +1648,68 @@ void CarBase::PreDraw()
 	SkidMark::Instance().BakePending();
 }
 
+//----------------------------------------------------------
+// 車体と4輪の行列を組む
+//
+// DrawLit と車庫の見せ札(HjCarPortrait)の両方から呼ぶ。
+// 見せ札側へ写すと、調整パネルでオフセットを触るたびに
+// 走行中の車と車庫の車で位置が食い違う
+//----------------------------------------------------------
+void CarBase::BuildPose(const Math::Matrix& carWorld,
+                        Math::Matrix& outBody, Math::Matrix outWheel[4]) const
+{
+	//===== 車体の行列(サスのロール/ピッチを反映。タイヤは接地したまま) =====
+	outBody =
+		Math::Matrix::CreateScale(m_bodyScale) *
+		Math::Matrix::CreateRotationY(m_bodyYaw) *
+		// 車体モデルだけをずらす。タイヤは接地したままにしたいので、
+		// 車ごと動かすことはしない
+		Math::Matrix::CreateTranslation(m_bodyOffset) *
+		Math::Matrix::CreateRotationX(m_pitchAngle) *  // ピッチ(前後の沈み込み)
+		Math::Matrix::CreateRotationZ(m_rollAngle) *   // ロール(左右の傾き)
+		carWorld;
+
+	//===== タイヤ4輪の行列を先に計算 =====
+	struct WheelDef { float x; float z; bool front; };
+	const WheelDef wheels[4] =
+	{
+		{ -m_track,  m_base, true  }, // 前左
+		{  m_track,  m_base, true  }, // 前右
+		{ -m_track, -m_base, false }, // 後左
+		{  m_track, -m_base, false }, // 後右
+	};
+	for (int i = 0; i < 4; ++i)
+	{
+		const WheelDef& w = wheels[i];
+		const bool leftSide = (w.x < 0.0f);
+		// 左側は同じモデルだと外向きの面が内を向くので、180度回して外向きにする
+		const Math::Matrix flip = leftSide ? Math::Matrix::CreateRotationY(3.14159265f) : Math::Matrix::Identity;
+		const Math::Matrix steerRot = w.front ? Math::Matrix::CreateRotationY(m_steer) : Math::Matrix::Identity;
+
+		// 全体 + 前輪/後輪 のオフセット
+		const float ox = m_offX + (w.front ? m_frontOffX : m_rearOffX);
+		const float oz = m_offZ + (w.front ? m_frontOffZ : m_rearOffZ);
+
+		// 転がり回転(車軸まわり)。モデルローカルで最初に適用。
+		// 左側は flip(Y180) で車軸の向きも反転するため、転がり角を反転して打ち消す
+		// (同一車軸のタイヤは左右とも同じ向きに回るのが正しい)。
+		float spin = w.front ? m_wheelSpinFront : m_wheelSpinRear;
+		if (leftSide) { spin = -spin; }
+		const Math::Matrix spinRot = Math::Matrix::CreateRotationX(spin);
+
+		outWheel[i] =
+			spinRot *
+			Math::Matrix::CreateScale(m_wheelScale) *
+			Math::Matrix::CreateRotationZ(m_camber) *   // キャンバー(flipより前=左右で自動ミラー)
+			flip *
+			Math::Matrix::CreateRotationY(m_wheelYaw) *
+			steerRot *
+			Math::Matrix::CreateTranslation(w.x + ox, m_wheelH, w.z + oz) *
+			carWorld;
+	}
+
+}
+
 void CarBase::DrawLit()
 {
 	auto& shader = KdShaderManager::Instance().m_StandardShader;
@@ -1669,56 +1732,9 @@ void CarBase::DrawLit()
 
 	const Math::Matrix carWorld = carRot * Math::Matrix::CreateTranslation(m_pos);
 
-	//===== 車体の行列(サスのロール/ピッチを反映。タイヤは接地したまま) =====
-	const Math::Matrix bodyW =
-		Math::Matrix::CreateScale(m_bodyScale) *
-		Math::Matrix::CreateRotationY(m_bodyYaw) *
-		// 車体モデルだけをずらす。タイヤは接地したままにしたいので、
-		// 車ごと動かすことはしない
-		Math::Matrix::CreateTranslation(m_bodyOffset) *
-		Math::Matrix::CreateRotationX(m_pitchAngle) *  // ピッチ(前後の沈み込み)
-		Math::Matrix::CreateRotationZ(m_rollAngle) *   // ロール(左右の傾き)
-		carWorld;
-
-	//===== タイヤ4輪の行列を先に計算 =====
-	struct WheelDef { float x; float z; bool front; };
-	const WheelDef wheels[4] =
-	{
-		{ -m_track,  m_base, true  }, // 前左
-		{  m_track,  m_base, true  }, // 前右
-		{ -m_track, -m_base, false }, // 後左
-		{  m_track, -m_base, false }, // 後右
-	};
+	Math::Matrix bodyW;
 	Math::Matrix wheelMat[4];
-	for (int i = 0; i < 4; ++i)
-	{
-		const WheelDef& w = wheels[i];
-		const bool leftSide = (w.x < 0.0f);
-		// 左側は同じモデルだと外向きの面が内を向くので、180度回して外向きにする
-		const Math::Matrix flip = leftSide ? Math::Matrix::CreateRotationY(3.14159265f) : Math::Matrix::Identity;
-		const Math::Matrix steerRot = w.front ? Math::Matrix::CreateRotationY(m_steer) : Math::Matrix::Identity;
-
-		// 全体 + 前輪/後輪 のオフセット
-		const float ox = m_offX + (w.front ? m_frontOffX : m_rearOffX);
-		const float oz = m_offZ + (w.front ? m_frontOffZ : m_rearOffZ);
-
-		// 転がり回転(車軸まわり)。モデルローカルで最初に適用。
-		// 左側は flip(Y180) で車軸の向きも反転するため、転がり角を反転して打ち消す
-		// (同一車軸のタイヤは左右とも同じ向きに回るのが正しい)。
-		float spin = w.front ? m_wheelSpinFront : m_wheelSpinRear;
-		if (leftSide) { spin = -spin; }
-		const Math::Matrix spinRot = Math::Matrix::CreateRotationX(spin);
-
-		wheelMat[i] =
-			spinRot *
-			Math::Matrix::CreateScale(m_wheelScale) *
-			Math::Matrix::CreateRotationZ(m_camber) *   // キャンバー(flipより前=左右で自動ミラー)
-			flip *
-			Math::Matrix::CreateRotationY(m_wheelYaw) *
-			steerRot *
-			Math::Matrix::CreateTranslation(w.x + ox, m_wheelH, w.z + oz) *
-			carWorld;
-	}
+	BuildPose(carWorld, bodyW, wheelMat);
 
 	//===== 本体(通常ライティング)。両面描画＝裏面も出す(Blender同様) =====
 	// CullNone(表裏カリング無効)を本体・4輪の描画の"間だけ"有効化し、直後に元へ戻す。
@@ -1814,7 +1830,7 @@ void CarBase::DrawModImGui()
 		cat.Rescan();
 	}
 	ImGui::SameLine();
-	ImGui::TextDisabled(U8("Asset/Mods/Body, /Wheel に置く"));
+	ImGui::TextDisabled(U8("Mods/Body, /Wheel に置く"));
 
 	if (cat.SkippedCount() > 0)
 	{
@@ -1835,9 +1851,15 @@ void CarBase::DrawModImGui()
 		const auto& list = cat.List(kind);
 
 		// いま選ばれているものを見出しに出す。
-		// 標準なら「標準」と書く。パスをそのまま出すと長くて読めない
+		//
+		// その車のモデルなら、そのモデル名を出す。
+		// 「標準」と呼び分けると、別物のように見える。
+		// シルビアの車体はシルビアのモデルというだけで、特別ではない
+		const std::string ownName = (kind == HjModCatalog::Kind::Body)
+			? GetOwnBodyName() : GetOwnWheelName();
+
 		const bool stock = (cur == ModConst::StockMark);
-		const char* now  = stock ? U8("標準")
+		const char* now  = stock ? ownName.c_str()
 		                         : (cat.IndexOf(kind, cur) >= 0
 		                            ? list[cat.IndexOf(kind, cur)].name.c_str()
 		                            : U8("(見つかりません)"));
@@ -1846,7 +1868,7 @@ void CarBase::DrawModImGui()
 
 		ImGui::PushID(label);
 
-		if (ImGui::Button(U8("標準へ戻す")))
+		if (ImGui::Button(U8("この車のモデルへ戻す")))
 		{
 			s_last = (this->*apply)(ModConst::StockMark);
 			SaveModChoice();
@@ -2136,6 +2158,22 @@ void CarBase::DrawTuningImGui()
 //----------------------------------------------------------
 // 調整値の保存 / 読込
 //----------------------------------------------------------
+//----------------------------------------------------------
+// 道から、拡張子なしのファイル名だけ取り出す
+//
+// MOD の候補と同じ形で並べるために使う
+//----------------------------------------------------------
+std::string CarBase::AssetName(const std::string& path)
+{
+	size_t begin = path.find_last_of("/\\");
+	begin = (begin == std::string::npos) ? 0 : (begin + 1);
+
+	const size_t dot = path.find_last_of('.');
+	const size_t end = (dot == std::string::npos || dot < begin) ? path.size() : dot;
+
+	return path.substr(begin, end - begin);
+}
+
 std::string CarBase::TuneFilePath() const
 {
 	return "Asset/Data/CarTune_" + m_saveKey + ".txt";
@@ -2284,7 +2322,7 @@ std::vector<CarBase::AppearanceParam> CarBase::AppearanceParamList()
 
 void CarBase::SaveModChoice() const
 {
-	std::ofstream ofs(ModFilePath());
+	HjSaveOStream ofs("mod/" + m_saveKey);
 	if (!ofs) { return; }
 
 	// 1行1項目。読み込み側が名前で拾うので、順番は問わない
@@ -2294,7 +2332,7 @@ void CarBase::SaveModChoice() const
 
 void CarBase::LoadModChoice()
 {
-	std::ifstream ifs(ModFilePath());
+	HjSaveIStream ifs("mod/" + m_saveKey, ModFilePath().c_str());
 	if (!ifs) { return; }
 
 	std::string key;
@@ -2311,14 +2349,14 @@ void CarBase::LoadModChoice()
 
 void CarBase::SaveTuning()
 {
-	std::ofstream ofs(TuneFilePath());
+	HjSaveOStream ofs("tune/" + m_saveKey);
 	if (!ofs) { return; }
 	for (const auto& p : TuneParamList()) { ofs << p.first << " " << *p.second << "\n"; }
 }
 
 void CarBase::LoadTuning()
 {
-	std::ifstream ifs(TuneFilePath());
+	HjSaveIStream ifs("tune/" + m_saveKey, TuneFilePath().c_str());
 	if (!ifs) { return; }
 	auto params = TuneParamList();
 	std::string key;
@@ -2327,4 +2365,153 @@ void CarBase::LoadTuning()
 	{
 		for (const auto& p : params) { if (key == p.first) { *p.second = val; break; } }
 	}
+}
+
+//----------------------------------------------------------
+// 車庫の見せ札として描く
+//
+// 走行中の DrawLit と分ける理由:
+//   ・ドリフトの塗り(SetTint)と輪郭は走っている時の演出で、
+//     止まっている絵に乗せると何も起きていないのに光って見える
+//   ・タイヤ痕・煙・当たり判定の線は絵に要らない
+//
+// 姿勢の値(ピッチ・ロール・切れ角・転がり)は、この車を
+// Update していないので既定のまま=直立・直進で組まれる
+//----------------------------------------------------------
+void CarBase::DrawPortrait(const Math::Matrix& world)
+{
+	auto& shader = KdShaderManager::Instance().m_StandardShader;
+
+	Math::Matrix bodyW;
+	Math::Matrix wheelMat[4];
+	BuildPose(world, bodyW, wheelMat);
+
+	// 裏面も出す。走行中と同じ扱いにしないと、
+	// 同じモデルなのに車庫でだけ穴が空いて見える
+	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);
+
+	shader.DrawModel(m_body, bodyW);
+	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m); }
+
+	KdShaderManager::Instance().UndoRasterizerState();
+
+	//===== アウトライン(走行中と同じ背面押し出し) =====
+	// これが無いと、車庫でだけ縁の無いのっぺりした絵になる。
+	// 走っている時と同じ描き味で見せないと、選んだ車の印象が変わる。
+	//
+	// ブースト中の発光は入れない。止まった絵で縁が光ると、
+	// 何も起きていないのに何か起きているように見える
+	if (m_outlineEnabled)
+	{
+		shader.BeginOutline();
+
+		auto drawAll = [&](float width, const Math::Color& col)
+		{
+			shader.SetOutlineWidth(width);
+			shader.DrawModel(m_body, bodyW, col);
+			for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, col); }
+		};
+
+		const Math::Color oc(m_outlineColor.x, m_outlineColor.y, m_outlineColor.z, 1.0f);
+
+		if (CarConst::OutlineTwoLayer)
+		{
+			// 外側(色)を先。後に描いたほうが上に乗るので、
+			// 内側の黒が色の内周を上書きして二層に見える
+			drawAll(m_outlineWidth * CarConst::OutlineOuterMul, oc);
+
+			const Math::Color inner(CarConst::OutlineInnerR,
+			                        CarConst::OutlineInnerG,
+			                        CarConst::OutlineInnerB, 1.0f);
+			drawAll(m_outlineWidth, inner);
+		}
+		else
+		{
+			drawAll(m_outlineWidth, oc);
+		}
+
+		shader.EndOutline();
+	}
+}
+
+//----------------------------------------------------------
+// 見せ札のためにモデルだけ読む
+//
+// Init() は音・タイヤ痕の確保・当たり判定の線まで用意する。
+// 絵を出すだけの車にそれをやらせると、走ってもいない車が
+// 共有のタイヤ痕マップの枠を食う
+//----------------------------------------------------------
+void CarBase::LoadPreviewModels()
+{
+	// 順番は Init() と同じにする。
+	//
+	// 先に標準を読み、その上へ差し替えを載せる。
+	// 逆にすると、差し替えのモデルを HjModLoader ではなく
+	// 素の読み込みに通すことになる(MODはAsset/の外にあるので壊れる)
+	m_body.SetModelData(m_bodyPath);
+	m_wheel.SetModelData(m_wheelPath);
+
+	// 保存済みの調整値を読む。
+	//
+	// 車体スケールもタイヤ位置もここに入っている。
+	// 読まないと、走行中の車と車庫の車で大きさも佇まいも別物になる
+	LoadTuning();
+
+	// 車庫で選んだ車と、走り出した車の見た目が違うと選んだ意味がない
+	if (m_useModChoice) { LoadModChoice(); }
+}
+
+//----------------------------------------------------------
+// 車体が占める大きさを測る
+//
+// 車ごとにモデルの単位も m_bodyScale もばらばらなので、
+// カメラの距離を決め打ちにすると、車を替えるたびに
+// 画面に映る大きさが変わる。
+// 実際に読んだモデルから測って、カメラ側で合わせる
+//----------------------------------------------------------
+bool CarBase::GetBodyBounds(Math::Vector3& outCenter, float& outRadius) const
+{
+	const auto data = m_body.GetData();
+	if (!data) { return false; }
+
+	bool any = false;
+	Math::Vector3 lo, hi;
+
+	for (const auto& node : data->GetOriginalNodes())
+	{
+		if (!node.m_spMesh) { continue; }
+
+		const auto& box = node.m_spMesh->GetBoundingBox();
+
+		// 箱の8隅を全部ノードの行列に通す。
+		//
+		// 中心だけ運んで辺の長さをそのまま使うと、ノード側に縮尺が
+		// 入っているモデル(書き出し時にcm単位のまま親で縮めたもの等)で
+		// 大きさを取り違える。縮小されているモデルほど過大に見積もり、
+		// カメラがその分だけ遠のいて豆粒になる
+		for (int k = 0; k < 8; ++k)
+		{
+			const Math::Vector3 corner = {
+				box.Center.x + ((k & 1) ? box.Extents.x : -box.Extents.x),
+				box.Center.y + ((k & 2) ? box.Extents.y : -box.Extents.y),
+				box.Center.z + ((k & 4) ? box.Extents.z : -box.Extents.z),
+			};
+
+			const Math::Vector3 w = Math::Vector3::Transform(corner, node.m_worldTransform);
+
+			if (!any) { lo = w; hi = w; any = true; }
+			else
+			{
+				lo = Math::Vector3::Min(lo, w);
+				hi = Math::Vector3::Max(hi, w);
+			}
+		}
+	}
+
+	if (!any) { return false; }
+
+	// 描くときと同じ拡大と位置ずらしを掛ける
+	outCenter = (lo + hi) * 0.5f * m_bodyScale + m_bodyOffset;
+	outRadius = ((hi - lo) * 0.5f * m_bodyScale).Length();
+	return true;
 }

@@ -361,3 +361,15 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ビルドで出来るアセット書庫。
+#
+# Distribute ビルドの PreBuild(tools/pack_assets.ps1)が作って、
+# exe へ埋め込まれる中間物。Asset/ から作り直せるので持たない。
+# 77MB あるので、入れると履歴が一気に重くなる
+assets.pak
+
+# リリース作業の一時物
+tools/_release_stage/
+tools/release_notes_tmp.md
+tools/*.zip

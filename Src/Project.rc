@@ -1,0 +1,15 @@
+#include "resource.h"
+
+// Distribute ビルドのときだけ、全アセットをまとめた assets.pak を埋め込む。
+// (PreBuildEvent の tools/pack_assets.ps1 が作る)
+//
+// ■ なぜ埋め込むか
+// フォルダで配ると、モデルも音も持っていかれる。
+// 借りているものもあるので、そのまま置いておけない。
+//
+// ■ 開発ビルドでは入れない
+// 入れると、ビルドのたびに数百MBの pak を作って埋め込むことになり、
+// 一回のビルドが待てなくなる。開発中は Asset/ をそのまま読む。
+#ifdef DISTRIBUTE_BUILD
+IDR_ASSETS_PAK RCDATA "..\\assets.pak"
+#endif

@@ -1,4 +1,5 @@
 ﻿#include "HjAudioSettings.h"
+#include "../Util/HjSaveFile.h"
 
 namespace
 {
@@ -17,7 +18,7 @@ std::vector<std::pair<const char*, float*>> HjAudioSettings::ParamList()
 
 void HjAudioSettings::Load()
 {
-	std::ifstream ifs(SettingsPath);
+	HjSaveIStream ifs("audio");
 	if (!ifs) { return; }   // 無ければ既定値のまま
 
 	auto params = ParamList();
@@ -38,7 +39,7 @@ void HjAudioSettings::Save() const
 	// ParamList は値の場所を返す都合で非constにしてある
 	auto params = const_cast<HjAudioSettings*>(this)->ParamList();
 
-	std::ofstream ofs(SettingsPath);
+	HjSaveOStream ofs("audio");
 	if (!ofs) { return; }
 	for (const auto& p : params) { ofs << p.first << " " << *p.second << "\n"; }
 }

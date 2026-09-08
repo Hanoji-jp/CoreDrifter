@@ -64,6 +64,26 @@ public:
 	// 点を動かすたびに道のりを測り直す
 
 	int  PointCount() const { return static_cast<int>(m_points.size()); }
+
+	//===== 制御点ごとの裾の幅 =====
+	// 区間ごとに裾を伸ばしたいので、制御点に持たせる。
+	//
+	// 道のりの範囲で持つやり方もあるが、制御点を動かすと
+	// 全長が変わって、指定した範囲がずれていく。
+	// 制御点に持たせれば、点と一緒に動く
+	// side は 0 が左、1 が右。進む向きに対しての左右
+	float ApronAt(int index, int side) const;
+	void  SetApronAt(int index, int side, float w);
+
+	// 道のりから引く。制御点の間はなめらかに繋ぐ
+	float ApronAtS(float s, int side) const;
+
+	//===== 制御点ごとの平場の幅 =====
+	// 路肩の外に、道と平行に伸ばす幅。
+	// 裾と同じく区間ごとに変えたいので、制御点に持たせる
+	float FlatAt(int index, int side) const;
+	void  SetFlatAt(int index, int side, float w);
+	float FlatAtS(float s, int side) const;
 	bool MovePoint(int index, const Math::Vector3& pos);
 
 	// 制御点の高さは「持ち上げ」として使う。
@@ -80,6 +100,14 @@ public:
 	float StationOfPoint(int i) const;
 
 	float LiftAt(float s) const;
+
+	// その場の曲がりの強さ。近い3点の外接円から出す。
+	//
+	// CurvatureAt は前後2mを平均するので、ヘアピンの入口では
+	// 直線と曲線が混ざって実際より緩く出る。道を組むには
+	// 平均のほうが値が暴れなくてよいが、
+	// 「ここは急すぎる」と知らせるには本当の値が要る
+	float LocalCurvatureAt(float s) const;
 
 	// 曲がりの強さ(1メートルあたりのラジアン)。半径の逆数。
 	//
@@ -115,6 +143,18 @@ private:
 	void ToSegment(float s, int& outSeg, float& outT) const;
 
 	std::vector<Math::Vector3> m_points;
+
+	// 制御点ごとの裾の幅(m)。m_points と同じ数だけ持つ。
+	//
+	// 点を足す・消すたびに数を合わせる必要があるので、
+	// 触る所は SyncApron を通す
+	std::vector<float> m_apron[2];
+
+	// 制御点ごとの平場の幅(m)。同じく左が0、右が1
+	std::vector<float> m_flat[2];
+
+	// 裾の幅の数を、制御点の数へ合わせる
+	void SyncApron();
 
 	// 区間ごとの、始点までの累積距離
 	std::vector<float> m_accum;

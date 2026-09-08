@@ -14,6 +14,7 @@ public :
 		Settings,
 		Elements,
 		PlayMode,
+		Garage,      // 乗る車を選ぶ
 		Room,      // マルチプレイのルーム
 		Lobby,       // 部屋の一覧
 		Matchmaking, // 相手を探している

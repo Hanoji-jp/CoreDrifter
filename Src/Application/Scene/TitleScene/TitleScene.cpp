@@ -4,11 +4,18 @@
 #include "../HjTransition.h"
 #include "../../GameObject/UI/TitleMenuUI.h"
 #include "../../GameObject/UI/HjUpdateNotice.h"
+#include "../../Updater/HjUpdater.h"
 #include "../../GameObject/Stage/TitleShowcase.h"
 #include "../../Const/ShowcaseConst.h"
 
 void TitleScene::Event()
 {
+	// 更新を自動で進める。
+	//
+	// タイトルからだけ呼ぶ。入れ替えるとゲームは閉じるので、
+	// 走っている最中にやられたらたまったものではない
+	HjUpdater::Instance().AutoStep(KdFPSController::GetDt());
+
 	// ELEMENTS(UIキット)確認用：F5 でいつでも開ける(デバッグ)
 	if (HjKeyInput::Instance().Pressed(VK_F5))
 	{
@@ -37,9 +44,10 @@ void TitleScene::Event()
 		case 0: // PLAY：PLAYバーが伸びて次レイアウトへ変形するモーフ遷移
 			HjTransition::Instance().GoMorph(SceneManager::SceneType::PlayMode, 54.0f, 380.0f, 400.0f, 51.0f);
 			break;
+		case 1: HjTransition::Instance().Go(SceneManager::SceneType::Garage);   break;  // GARAGE
 		case 2: HjTransition::Instance().Go(SceneManager::SceneType::Settings); break;  // SETTINGS
 		case 4: PostQuitMessage(0);                                             break;  // QUIT
-		default: HjTransition::Instance().Go(SceneManager::SceneType::Game);    break;  // GARAGE/STATS(未実装)→暫定Game
+		default: HjTransition::Instance().Go(SceneManager::SceneType::Game);    break;  // STATS(未実装)→暫定Game
 		}
 	}
 }

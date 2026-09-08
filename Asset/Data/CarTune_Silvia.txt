@@ -67,9 +67,9 @@ lsdLock 12
 bumpLoadGain 0.12
 handbrakeCounterMul 0.8
 outlineWidth 0.016
-outlineColR 0.0996563
-outlineColG 0.80508
-outlineColB 1
+outlineColR 1
+outlineColG 0
+outlineColB 0
 smokeColR 0
 smokeColG 0.659794
 smokeColB 1

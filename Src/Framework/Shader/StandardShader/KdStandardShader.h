@@ -125,6 +125,29 @@ public:
 		float			MarkPad0 = 0.0f;
 		float			MarkPad1 = 0.0f;
 		float			MarkPad2 = 0.0f;
+
+		//===== 地形の塗り分け(オートマテリアル) =====
+		// 岩・土・草・舗装の4層を、頂点色の重みで混ぜる。
+		//
+		// 画像を貼らずワールド座標のノイズで作る。
+		// 貼ると、数キロ四方の地形では必ずタイリングの継ぎ目が出るうえ、
+		// 借りものの権利を1枚ずつ確かめて回ることになる
+		float			SplatEnable    = 0.0f;
+		float			SplatGrain     = 0.06f;  // 細かい粒の振れ幅
+		float			SplatGrainFreq = 2.5f;   // 粒の細かさ(1/m)
+		float			SplatMacroFreq = 0.035f; // 大きな色ムラの細かさ(1/m)
+
+		Math::Vector3	SplatRockCol  = { 0.42f, 0.41f, 0.39f };
+		float			SplatRockRough = 0.95f;
+
+		Math::Vector3	SplatDirtCol  = { 0.40f, 0.32f, 0.23f };
+		float			SplatDirtRough = 0.90f;
+
+		Math::Vector3	SplatGrassCol = { 0.24f, 0.34f, 0.17f };
+		float			SplatGrassRough = 0.85f;
+
+		Math::Vector3	SplatRoadCol  = { 0.16f, 0.16f, 0.17f };
+		float			SplatRoadRough = 0.55f;
 	};
 
 	// 定数バッファ(メッシュ単位更新)
@@ -191,6 +214,62 @@ public:
 		cb.MarkMapOriginZ = originZ;
 		cb.MarkMapInvSize = (size > 1e-4f) ? (1.0f / size) : 0.0f;
 		cb.MarkMapDarken  = darken;
+		m_dirtyCBObj = true;
+	}
+
+	//===== 地形の塗り分け =====
+	// 頂点色を「色」ではなく「4層の重み」として読ませる。
+	//
+	// 重みはCPUで出す。傾きも道からの距離も、当たり判定を持っている
+	// 側にしかない情報なので、シェーダーで作り直すと
+	// 見えている塗り分けと走れる場所がずれる
+	void SetSplatEnable(bool on)
+	{
+		auto& cb = m_cb0_Obj.Work();
+		cb.SplatEnable = on ? 1.0f : 0.0f;
+		m_dirtyCBObj = true;
+	}
+
+	// オブジェクト単位の定数をGPUへ送り、既定へ戻す。
+	//
+	// ■ なぜ要るか
+	// DrawModel はこれを描画の前後で自動でやるが、DrawMesh はやらない。
+	// メッシュを直接描くもの(地形・道)は、設定しただけでは何も届かず、
+	// 次に DrawModel を呼んだ誰か(車)にまとめて届いてしまう。
+	//
+	// 描く前に Push、描き終わったら Pop を呼ぶ
+	void PushCBObject()
+	{
+		m_cb0_Obj.Write();
+		m_dirtyCBObj = false;
+	}
+
+	void PopCBObject()
+	{
+		ResetCBObject();
+	}
+
+	void SetSplatLook(float grain, float grainFreq, float macroFreq)
+	{
+		auto& cb = m_cb0_Obj.Work();
+		cb.SplatGrain     = grain;
+		cb.SplatGrainFreq = grainFreq;
+		cb.SplatMacroFreq = macroFreq;
+		m_dirtyCBObj = true;
+	}
+
+	// 層ごとの色と粗さ。index 0=岩 1=土 2=草 3=舗装
+	void SetSplatLayer(int index, const Math::Vector3& color, float roughness)
+	{
+		auto& cb = m_cb0_Obj.Work();
+		switch (index)
+		{
+		case 0: cb.SplatRockCol  = color; cb.SplatRockRough  = roughness; break;
+		case 1: cb.SplatDirtCol  = color; cb.SplatDirtRough  = roughness; break;
+		case 2: cb.SplatGrassCol = color; cb.SplatGrassRough = roughness; break;
+		case 3: cb.SplatRoadCol  = color; cb.SplatRoadRough  = roughness; break;
+		default: return;
+		}
 		m_dirtyCBObj = true;
 	}
 

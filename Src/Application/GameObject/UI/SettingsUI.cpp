@@ -1,4 +1,5 @@
 ﻿#include "SettingsUI.h"
+#include "../../Const/CreditsConst.h"
 #include "../../Input/HjKeyInput.h"
 #include "../../Audio/HjAudioSettings.h"
 #include "../../Audio/HjAudioSpace.h"
@@ -37,6 +38,13 @@ namespace
 	// タブの番号。並び順を変えたときに追いやすいよう名前を付ける
 	const int   kTabAudio = 3;
 
+	// 借りているものの出典を出すタブ。
+	//
+	// license.txt を同梱するだけでは足りない。
+	// CC-BY は「共有する場所に作者を書く」ことが条件なので、
+	// 遊ぶ側が見られる所に無いと、そもそも使う権利が無い
+	const int   kTabOther = 5;
+
 	// 音量を1回で動かす量。細かすぎると合わせるのが面倒で、
 	// 粗すぎると好みの位置に止まらない
 	const float kVolStep = 0.05f;
@@ -49,6 +57,9 @@ namespace
 int SettingsUI::RowCount() const
 {
 	if (m_tab == kTabAudio) { return kAudioRowCount; }
+
+	// 出典は選ぶものではないので、行は持たない
+	if (m_tab == kTabOther) { return 0; }
 	return kRowCount;
 }
 
@@ -255,6 +266,30 @@ void SettingsUI::DrawSprite()
 			U::RectTL(kTabX - 14.0f, rowY - 6.0f, w, 38.0f, ACID, true);
 		}
 		U::Text(FontTab, kTabX, rowY, 20.0f, kTabs[i], active ? INK : MUTE);
+	}
+
+	//===== 出典 =====
+	// 選ぶものではないので、行ではなく文章として出す
+	if (m_tab == kTabOther)
+	{
+		U::FrameTL(kPanelX, kPanelY, kPanelW, kRowH * 6.0f, 2.0f, INK);
+
+		float y = kPanelY + 22.0f;
+
+		U::Text(FontRow, kPanelX + 24.0f, y, 18.0f, CreditsConst::Heading, INK);
+		y += 34.0f;
+
+		for (int i = 0; i < CreditsConst::Count; ++i)
+		{
+			const auto& e = CreditsConst::Items[i];
+
+			U::Text(FontRow, kPanelX + 24.0f, y, 15.0f, e.title,   INK);  y += 22.0f;
+			U::Text(FontRow, kPanelX + 40.0f, y, 13.0f, e.author,  MUTE); y += 19.0f;
+			U::Text(FontRow, kPanelX + 40.0f, y, 13.0f, e.license, MUTE); y += 19.0f;
+			U::Text(FontRow, kPanelX + 40.0f, y, 12.0f, e.source,  MUTE); y += 26.0f;
+		}
+
+		return;
 	}
 
 	// 右パネル(枠＋行罫線)

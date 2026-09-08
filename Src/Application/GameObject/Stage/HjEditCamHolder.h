@@ -1,9 +1,11 @@
 ﻿#pragma once
 
 #include "../Camera/HjEditorCamera.h"
+#include "HjTerrainBrush.h"
 
 class HjRoad;
 class HjRoadEditor;
+class HjTerrainBrush;
 
 //==========================================================
 // HjEditCamHolder
@@ -38,6 +40,13 @@ public:
 			if (!m_pDebugWire) { m_pDebugWire = std::make_unique<KdDebugWireFrame>(); }
 			m_pEditor->PushMarker(*m_pRoad, *m_pDebugWire);
 		}
+
+		// 筆の輪。どこをどれだけ触るのかが見えないと狙って彫れない
+		if (m_pBrush)
+		{
+			if (!m_pDebugWire) { m_pDebugWire = std::make_unique<KdDebugWireFrame>(); }
+			m_pBrush->PushRing(*m_pDebugWire);
+		}
 	}
 
 	void SetCamera(const std::shared_ptr<HjEditorCamera>& cam) { m_spCam = cam; }
@@ -49,6 +58,9 @@ public:
 		m_pRoad   = road;
 		m_pEditor = editor;
 	}
+
+	// 筆の輪を出す対象。持ち主は場面なので借りるだけ
+	void SetBrush(const HjTerrainBrush* brush) { m_pBrush = brush; }
 
 	// 止めている間も動くと名乗る。
 	// でないと、編集中に画面が止まったままになる
@@ -62,7 +74,8 @@ private:
 	std::shared_ptr<HjEditorCamera> m_spCam;
 
 	const HjRoad*       m_pRoad   = nullptr;
-	const HjRoadEditor* m_pEditor = nullptr;
+	const HjRoadEditor*   m_pEditor = nullptr;
+	const HjTerrainBrush* m_pBrush  = nullptr;
 
 	bool m_enabled = false;
 };

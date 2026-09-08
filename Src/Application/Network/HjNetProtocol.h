@@ -54,6 +54,13 @@ struct HjNetJoinPacket
 	unsigned char smokeHiR = 0, smokeHiG = 0, smokeHiB = 0;
 	// 煙のグラデが色Bになりきる距離。0〜255 を 0〜32m として使う
 	unsigned char smokeGradDist = 0;
+	// 乗っている車種(CarChoiceConst::Kind の番号)。
+	//
+	// 走行中に変わるものではないので、毎秒20回の状態パケットには入れず、
+	// 参加のときに1回だけ送る。
+	// 送らないと、相手がNSXでもこちら側ではシルビアで出る
+	unsigned char carKind = 0;
+
 	char          name[NetConst::MaxNameLen + 1] = {};
 };
 
@@ -83,7 +90,9 @@ struct HjNetPeerEntry
 	unsigned char smokeHiR = 0, smokeHiG = 0, smokeHiB = 0;
 	// 煙のグラデが色Bになりきる距離。0〜255 を 0〜32m として使う
 	unsigned char smokeGradDist = 0;
-	unsigned char  pad2 = 0;
+	// 乗っている車種(CarChoiceConst::Kind の番号)。
+	// 隙間を埋めていたバイトをそのまま使うので、大きさは変わらない
+	unsigned char  carKind = 0;
 
 	char           name[NetConst::MaxNameLen + 1] = {};
 };

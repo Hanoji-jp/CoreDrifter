@@ -15,21 +15,40 @@ namespace UpdaterConst
 {
 	//===== どこを見るか =====
 	// リリースを置いてあるリポジトリ。
-	// ソースとリリースを分けたくなったら、ここだけ変える
+	//
+	// ソースの置き場(git のリモート)とは別。
+	//   バージョン管理 … Hanoji-jp/CoreDrifter
+	//   リリース       … Hanoji-jp/DRIFT-PROJECT
+	//
+	// アップデータは releases/latest を見るだけなので、
+	// git のリモートが何であっても関係ない。
+	// 混同して「push 先を変えなきゃ」とならないよう書いておく
 	constexpr const char* Owner = "Hanoji-jp";
-	constexpr const char* Repo  = "CoreDrifter";
+	constexpr const char* Repo  = "DRIFT-PROJECT";
 
 	constexpr const char* ApiHost = "api.github.com";
 
 	// GitHub API は User-Agent が無いと弾く。
 	// 何が繋いできたのか分かる名前にしておく
-	constexpr const char* UserAgent = "CoreDrifterUpdater/1.0";
+	constexpr const char* UserAgent = "DriftProjectUpdater/1.0";
 
 	//===== 手元の版 =====
 	// exe と同じ場所に置く。中身は "v1.0.0" の1行。
 	// 無ければ v0.0.0 扱いにして、必ず更新がある状態にする
 	constexpr const char* VersionFile = "version.txt";
 	constexpr const char* UnknownVersion = "v0.0.0";
+
+	//===== 自動で進めるか =====
+	// 切っていると、確認まではするが、落とすのも当てるのも手で押すことになる。
+	// 更新に気づいても押さないまま走り続けるので、結局古いままになる。
+	//
+	// 入れると、新しいものがあれば裏で落として、
+	// 支度ができた所で入れ替えて開き直す。
+	constexpr bool AutoEnabled = true;
+
+	// 入れ替える前に、知らせを見せておく秒数。
+	// いきなり閉じると、何が起きたのか分からない
+	constexpr float ApplyDelay = 4.0f;
 
 	//===== 受け取り =====
 	// 落とす先。展開したら消す

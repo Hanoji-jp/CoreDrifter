@@ -37,6 +37,7 @@ enum class KdRasterizerState
 	CullNone,		// 描画省略なし
 	CullFront,		// 表面描画省略
 	CullBack,		// 裏面描画省略
+	WireFrame,		// 線だけ描画(面の張り方を目で確かめる用)
 	Max
 };
 

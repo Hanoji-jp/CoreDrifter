@@ -799,6 +799,30 @@ std::shared_ptr<KdGLTFModel> KdLoadGLTFModel(std::string_view path)
 		// 全チャンネル
 		for (const auto& channel : srcAni.channels)
 		{
+			// アニメーションが、このモデルに無いノードを指していることがある。
+			//
+			// 別のモデルから一部を切り出して作った glTF に、元の
+			// アニメーションがそのまま残っている場合など
+			// (例: 89ノードの車体から8ノードのホイールを切り出したのに、
+			//  チャンネルが75番を指したまま)。
+			//
+			// 素通しすると tempNodes の範囲外を参照する。
+			// 参照した先のゴミが nullptr でなければ「初回」と見なされず、
+			// そのまま push_back してデタラメな番地へ書き込んで落ちる。
+			//
+			// MODは遊ぶ側が持ち込むので、ここで弾けないとゲームごと落ちる。
+			// 動かないアニメーションは捨てて、モデルは表示する
+			if (channel.sampler < 0 ||
+				channel.sampler >= static_cast<int>(srcAni.samplers.size()))
+			{
+				continue;
+			}
+			if (channel.target_node < 0 ||
+				channel.target_node >= static_cast<int>(tempNodes.size()))
+			{
+				continue;
+			}
+
 			const auto& sampler = srcAni.samplers[channel.sampler];
 
 			// 対象ノードのIndex

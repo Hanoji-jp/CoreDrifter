@@ -16,16 +16,19 @@ namespace
 void HjRoadSpline::SetPoints(const std::vector<Math::Vector3>& points)
 {
 	m_points = points;
+	SyncApron();
 	BuildLengthTable();
 }
 
 //----------------------------------------------------------
 bool HjRoadSpline::LoadFromFile(const std::string& path)
 {
-	std::ifstream ifs(path);
+	KdAssetIStream ifs(path);
 	if (!ifs) { return false; }
 
 	std::vector<Math::Vector3> pts;
+	std::vector<float> apronL, apronR;
+	std::vector<float> flatL, flatR;
 	std::string line;
 
 	while (std::getline(ifs, line))
@@ -38,12 +41,43 @@ bool HjRoadSpline::LoadFromFile(const std::string& path)
 		float x = 0.0f, y = 0.0f, z = 0.0f;
 		if (!(ss >> x >> y >> z)) { continue; }
 
+		// 4つめ以降があれば、左右それぞれの裾と平場の幅。
+		// 片方だけなら両側に使う。無い行は既定にする。
+		//
+		// ※ C++11 以降、>> は失敗すると値に 0 を書く。
+		//   既定値を入れておいても上書きされるので、
+		//   成功したときだけ受け取る
+		auto Next = [&ss](float& out) -> bool
+		{
+			float v = 0.0f;
+			if (!(ss >> v)) { return false; }
+			out = v;
+			return true;
+		};
+
+		float wl = RC::ApronWidth;
+		float wr = RC::ApronWidth;
+		if (Next(wl)) { wr = wl; Next(wr); }
+
+		float fl = RC::ApronFlat;
+		float fr = RC::ApronFlat;
+		if (Next(fl)) { fr = fl; Next(fr); }
+
 		pts.push_back(Math::Vector3(x, y, z));
+		apronL.push_back(wl);
+		apronR.push_back(wr);
+		flatL.push_back(fl);
+		flatR.push_back(fr);
 	}
 
 	if (static_cast<int>(pts.size()) < RC::MinPoints) { return false; }
 
 	SetPoints(pts);
+	m_apron[0] = apronL;
+	m_apron[1] = apronR;
+	m_flat[0] = flatL;
+	m_flat[1] = flatR;
+	SyncApron();
 	return true;
 }
 
@@ -321,6 +355,13 @@ bool HjRoadSpline::InsertAfter(int index)
 	const Math::Vector3 mid = (m_points[index] + m_points[next]) * 0.5f;
 
 	m_points.insert(m_points.begin() + index + 1, mid);
+
+	// 裾の幅も同じ所へ入れる。入れないと以降の点の幅が1つずつずれる
+	SyncApron();
+	m_apron[0].insert(m_apron[0].begin() + index + 1, ApronAt(index, 0));
+	m_apron[1].insert(m_apron[1].begin() + index + 1, ApronAt(index, 1));
+	m_flat[0].insert(m_flat[0].begin() + index + 1, FlatAt(index, 0));
+	m_flat[1].insert(m_flat[1].begin() + index + 1, FlatAt(index, 1));
 	BuildLengthTable();
 	return true;
 }
@@ -335,6 +376,19 @@ bool HjRoadSpline::ErasePoint(int index)
 	if (index < 0 || index >= n) { return false; }
 
 	m_points.erase(m_points.begin() + index);
+
+	SyncApron();
+	for (int side = 0; side < 2; ++side)
+	{
+		if (index < static_cast<int>(m_apron[side].size()))
+		{
+			m_apron[side].erase(m_apron[side].begin() + index);
+		}
+		if (index < static_cast<int>(m_flat[side].size()))
+		{
+			m_flat[side].erase(m_flat[side].begin() + index);
+		}
+	}
 	BuildLengthTable();
 	return true;
 }
@@ -344,12 +398,17 @@ bool HjRoadSpline::SaveToFile(const std::string& path) const
 	std::ofstream ofs(path);
 	if (!ofs) { return false; }
 
-	ofs << "# 道の制御点。1行に x y z\n";
+	ofs << "# 道の制御点。1行に x y z 左の裾 右の裾 左の平場 右の平場\n";
 	ofs << "# 高さを書いておくと、その高さが道になる(地形がそれに合わせて削れる)\n";
+	ofs << "# 裾の幅は省ける。1つだけなら両側に使う\n";
 
-	for (const auto& p : m_points)
+	for (size_t i = 0; i < m_points.size(); ++i)
 	{
-		ofs << p.x << " " << p.y << " " << p.z << "\n";
+		const Math::Vector3& p = m_points[i];
+		const int k = static_cast<int>(i);
+		ofs << p.x << " " << p.y << " " << p.z << " "
+		    << ApronAt(k, 0) << " " << ApronAt(k, 1) << " "
+		    << FlatAt(k, 0)  << " " << FlatAt(k, 1)  << "\n";
 	}
 	return true;
 }
@@ -383,6 +442,7 @@ float HjRoadSpline::LiftAt(float s) const
 void HjRoadSpline::AppendPoint(const Math::Vector3& pos)
 {
 	m_points.push_back(pos);
+	SyncApron();
 	BuildLengthTable();
 }
 
@@ -425,4 +485,157 @@ float HjRoadSpline::StationOfPoint(int i) const
 {
 	if (m_accum.empty()) { return 0.0f; }
 	return m_accum[std::clamp(i, 0, static_cast<int>(m_accum.size()) - 1)];
+}
+
+//----------------------------------------------------------
+// その場の曲がりの強さ
+//
+// CurvatureAt は前後2mの平均なので、ヘアピンの入口では
+// 直線と曲線が混ざって実際より緩く出る。
+// 実測では、本当の最小半径2.6mを5.6mと見ていた。
+//
+// こちらは近い3点の外接円から出すので、平均で薄まらない。
+// 道を組むのに使うと値が地点ごとに暴れて幅がガタつくので、
+// 「ここは急すぎる」と知らせるためだけに使う
+//----------------------------------------------------------
+float HjRoadSpline::LocalCurvatureAt(float s) const
+{
+	if (!IsValid()) { return 0.0f; }
+
+	const float d = 0.4f;
+
+	const Math::Vector3 a = PositionAt(std::max(s - d, 0.0f));
+	const Math::Vector3 b = PositionAt(s);
+	const Math::Vector3 cc = PositionAt(std::min(s + d, m_total));
+
+	// 真上から見た三角形。高さは見ない
+	const float ab = sqrtf((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+	const float bc = sqrtf((cc.x - b.x) * (cc.x - b.x) + (cc.z - b.z) * (cc.z - b.z));
+	const float ca = sqrtf((cc.x - a.x) * (cc.x - a.x) + (cc.z - a.z) * (cc.z - a.z));
+
+	// 外接円の半径は (辺の積) / (4 * 面積)
+	const float area = fabsf((b.x - a.x) * (cc.z - a.z) - (b.z - a.z) * (cc.x - a.x)) * 0.5f;
+
+	if (area < 1e-6f || ab * bc * ca < 1e-9f) { return 0.0f; }
+
+	return 4.0f * area / (ab * bc * ca);
+}
+
+//----------------------------------------------------------
+// 裾の幅の数を、制御点の数へ合わせる
+//
+// 点を足す・消すたびに呼ぶ。合わせないと、
+// 以降の点の幅が1つずつずれる
+//----------------------------------------------------------
+// 裾の幅の数を、制御点の数へ合わせる
+//
+// 点を足す・消すたびに呼ぶ。合わせないと、
+// 以降の点の幅が1つずつずれる
+//----------------------------------------------------------
+void HjRoadSpline::SyncApron()
+{
+	m_apron[0].resize(m_points.size(), RC::ApronWidth);
+	m_apron[1].resize(m_points.size(), RC::ApronWidth);
+	m_flat[0].resize(m_points.size(), RC::ApronFlat);
+	m_flat[1].resize(m_points.size(), RC::ApronFlat);
+}
+
+//----------------------------------------------------------
+// 制御点ごとの裾の幅
+//
+// 左右で別に持つ。
+// 谷側だけ伸ばして山側は詰める、という使い方をするので、
+// 1つの値だと片側に合わせるしかなくなる
+//----------------------------------------------------------
+float HjRoadSpline::ApronAt(int index, int side) const
+{
+	const std::vector<float>& v = m_apron[std::clamp(side, 0, 1)];
+	if (v.empty()) { return RC::ApronWidth; }
+
+	return v[std::clamp(index, 0, static_cast<int>(v.size()) - 1)];
+}
+
+void HjRoadSpline::SetApronAt(int index, int side, float w)
+{
+	SyncApron();
+
+	std::vector<float>& v = m_apron[std::clamp(side, 0, 1)];
+	if (index < 0 || index >= static_cast<int>(v.size())) { return; }
+
+	v[index] = std::clamp(w, 0.0f, RC::ApronWidthMax);
+}
+
+//----------------------------------------------------------
+// 道のりから裾の幅を引く
+//
+// 制御点の間はなめらかに繋ぐ。
+// そのまま切り替えると、そこで裾の外端が横へ跳ねて、
+// 一点に潰れた三角の扇ができる
+//----------------------------------------------------------
+float HjRoadSpline::ApronAtS(float s, int side) const
+{
+	const std::vector<float>& v = m_apron[std::clamp(side, 0, 1)];
+	if (v.empty()) { return RC::ApronWidth; }
+
+	int seg = 0;
+	float t = 0.0f;
+	ToSegment(s, seg, t);
+
+	const int n = static_cast<int>(v.size());
+	const int i0 = std::clamp(seg,     0, n - 1);
+	const int i1 = std::clamp(seg + 1, 0, n - 1);
+
+	// 端で折れないよう滑らかに
+	const float k = t * t * (3.0f - 2.0f * t);
+
+	return v[i0] + (v[i1] - v[i0]) * k;
+}
+
+//----------------------------------------------------------
+// 制御点ごとの平場の幅
+//
+// 路肩の外に、道と平行に伸ばす幅。
+// 裾と同じく区間ごとに変えたい
+//----------------------------------------------------------
+float HjRoadSpline::FlatAt(int index, int side) const
+{
+	const std::vector<float>& v = m_flat[std::clamp(side, 0, 1)];
+	if (v.empty()) { return RC::ApronFlat; }
+
+	return v[std::clamp(index, 0, static_cast<int>(v.size()) - 1)];
+}
+
+void HjRoadSpline::SetFlatAt(int index, int side, float w)
+{
+	SyncApron();
+
+	std::vector<float>& v = m_flat[std::clamp(side, 0, 1)];
+	if (index < 0 || index >= static_cast<int>(v.size())) { return; }
+
+	v[index] = std::clamp(w, 0.0f, RC::ApronFlatMax);
+}
+
+//----------------------------------------------------------
+// 道のりから平場の幅を引く
+//
+// 制御点の間はなめらかに繋ぐ。
+// そのまま切り替えると、そこで外端が横へ跳ねる
+//----------------------------------------------------------
+float HjRoadSpline::FlatAtS(float s, int side) const
+{
+	const std::vector<float>& v = m_flat[std::clamp(side, 0, 1)];
+	if (v.empty()) { return RC::ApronFlat; }
+
+	int seg = 0;
+	float t = 0.0f;
+	ToSegment(s, seg, t);
+
+	const int n = static_cast<int>(v.size());
+	const int i0 = std::clamp(seg,     0, n - 1);
+	const int i1 = std::clamp(seg + 1, 0, n - 1);
+
+	// 端で折れないよう滑らかに
+	const float k = t * t * (3.0f - 2.0f * t);
+
+	return v[i0] + (v[i1] - v[i0]) * k;
 }
