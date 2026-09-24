@@ -37,6 +37,10 @@ public:
 	const char* Name() const;
 	static const char* NameOf(Kind k);
 
+	// 作り手と型番。車庫の見出しが使う
+	static const char* MakerOf(Kind k);
+	static const char* ModelOf(Kind k);
+
 	// 選ばれている車を作る。
 	// 場面ごとに種類で分岐を書くと、車を足すたびに全部直すことになる
 	static std::shared_ptr<CarBase> Create(Kind k);

@@ -66,12 +66,16 @@ namespace SplatConst
 	constexpr float RoadR  = 0.16f, RoadG  = 0.16f, RoadB  = 0.17f;
 
 	//===== 層の粗さ =====
-	// 舗装だけ少し艶を残す。雨上がりでなくても、
-	// アスファルトは土や草より光を返す
+	// 1 に近いほど艶が無い。
+	//
+	// 舗装を 0.55 にしていたが、これは濡れた路面の値。
+	// 乾いたアスファルトは骨材がむき出しの粗い面で、
+	// 実測でも 0.85〜0.95 あたり。低くすると、曇っていても
+	// 路面だけ空を映して光る
 	constexpr float RockRough  = 0.95f;
-	constexpr float DirtRough  = 0.90f;
-	constexpr float GrassRough = 0.85f;
-	constexpr float RoadRough  = 0.55f;
+	constexpr float DirtRough  = 0.92f;
+	constexpr float GrassRough = 0.90f;
+	constexpr float RoadRough  = 0.88f;
 
 	//===== 模様 =====
 	constexpr float Grain     = 0.09f;    // 明暗の振れ幅

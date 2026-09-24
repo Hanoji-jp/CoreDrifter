@@ -441,19 +441,6 @@ void HjTerrainBrush::DrawGui(HjHeightField& field)
 	ImGui::Text(U8("戻せる手 %d / %d"),
 	            static_cast<int>(m_undo.size()), TB::UndoDepth);
 
-	//===== 保存 =====
-	// 書き出すのは素地。仕上がりを書くと道の削りが焼き込まれて、
-	// 次に道を動かしたときに二重に削れる
-	if (ImGui::Button(U8("彫った形を書き出す")))
-	{
-		// 書き出し先は取り込んだ標高データとは別のファイル。
-		// 同じにすると、保存したときに DEM が消える
-		m_saved = field.SaveToFile(TerrainConst::EditPath);
-		m_savedShown = true;
-	}
-	ImGui::SameLine();
-	ImGui::TextDisabled(TerrainConst::EditPath);
-
 	// 黙って失敗されると、保存できたのか分からない
 	if (m_savedShown)
 	{
@@ -468,4 +455,23 @@ void HjTerrainBrush::DrawGui(HjHeightField& field)
 				U8("書き出せなかった。Asset/Data/terrain フォルダがあるか確かめて"));
 		}
 	}
+}
+
+//----------------------------------------------------------
+// 彫った形を書き出す
+//
+// ボタンは持たない。書き出しは1か所にまとめてあるので、
+// そこから呼ばれる。
+//
+// 書き出すのは素地。仕上がりを書くと道の削りが焼き込まれて、
+// 次に道を動かしたときに二重に削れる。
+//
+// 書き出し先は取り込んだ標高データとは別のファイル。
+// 同じにすると、保存したときに DEM が消える
+//----------------------------------------------------------
+bool HjTerrainBrush::Save(const HjHeightField& field)
+{
+	m_saved = field.SaveToFile(TerrainConst::EditPath);
+	m_savedShown = true;
+	return m_saved;
 }

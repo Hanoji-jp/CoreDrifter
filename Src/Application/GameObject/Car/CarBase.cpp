@@ -1,4 +1,5 @@
 ﻿#include "CarBase.h"
+#include "../../Const/RigidCarConst.h"
 #include "../../Util/HjSaveFile.h"
 #include "../../Util/HjProfiler.h"
 #include "../../Util/HjPostFxSettings.h"
@@ -40,9 +41,18 @@ void CarBase::Init()
 	// タイヤ痕のマップはコースに1枚の共有。自車ぶんの枠だけ確保する
 	SkidMark::Instance().Init();
 	m_skidBase = SkidMark::Instance().AllocTrails();
-	
+
 	// 当たり判定の可視化用ワイヤフレーム(F1でトグル)
 	m_pDebugWire = std::make_unique<KdDebugWireFrame>();
+
+	//===== 剛体で走らせる =====
+	// 既定はこちら。
+	//
+	// 旧モデルは3自由度の平面で、姿勢は4輪のレイから推定していた。
+	// 片輪が浮く・転倒する・縁石で跳ねる、が原理的に出せない。
+	//
+	// 調整パネルで切り替えれば旧モデルにも戻せる
+	SetRigid(true);
 
 	// 調整パネル(DrawImGui)はシーン側でステージ用パネルと合成して登録する
 }
@@ -78,6 +88,14 @@ void CarBase::SetSpawn(const Math::Vector3& pos, float yaw)
 	m_prevGroundValid = false;
 	m_pitchRate       = 0.0f;
 	m_rollRate        = 0.0f;
+
+	//===== 剛体も置き直す =====
+	// m_pos へ代入するだけでは剛体は前の場所に残る。
+	//
+	// 起動直後は原点に置いたままになり、そこの地形へ
+	// 埋まった状態で走り出す。サスが縮みきった反力で
+	// 打ち上げられて、車が上へ飛んでいく
+	if (m_useRigid) { m_rigid.Place(pos, yaw); }
 }
 
 //----------------------------------------------------------
@@ -190,8 +208,213 @@ void CarBase::UpdateBodyAlignAssist(float dt, float vLong0, bool handbrake)
 	while (d < -3.14159265f) { d += 6.2831853f; }
 
 	const float k = std::min(m_bodyAlign * alignEngage * dt, 1.0f);
+
+	// 剛体は姿勢をクォータニオンで持つので、ヨーだけ回す。
+	// m_yaw へ書いても、次のフレームで剛体の値に上書きされる
+	if (m_useRigid)
+	{
+		m_rigid.RotateYaw(d * k);
+		m_rigid.DampYaw(k);
+		return;
+	}
+
 	m_yaw     += d * k;               // 車体を進行方向へ回頭
 	m_yawRate -= m_yawRate * k;       // 余分な回転を抑えて収束
+}
+
+//----------------------------------------------------------
+// 舵角を決める
+//
+// オートカウンター(CarX風)：横滑り方向へ前輪を自動で当て続ける。
+// 車体の横滑り角(sideslip)＝進行方向と車体前方の角度。ドリフト中は前輪が
+// 進行方向を向く＝カウンターになる。プレイヤー入力はこれに足し引きする。
+//
+// ■ 下回りとは切り離してある
+// 平面モデルでも剐体でも、舵の作り方は同じでなければいけない。
+// ここがドリフトの手ごたえそのものだから
+//----------------------------------------------------------
+void CarBase::UpdateSteerAngle(float dt, float steerInput, float throttle,
+                              bool handbrake, float vLong0, float vLat0, float speedNow)
+{
+	float autoCounter = 0.0f;
+	if (m_counterSteerEnabled && speedNow > m_counterMinSpeed && vLong0 > 0.0f)
+	{
+		const float sideslip = atan2f(vLat0, fabsf(vLong0) + 1.0f); // 右滑り+ / 左滑り-
+		autoCounter = sideslip * m_counterAssist;
+		// カウンターは最大切れ角の1.3倍まで(スライド捕捉に十分。maxSteer自体を控えめにして
+		// 過剰舵角でのcos減衰＝前輪が食わなくなる問題を避ける)
+		autoCounter = std::clamp(autoCounter, -m_maxSteerAngle * 1.3f, m_maxSteerAngle * 1.3f);
+	}
+	// サイド中のカウンター倍率は"段差だけ"を平滑化(1↔m_handbrakeCounterMul)。
+	// カウンター本体は横滑り角に即追従させる＝出口で舵が残らずワイドに膨らまない。
+	const float hbTarget = handbrake ? m_handbrakeCounterMul : 1.0f;
+	m_hbCounterFactor += (hbTarget - m_hbCounterFactor) * std::min(8.0f * dt, 1.0f);
+	autoCounter *= m_hbCounterFactor;
+	// アクセルに応じてアシストをなめらかに切り替える(1=アクセル中/ドリフト保持, 0=オフ/復帰)。
+	// 二値でパチパチ切り替わらず、Wの踏み加減で角度を連続的にコントロールできる。
+	const float liftTarget = (throttle > 0.0f) ? 1.0f : 0.0f;
+	m_liftCounterFactor += (liftTarget - m_liftCounterFactor) * std::min(4.0f * dt, 1.0f);
+	// アクセルを抜いたときにカウンターを抜く挙動。既定は切ってある。
+	// 舵に触っていないのに前輪の角度が変わると、手ごたえが読めなくなる。
+	// アクセルオフでリアがグリップを取り戻すのは荷重移動で既に起きているので、
+	// ここまでやると二重に効く。
+	// (m_liftCounterFactor 自体は「アクセルオフで進行方向へ回頭」でも使うので残す)
+	if (m_liftCounterEnabled) { autoCounter *= m_liftCounterFactor; }
+
+	//===== ステア(CarX参考のドリフトアシスト) =====
+	// プレイヤー入力は平滑化。オートカウンターは"即時"反映してスライドを素早く捕まえる。
+	// これがCarXの「勝手に当て舵してドリフトを維持できる」手触りの核心。
+	const float steerFade    = 1.0f / (1.0f + speedNow * 0.03f);   // 高速で舵角を絞る
+	const float playerTarget = steerInput * m_maxSteerAngle * steerFade;
+
+	// 舵を戻す/反対側へ振る時は速く動かす。切り込みと同じ速さで戻すと、
+	// 逆ステの位置から反対のロックまで舵が旅する間にタイミングを逃す。
+	float steerRate = m_steerSpeed;
+	const bool returning = (playerTarget * m_playerSteer < 0.0f)          // 逆側へ振る
+	                    || (fabsf(playerTarget) < fabsf(m_playerSteer));  // 中央へ戻す
+	if (returning) { steerRate *= m_steerReturnMul; }
+
+	// 舵は一定の速さで動いて、目標に着いたらそこで止まる。
+	//
+	// ここを1次遅れ(指数)で寄せると、最初だけ速くて後はじわじわ近づき、
+	// いつまでも目標に届かない。ゴムで引っ張られるような手ごたえになり、
+	// 今どこまで切れているのかが分からなくなる。
+	// 実車のステアリングは腕が動かせる速さで動き、握った位置で止まる。
+	{
+		const float step = steerRate * m_maxSteerAngle * dt;   // このフレームで動ける量
+		const float diff = playerTarget - m_playerSteer;
+		m_playerSteer += std::clamp(diff, -step, step);
+	}
+
+	// 振り返しの意思があるならカウンターを緩める。
+	// アシストは横滑り角を掴んで当て舵を当て続けるので、そのままだと
+	// 「反対へ向けたい入力」と綱引きになり、切り返しが鈍る。
+	if (autoCounter * steerInput < 0.0f)
+	{
+		const float release = m_counterRelease * std::min(fabsf(steerInput), 1.0f);
+		autoCounter *= 1.0f - release;
+	}
+
+	// カウンターも動ける量に上限を付けて追わせる。
+	//
+	// 元になる横滑り角は速度から毎フレーム計算した生の値で、
+	// 段差・タイヤの緩和・摩擦円の頭打ちで細かく震える。
+	// そのまま舵へ入れると見た目のタイヤがカクカク動く。
+	// プレイヤーの舵より速いレートにしてあるので、スライドの捕まえは鈍らない。
+	{
+		const float step = CarConst::CounterRate * m_maxSteerAngle * dt;
+		const float diff = autoCounter - m_autoCounter;
+		m_autoCounter += std::clamp(diff, -step, step);
+	}
+
+	m_steer = m_playerSteer + m_autoCounter;
+	// 舵角の上限。過剰に切ると前輪の横力がcos(舵角)で消えて食わなくなるので、
+	// maxSteerを控えめにした上で1.3倍までに収める(捕捉に十分＋前輪が効く範囲)。
+	const float steerLimit = m_maxSteerAngle * 1.3f;
+	m_steer = std::clamp(m_steer, -steerLimit, steerLimit);
+}
+
+//----------------------------------------------------------
+// 振り返しの後押し
+//
+// ドリフト中(横滑りあり)に舵を切った方向へヨーを後押し＝
+// 反対側へパッと振り替えやすい。
+// 通常グリップ走行(横滑り小)では効かない。
+//
+// 硬い閾値で切ると、振り返しの途中(横滑りが0を通る瞬間)に
+// 補助が消えてそこだけ動きが止まる。滑らかに立ち上げて谷を作らない
+//----------------------------------------------------------
+float CarBase::TransitionYawBoost(float steerInput, float vLong0, float vLat0) const
+{
+	if (!m_transitionEnabled || m_transitionAssist <= 0.0f) { return 0.0f; }
+	if (vLong0 <= 0.5f) { return 0.0f; }
+
+	const float ss = atan2f(vLat0, fabsf(vLong0) + 1.0f);   // 横滑り角
+
+	const float gain = std::clamp(
+		(fabsf(ss) - CarConst::TransitionSlipMin) / CarConst::TransitionSlipBand,
+		0.0f, 1.0f);
+
+	// 今の回転と逆へ振った瞬間だけ、追加でキレを足す
+	const float flick = (steerInput * m_yawRate < 0.0f)
+		                  ? CarConst::TransitionFlickMul : 1.0f;
+
+	return steerInput * m_transitionAssist * gain * flick;
+}
+
+//----------------------------------------------------------
+// スピン防止アシスト
+//
+// 横滑り角が大きい時、"スライドを深める向き(スピンアウト)"の
+// ヨーだけを抑える。戻す向き(アクセルオフ＋逆ハンでのリカバリー)は邪魔しない
+//----------------------------------------------------------
+float CarBase::SpinAssistRate(float steerInput, bool handbrake,
+                             float vLong, float vLat, float yawRate) const
+{
+	if (!m_spinAssistEnabled) { return 0.0f; }
+
+	const float ss    = atan2f(vLat, fabsf(vLong) + 1.0f);   // 横滑り角(符号付)
+	const float ssAbs = fabsf(ss);
+
+	if (ssAbs <= CarConst::SpinAssistThreshold) { return 0.0f; }
+
+	// ヨーと横滑りが同符号＝スピンアウト方向。逆符号＝リカバリー方向(抑えない)
+	if (yawRate * vLat <= 0.0f) { return 0.0f; }
+
+	// 回っている向きへ舵を当て続けている＝プレイヤーが狙って回している。
+	// ドリフト中はカウンター(回転と逆)を当てているので、ここには入らない。
+	// この区別が無いと、狙って回そうとしてもアシストに止められる
+	const bool intentional = (steerInput * yawRate > 0.0f) &&
+		                       (fabsf(steerInput) > CarConst::SpinIntentSteer);
+
+	if (intentional) { return 0.0f; }
+
+	// サイド中はアシストを弱めてリアを自由に回り込ませる(広がり感)
+	const float assist = m_spinAssist
+		                 * (handbrake ? CarConst::HandbrakeSpinAssistMul : 1.0f);
+
+	return (ssAbs - CarConst::SpinAssistThreshold) * assist;
+}
+
+//----------------------------------------------------------
+// 後退ギア(R)の断続
+//----------------------------------------------------------
+void CarBase::UpdateReverseGear(float dt, float throttle, bool handbrake, float vLong0)
+{
+	// ほぼ停止中にSを踏み続けたら後退へ入る。Wか前進し始めたら解除。
+	// 前進中のSは通常どおりブレーキ。
+	//
+	// ■ 判定に「実際の速さ」を使う
+	// 車体前方の速度(vLong0)で見ると、ドリフト中に誤って後退へ入る。
+	// 横を向いている間は前方成分が小さくなるので、実際には高速で
+	// 滑っていても停止扱いになってしまう。
+	// 後退へ入るとブレーキが後退駆動に置き換わる(brakeEach=0)ため、
+	// 「サイドを引いて思い切りブレーキしても止まらず前へ進む」という
+	// 挙動になっていた。
+	//
+	// ■ サイド中は入らない
+	// サイドブレーキは減速とドリフトの操作であって、後退の意思ではない。
+	//
+	// ■ 少し踏み続けさせる
+	// 一瞬でも条件を満たしたら入る作りだと、停止寸前のブレーキ中に
+	// ギアが勝手に切り替わって制動が抜ける。
+	if (m_reverse)
+	{
+		if (throttle > 0.0f || vLong0 > CarConst::ReverseExitSpeed)
+		{
+			m_reverse = false;
+			m_reverseHold = 0.0f;
+		}
+	}
+	else
+	{
+		const bool wantReverse = (throttle < 0.0f)
+		                      && !handbrake
+		                      && (m_vel.Length() < CarConst::ReverseEngageSpeed);
+
+		m_reverseHold = wantReverse ? (m_reverseHold + dt) : 0.0f;
+		if (m_reverseHold >= CarConst::ReverseEngageHold) { m_reverse = true; }
+	}
 }
 
 //----------------------------------------------------------
@@ -214,6 +437,54 @@ void CarBase::ApplyVisualState(const Math::Vector3& pos, float yaw, const Math::
 
 	m_wheelSpinFront = spinFront;
 	m_wheelSpinRear  = spinRear;
+}
+
+//----------------------------------------------------------
+// レブの効き具合
+//
+// トルクを絞る側と、音を潰す側の両方が同じ値を読む。
+// 別々に書くと、片方だけ直して音と挙動がずれる
+//----------------------------------------------------------
+float CarBase::RevCut() const
+{
+	const float rpmN = m_engineRPM / CarConst::MaxRPM;
+
+	if (rpmN <= CarConst::RevCutStart) { return 0.0f; }
+
+	return std::clamp(
+		(rpmN - CarConst::RevCutStart) /
+		std::max(CarConst::RevCutEnd - CarConst::RevCutStart, 1e-4f), 0.0f, 1.0f);
+}
+
+//----------------------------------------------------------
+// エンジン音
+//
+// 回転数とアクセル開度を渡すだけで、点火の間隔と音量が決まる。
+// 後退中はSがアクセルなので、踏み込み量として符号を落とす
+//----------------------------------------------------------
+void CarBase::UpdateEngineAudio(float dt, float throttle)
+{
+	const float open = std::clamp(fabsf(throttle), 0.0f, 1.0f);
+
+	m_engineAudio.Update(dt, m_engineRPM, open, CarConst::MaxRPM, RevCut());
+}
+
+//----------------------------------------------------------
+// 音の3D
+//
+// 聴取点はカメラ、音源は車。
+// エンジンは車の後ろ(マフラー)、タイヤは接地面から鳴らす。
+// 位置を与えないと常に耳元で同じ大きさに聞こえ、距離と方向の
+// 手がかりが無いまま＝実在しない音になる
+//----------------------------------------------------------
+void CarBase::PlaceAudio()
+{
+	HjAudioSpace::Instance().UpdateListener();
+
+	const Math::Vector3 fwd(sinf(m_yaw), 0.0f, cosf(m_yaw));
+
+	m_engineAudio.Apply3D(m_pos - fwd * m_base + Math::Vector3(0.0f, 0.3f, 0.0f));
+	m_tireAudio.Apply3D(m_pos - fwd * m_base * 0.5f);
 }
 
 //----------------------------------------------------------
@@ -502,20 +773,13 @@ void CarBase::UpdateDriveline(float dt, float throttle, bool handbrake,
 
 	// レブ手前でトルクを絞る(頭打ち)。RevCutStart→RevCutEndで1→0へ。
 	// これでギアが上限に張り付き、伸ばすにはシフトアップが必要＝ギア差が体感できる。
-	float revCut = 0.0f;   // レブリミッターの効き具合(0〜1)。音側でも使う
-	if (rpmN > CarConst::RevCutStart)
-	{
-		revCut = std::clamp((rpmN - CarConst::RevCutStart) /
-		                    std::max(CarConst::RevCutEnd - CarConst::RevCutStart, 1e-4f), 0.0f, 1.0f);
-		torque *= (1.0f - revCut);   // レッドでトルク0
-	}
+	const float revCut = RevCut();
+	torque *= (1.0f - revCut);   // レッドでトルク0
+
 	const float gearFactor = CarConst::GearRatios[m_gear] / CarConst::DriveRefRatio;
 	m_driveAccel = m_enginePower * torque * m_clutch * gearFactor;
 
-	// エンジン音。回転数とアクセル開度を渡すだけで、点火の間隔と音量が決まる。
-	// 後退中はSがアクセルなので、踏み込み量として符号を落として渡す。
-	const float audioThrottle = std::clamp(fabsf(throttle), 0.0f, 1.0f);
-	m_engineAudio.Update(dt, m_engineRPM, audioThrottle, CarConst::MaxRPM, revCut);
+	UpdateEngineAudio(dt, throttle);
 }
 
 //----------------------------------------------------------
@@ -815,30 +1079,12 @@ for (int s = 0; s < sub; ++s)
 	m_yawRate += (sumMz / std::max(m_izz, 0.05f)) * h;
 	m_yawRate -= m_yawRate * std::min(m_yawDamp * h, 1.0f);
 
-	// スピン防止アシスト：横滑り角が大きい時、"スライドを深める向き(スピンアウト)"の
-	// ヨーだけを抑える。戻す向き(アクセルオフ＋逆ハンでのリカバリー)は邪魔しない。
-	if (m_spinAssistEnabled)
+	// スピン防止アシスト。
+	// 横滑りを深める向きのヨーだけを抑える
 	{
-		const float ss    = atan2f(vLat, fabsf(vLong) + 1.0f);   // 横滑り角(符号付)
-		const float ssAbs = fabsf(ss);
-		// ヨーと横滑りが同符号＝スピンアウト方向。逆符号＝リカバリー方向(抑えない)。
-		const bool spinningOut = (m_yawRate * vLat > 0.0f);
+		const float rate = SpinAssistRate(steerInput, handbrake, vLong, vLat, m_yawRate);
 
-		// 回っている向きへ舵を当て続けている＝プレイヤーが狙って回している。
-		// ドリフト中はカウンター(回転と逆)を当てているので、ここには入らない。
-		// ドーナツや360度は回転と同じ向きへ入れ続けるので、そこで区別できる。
-		// この区別が無いと、狙って回そうとしてもアシストに止められて、
-		// 横滑り角がしきい値から先へ進めなくなる。
-		const bool intentional = (steerInput * m_yawRate > 0.0f) &&
-		                         (fabsf(steerInput) > CarConst::SpinIntentSteer);
-
-		if (ssAbs > CarConst::SpinAssistThreshold && spinningOut && !intentional)
-		{
-			// サイド中はアシストを弱めてリアを自由に回り込ませる(広がり感)
-			const float assist = m_spinAssist * (handbrake ? CarConst::HandbrakeSpinAssistMul : 1.0f);
-			const float over = ssAbs - CarConst::SpinAssistThreshold;
-			m_yawRate -= m_yawRate * std::min(over * assist * h, 1.0f);
-		}
+		if (rate > 0.0f) { m_yawRate -= m_yawRate * std::min(rate * h, 1.0f); }
 	}
 	m_yaw     += m_yawRate * h;
 
@@ -1180,17 +1426,7 @@ wrap(m_wheelSpinRear);
 		m_tireAudio.Update(dt, slip01, carSpeed, brake01, m_onGround);
 	}
 
-	// 音の3D。聴取点はカメラ、音源は車。
-	// エンジンは車の後ろ(マフラー)、タイヤは接地面から鳴らす。
-	// 位置を与えないと常に耳元で同じ大きさに聞こえ、距離と方向の
-	// 手がかりが無いまま＝実在しない音になる。
-	{
-		HjAudioSpace::Instance().UpdateListener();
-
-		const Math::Vector3 fwdA(sinf(m_yaw), 0.0f, cosf(m_yaw));
-		m_engineAudio.Apply3D(m_pos - fwdA * m_base + Math::Vector3(0.0f, 0.3f, 0.0f));
-		m_tireAudio.Apply3D(m_pos - fwdA * m_base * 0.5f);
-	}
+	PlaceAudio();
 
 	// タイヤ痕：煙と同じ後輪接地点に毎フレーム点を渡す。
 	// (実際に点が増えるのは前の点から一定距離離れた時だけなので、低速でも密集しない)
@@ -1365,17 +1601,33 @@ void CarBase::Update()
 		m_driveDiff  = 0.0f;
 		m_velY       = 0.0f;
 
-		// 接地だけは続ける。止めた瞬間に地形へめり込んだままになるのを防ぐ
-		UpdateGroundContact(dt);
+		// 接地だけは続ける。止めた瞬間に地形へめり込んだままになるのを防ぐ。
+		//
+		// ただしすり抜け中は取らない。取ると、持ち上げた車が
+		// 毎フレーム地面へ引き戻されて浮かない
+		if (!m_noClip) { UpdateGroundContact(dt); }
 		return;
 	}
 
 	UpdateDebugKeys();
 
 	const DriveInput in = ReadInput();
-	// 追走のCPUが手本として借りる。物理へ渡す前の値をそのまま覚える
+
+	// 追走のCPUが手本として借りる。物理へ渡す前の値をそのまま覚える。
+	//
+	// 剛体へ渡すのもこれなので、分岐より先に入れる。
+	// 後ろに置くと、剛体が前フレームの入力を読み続けて何も効かない
 	m_lastInput = in;
 	m_handbrakeNow = in.handbrake;   // 通信で相手へ送るので覚えておく
+
+	//===== 剛体で走らせる =====
+	// 旧モデルは3自由度の平面モデルで、姿勢は4輪のレイから
+	// 推定していた。片輪が浮く・転倒する、が原理的に出せない
+	if (m_useRigid)
+	{
+		UpdateRigid(dt);
+		return;
+	}
 	float throttle       = in.throttle;
 	float steerInput     = in.steer;
 	bool  handbrake      = in.handbrake;
@@ -1383,150 +1635,22 @@ void CarBase::Update()
 	bool  shiftUp        = in.shiftUp;
 	bool  shiftDown      = in.shiftDown;
 
-	//===== オートカウンター(CarX風)：横滑り方向へ前輪を自動で当て続ける =====
-	// 車体の横滑り角(sideslip)＝進行方向と車体前方の角度。ドリフト中は前輪が
-	// 進行方向を向く＝カウンターになる。プレイヤー入力はこれに足し引きする。
+	// 進行方向に対する前後・横の速さ。舵も駆動も後退判定もここを見る
 	const Math::Vector3 fwd0(sinf(m_yaw), 0.0f, cosf(m_yaw));
 	const Math::Vector3 right0(cosf(m_yaw), 0.0f, -sinf(m_yaw));
 	const float vLong0 = m_vel.Dot(fwd0);
 	const float vLat0  = m_vel.Dot(right0);
 	const float speedNow = m_vel.Length();
 
-	float autoCounter = 0.0f;
-	if (m_counterSteerEnabled && speedNow > m_counterMinSpeed && vLong0 > 0.0f)
-	{
-		const float sideslip = atan2f(vLat0, fabsf(vLong0) + 1.0f); // 右滑り+ / 左滑り-
-		autoCounter = sideslip * m_counterAssist;
-		// カウンターは最大切れ角の1.3倍まで(スライド捕捉に十分。maxSteer自体を控えめにして
-		// 過剰舵角でのcos減衰＝前輪が食わなくなる問題を避ける)
-		autoCounter = std::clamp(autoCounter, -m_maxSteerAngle * 1.3f, m_maxSteerAngle * 1.3f);
-	}
-	// サイド中のカウンター倍率は"段差だけ"を平滑化(1↔m_handbrakeCounterMul)。
-	// カウンター本体は横滑り角に即追従させる＝出口で舵が残らずワイドに膨らまない。
-	const float hbTarget = handbrake ? m_handbrakeCounterMul : 1.0f;
-	m_hbCounterFactor += (hbTarget - m_hbCounterFactor) * std::min(8.0f * dt, 1.0f);
-	autoCounter *= m_hbCounterFactor;
-	// アクセルに応じてアシストをなめらかに切り替える(1=アクセル中/ドリフト保持, 0=オフ/復帰)。
-	// 二値でパチパチ切り替わらず、Wの踏み加減で角度を連続的にコントロールできる。
-	const float liftTarget = (throttle > 0.0f) ? 1.0f : 0.0f;
-	m_liftCounterFactor += (liftTarget - m_liftCounterFactor) * std::min(4.0f * dt, 1.0f);
-	// アクセルを抜いたときにカウンターを抜く挙動。既定は切ってある。
-	// 舵に触っていないのに前輪の角度が変わると、手ごたえが読めなくなる。
-	// アクセルオフでリアがグリップを取り戻すのは荷重移動で既に起きているので、
-	// ここまでやると二重に効く。
-	// (m_liftCounterFactor 自体は「アクセルオフで進行方向へ回頭」でも使うので残す)
-	if (m_liftCounterEnabled) { autoCounter *= m_liftCounterFactor; }
+	UpdateSteerAngle(dt, steerInput, throttle, handbrake, vLong0, vLat0, speedNow);
 
-	//===== ステア(CarX参考のドリフトアシスト) =====
-	// プレイヤー入力は平滑化。オートカウンターは"即時"反映してスライドを素早く捕まえる。
-	// これがCarXの「勝手に当て舵してドリフトを維持できる」手触りの核心。
-	const float steerFade    = 1.0f / (1.0f + speedNow * 0.03f);   // 高速で舵角を絞る
-	const float playerTarget = steerInput * m_maxSteerAngle * steerFade;
-
-	// 舵を戻す/反対側へ振る時は速く動かす。切り込みと同じ速さで戻すと、
-	// 逆ステの位置から反対のロックまで舵が旅する間にタイミングを逃す。
-	float steerRate = m_steerSpeed;
-	const bool returning = (playerTarget * m_playerSteer < 0.0f)          // 逆側へ振る
-	                    || (fabsf(playerTarget) < fabsf(m_playerSteer));  // 中央へ戻す
-	if (returning) { steerRate *= m_steerReturnMul; }
-
-	// 舵は一定の速さで動いて、目標に着いたらそこで止まる。
-	//
-	// ここを1次遅れ(指数)で寄せると、最初だけ速くて後はじわじわ近づき、
-	// いつまでも目標に届かない。ゴムで引っ張られるような手ごたえになり、
-	// 今どこまで切れているのかが分からなくなる。
-	// 実車のステアリングは腕が動かせる速さで動き、握った位置で止まる。
-	{
-		const float step = steerRate * m_maxSteerAngle * dt;   // このフレームで動ける量
-		const float diff = playerTarget - m_playerSteer;
-		m_playerSteer += std::clamp(diff, -step, step);
-	}
-
-	// 振り返しの意思があるならカウンターを緩める。
-	// アシストは横滑り角を掴んで当て舵を当て続けるので、そのままだと
-	// 「反対へ向けたい入力」と綱引きになり、切り返しが鈍る。
-	if (autoCounter * steerInput < 0.0f)
-	{
-		const float release = m_counterRelease * std::min(fabsf(steerInput), 1.0f);
-		autoCounter *= 1.0f - release;
-	}
-
-	// カウンターも動ける量に上限を付けて追わせる。
-	//
-	// 元になる横滑り角は速度から毎フレーム計算した生の値で、
-	// 段差・タイヤの緩和・摩擦円の頭打ちで細かく震える。
-	// そのまま舵へ入れると見た目のタイヤがカクカク動く。
-	// プレイヤーの舵より速いレートにしてあるので、スライドの捕まえは鈍らない。
-	{
-		const float step = CarConst::CounterRate * m_maxSteerAngle * dt;
-		const float diff = autoCounter - m_autoCounter;
-		m_autoCounter += std::clamp(diff, -step, step);
-	}
-
-	m_steer = m_playerSteer + m_autoCounter;
-	// 舵角の上限。過剰に切ると前輪の横力がcos(舵角)で消えて食わなくなるので、
-	// maxSteerを控えめにした上で1.3倍までに収める(捕捉に十分＋前輪が効く範囲)。
-	const float steerLimit = m_maxSteerAngle * 1.3f;
-	m_steer = std::clamp(m_steer, -steerLimit, steerLimit);
-
-	//===== トランジション補助(振り返し) =====
-	// ドリフト中(横滑りあり)に舵を切った方向へヨーを後押し＝反対側へパッと振り替えやすい。
-	// 通常グリップ走行(横滑り小)では効かない。切った方向へ回頭を足すだけ。
-	{
-		const float ss = atan2f(vLat0, fabsf(vLong0) + 1.0f);   // 横滑り角
-		if (m_transitionEnabled && m_transitionAssist > 0.0f && vLong0 > 0.5f)
-		{
-			// 硬い閾値で切ると、振り返しの途中(横滑りが0を通る瞬間)に補助が消えて
-			// そこだけ動きが止まる。滑らかに立ち上げて谷を作らない。
-			const float gain = std::clamp(
-				(fabsf(ss) - CarConst::TransitionSlipMin) / CarConst::TransitionSlipBand,
-				0.0f, 1.0f);
-
-			// 今の回転と逆へ振った瞬間だけ、追加でキレを足す
-			const float flick = (steerInput * m_yawRate < 0.0f)
-				? CarConst::TransitionFlickMul : 1.0f;
-
-			m_yawRate += steerInput * m_transitionAssist * gain * flick * dt;
-		}
-	}
+	// 振り返しの後押し。切った向きへヨーを足す
+	m_yawRate += TransitionYawBoost(steerInput, vLong0, vLat0) * dt;
 
 	UpdateDriveline(dt, throttle, handbrake, clutchPressed, shiftUp, shiftDown, vLong0);
 
-	//===== 後退ギア(R)の断続 =====
-	// ほぼ停止中にSを踏み続けたら後退へ入る。Wか前進し始めたら解除。
-	// 前進中のSは通常どおりブレーキ。
-	//
-	// ■ 判定に「実際の速さ」を使う
-	// 車体前方の速度(vLong0)で見ると、ドリフト中に誤って後退へ入る。
-	// 横を向いている間は前方成分が小さくなるので、実際には高速で
-	// 滑っていても停止扱いになってしまう。
-	// 後退へ入るとブレーキが後退駆動に置き換わる(brakeEach=0)ため、
-	// 「サイドを引いて思い切りブレーキしても止まらず前へ進む」という
-	// 挙動になっていた。
-	//
-	// ■ サイド中は入らない
-	// サイドブレーキは減速とドリフトの操作であって、後退の意思ではない。
-	//
-	// ■ 少し踏み続けさせる
-	// 一瞬でも条件を満たしたら入る作りだと、停止寸前のブレーキ中に
-	// ギアが勝手に切り替わって制動が抜ける。
-	if (m_reverse)
-	{
-		if (throttle > 0.0f || vLong0 > CarConst::ReverseExitSpeed)
-		{
-			m_reverse = false;
-			m_reverseHold = 0.0f;
-		}
-	}
-	else
-	{
-		const bool wantReverse = (throttle < 0.0f)
-		                      && !handbrake
-		                      && (m_vel.Length() < CarConst::ReverseEngageSpeed);
+	UpdateReverseGear(dt, throttle, handbrake, vLong0);
 
-		m_reverseHold = wantReverse ? (m_reverseHold + dt) : 0.0f;
-		if (m_reverseHold >= CarConst::ReverseEngageHold) { m_reverse = true; }
-	}
 	// 駆動方向へアクセルを踏んでいるか(前進=W / 後退=S)。空転リラックスの判定に使う。
 	const bool accelPressed = m_reverse ? (throttle < 0.0f) : (throttle > 0.0f);
 
@@ -1921,6 +2045,44 @@ void CarBase::DrawModImGui()
 
 void CarBase::DrawTuningImGui()
 {
+	//===== 走らせ方 =====
+	// 旧モデルは3自由度の平面モデル。姿勢は4輪のレイから推定していた。
+	// 剛体は姿勢そのものを持つので、片輪が浮くし転倒もする。
+	//
+	// 詰め終わるまで見比べる必要があるので、切り替えられるようにしてある
+	{
+		bool rigid = m_useRigid;
+		if (ImGui::Checkbox(U8("剛体で走らせる(6自由度)"), &rigid))
+		{
+			SetRigid(rigid);
+		}
+
+		if (m_useRigid)
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled(U8("接地 %d / 4"), m_rigid.GroundedCount());
+
+			ImGui::TextDisabled(U8("横滑り %.1f 度 / 前 %.2f 後 %.2f"),
+			                    m_rigid.SlipAngle() * 57.2958f,
+			                    m_rigid.SlipFront(), m_rigid.SlipRear());
+
+			if (m_rigid.IsFlipped()) { ImGui::TextDisabled(U8("転倒中")); }
+
+			// 調整値は毎フレーム渡しているので、触ればそのまま効く。
+			// 回転と段はエンジン側(旧モデル)が持っている
+			if (m_reverse)
+			{
+				ImGui::TextDisabled(U8("%.0f rpm / R"), m_engineRPM);
+			}
+			else
+			{
+				ImGui::TextDisabled(U8("%.0f rpm / %d速"), m_engineRPM, m_gear);
+			}
+		}
+
+		ImGui::Separator();
+	}
+
 	// ※ウィンドウは開かない。Hierarchy が用意した Inspector の中へ描く。
 	//   自前で Begin すると、選ぶたびに別ウィンドウが現れて
 	//   位置もドッキング状態もバラバラになる。
@@ -2322,7 +2484,7 @@ std::vector<CarBase::AppearanceParam> CarBase::AppearanceParamList()
 
 void CarBase::SaveModChoice() const
 {
-	HjSaveOStream ofs("mod/" + m_saveKey);
+	HjSaveOStream ofs("mod/" + m_saveKey, ModFilePath().c_str());
 	if (!ofs) { return; }
 
 	// 1行1項目。読み込み側が名前で拾うので、順番は問わない
@@ -2349,7 +2511,7 @@ void CarBase::LoadModChoice()
 
 void CarBase::SaveTuning()
 {
-	HjSaveOStream ofs("tune/" + m_saveKey);
+	HjSaveOStream ofs("tune/" + m_saveKey, TuneFilePath().c_str());
 	if (!ofs) { return; }
 	for (const auto& p : TuneParamList()) { ofs << p.first << " " << *p.second << "\n"; }
 }
@@ -2366,6 +2528,25 @@ void CarBase::LoadTuning()
 		for (const auto& p : params) { if (key == p.first) { *p.second = val; break; } }
 	}
 }
+//----------------------------------------------------------
+// 素のまま描く
+//
+// 影の元になる深度を書くのに使う。
+// 深度マップの生成では色も縁取りも要らないので、
+// ポーズを組んでモデルを流すだけ
+//----------------------------------------------------------
+void CarBase::DrawPortraitPlain(const Math::Matrix& world)
+{
+	auto& shader = KdShaderManager::Instance().m_StandardShader;
+
+	Math::Matrix bodyW;
+	Math::Matrix wheelMat[4];
+	BuildPose(world, bodyW, wheelMat);
+
+	shader.DrawModel(m_body, bodyW);
+	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m); }
+}
+
 
 //----------------------------------------------------------
 // 車庫の見せ札として描く
@@ -2378,7 +2559,8 @@ void CarBase::LoadTuning()
 // 姿勢の値(ピッチ・ロール・切れ角・転がり)は、この車を
 // Update していないので既定のまま=直立・直進で組まれる
 //----------------------------------------------------------
-void CarBase::DrawPortrait(const Math::Matrix& world)
+void CarBase::DrawPortrait(const Math::Matrix& world, float outlineMul,
+                           const Math::Color& col)
 {
 	auto& shader = KdShaderManager::Instance().m_StandardShader;
 
@@ -2390,8 +2572,8 @@ void CarBase::DrawPortrait(const Math::Matrix& world)
 	// 同じモデルなのに車庫でだけ穴が空いて見える
 	KdShaderManager::Instance().ChangeRasterizerState(KdRasterizerState::CullNone);
 
-	shader.DrawModel(m_body, bodyW);
-	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m); }
+	shader.DrawModel(m_body, bodyW, col);
+	for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, col); }
 
 	KdShaderManager::Instance().UndoRasterizerState();
 
@@ -2401,13 +2583,17 @@ void CarBase::DrawPortrait(const Math::Matrix& world)
 	//
 	// ブースト中の発光は入れない。止まった絵で縁が光ると、
 	// 何も起きていないのに何か起きているように見える
-	if (m_outlineEnabled)
+	//
+	// 太さだけは呼ぶ側から絞れるようにする。走行中と同じ太さで
+	// 大きく写すと、背面を押し出す作りの都合で面の切れ目に線が溜まり、
+	// 車体の内側まで色が散る
+	if (m_outlineEnabled && outlineMul > 0.0f)
 	{
 		shader.BeginOutline();
 
 		auto drawAll = [&](float width, const Math::Color& col)
 		{
-			shader.SetOutlineWidth(width);
+			shader.SetOutlineWidth(width * outlineMul);
 			shader.DrawModel(m_body, bodyW, col);
 			for (const auto& m : wheelMat) { shader.DrawModel(m_wheel, m, col); }
 		};
@@ -2514,4 +2700,310 @@ bool CarBase::GetBodyBounds(Math::Vector3& outCenter, float& outRadius) const
 	outCenter = (lo + hi) * 0.5f * m_bodyScale + m_bodyOffset;
 	outRadius = ((hi - lo) * 0.5f * m_bodyScale).Length();
 	return true;
+}
+
+//----------------------------------------------------------
+// 剛体で走らせるかを切り替える
+//
+// 入り切りで座標系が変わる。旧モデルは接地面の高さで位置を持ち、
+// 剛体は重心の高さで持つので、いまの位置を渡し直す
+//----------------------------------------------------------
+void CarBase::SetRigid(bool on)
+{
+	if (m_useRigid == on) { return; }
+
+	m_useRigid = on;
+
+	if (on)
+	{
+		ApplyRigidSetup();
+		m_rigid.Place(m_pos, m_yaw);
+
+		// 駆動輪の回転を引き継ぐ。捨てると切り替えた瞬間に失速する
+		m_rigid.SetDrive(m_driveSpeed, m_driveDiff);
+	}
+	else
+	{
+		// 旧モデルへ戻す。姿勢は捨てて向きだけ引き継ぐ
+		m_useNetRotation = false;
+		m_vel     = Math::Vector3::Zero;
+		m_velY    = 0.0f;
+		m_yawRate = 0.0f;
+	}
+}
+
+//----------------------------------------------------------
+// 調整値を剛体へ渡す
+//
+// 名前も単位も旧モデルのまま渡す。
+// 剛体側で読み替えると、調整パネルのどのつまみが何に効くのか
+// 分からなくなる
+//----------------------------------------------------------
+void CarBase::ApplyRigidSetup()
+{
+	HjCarRigid::Setup su;
+
+	su.track = m_track;
+	su.base  = m_base;
+
+	//----- タイヤ -----
+	su.muFront = m_muFront;
+	su.muRear  = m_muRear;
+	su.tireB   = m_tireB;
+	su.tireC   = m_tireC;
+	su.tireLoadSens = m_tireLoadSens;
+	su.tireRelaxLen = m_tireRelaxLen;
+	su.slipEps      = m_slipEps;
+	su.camber     = m_camber;
+	su.camberGrip = m_camberGrip;
+	su.handbrakeGripMul = m_handbrakeGripMul;
+
+	//----- アライメント -----
+	su.toeFront  = m_toeFront;
+	su.toeRear   = m_toeRear;
+	su.ackermann = m_ackermann;
+
+	//----- 駆動輪 -----
+	su.longStiff    = m_longStiff;
+	su.wheelInertia = m_wheelInertia;
+	su.driveRelax   = m_driveRelax;
+	su.lsdLock      = m_lsdLock;
+
+	//----- 抵抗 -----
+	su.drag      = m_drag;
+	su.scrubDrag = m_scrubDrag;
+	su.scrubDragEnabled = m_scrubDragEnabled;
+
+	//----- 力 -----
+	su.brakePower = m_brakePower;
+	su.maxSpeed   = m_maxSpeed;
+	su.yawDamp    = m_yawDamp;
+
+	//----- 空力 -----
+	su.downforceCoef     = m_downforceCoef;
+	su.downforceRearBias = m_downforceRearBias;
+
+	//----- サス -----
+	su.springF = m_springF;
+	su.springR = m_springR;
+	su.arbF    = m_arbF;
+	su.arbR    = m_arbR;
+
+	m_rigid.SetSetup(su);
+}
+
+//----------------------------------------------------------
+// 剛体で1フレーム進める
+//
+// ■ 役割分担
+//   舵・エンジン・変速・アシスト … ここ(旧モデルと同じ処理)
+//   姿勢・接地・タイヤの力        … 剛体
+//
+// ドリフトの手ざわりは平面モデル側で作り込んであるので、
+// 下回りを剛体に替えても、ここを通す限り乗り味は変わらない。
+//
+// ■ 書き戻し
+// 見た目・音・通信・エフェクトは m_pos / m_vel / m_yaw を見ている。
+// そこを剛体が埋めれば、下回りを入れ替えても上は動く。
+// 姿勢だけは3つの角では表せないので、通信で使っている
+// クォータニオンの経路をそのまま借りる
+//----------------------------------------------------------
+void CarBase::UpdateRigid(float dt)
+{
+	// 調整値を渡す。切り替えた時だけだと、調整しても走りが変わらない
+	ApplyRigidSetup();
+
+	const DriveInput in = m_lastInput;
+
+	const float throttle      = in.throttle;
+	const float steerInput    = in.steer;
+	const bool  handbrake     = in.handbrake;
+	const bool  clutchPressed = in.clutch;
+
+	//===== 進行方向に対する前後・横の速さ =====
+	// 舵も駆動も後退判定もここを見る。
+	// 旧モデルと同じ意味の値でないと、アシストが噛み合わない
+	m_yaw = m_rigid.Yaw();
+
+	const Math::Vector3 fwd0(sinf(m_yaw), 0.0f, cosf(m_yaw));
+	const Math::Vector3 right0(cosf(m_yaw), 0.0f, -sinf(m_yaw));
+
+	Math::Vector3 vFlat = m_rigid.Vel();
+	vFlat.y = 0.0f;
+
+	const float vLong0   = vFlat.Dot(fwd0);
+	const float vLat0    = vFlat.Dot(right0);
+	const float speedNow = vFlat.Length();
+
+	// アシストは m_vel / m_yawRate を見て向きを決める。
+	// 映してから呼ばないと、前フレームの値で判断する
+	m_vel     = vFlat;
+	m_yawRate = m_rigid.YawRate();
+
+	//===== 舵 =====
+	// オートカウンターを含む。結果は m_steer に入る
+	UpdateSteerAngle(dt, steerInput, throttle, handbrake, vLong0, vLat0, speedNow);
+
+	//===== 振り返しの後押し =====
+	m_rigid.AddYawRate(TransitionYawBoost(steerInput, vLong0, vLat0) * dt);
+
+	//===== 駆動系 =====
+	// 駆動輪の回転(m_driveSpeed)は、エンジン側とタイヤ側の両方が触る。
+	// クラッチはこちらが、路面からの反力は剛体が解くので、
+	// 行き来させないと閉じない
+	m_driveSpeed = m_rigid.DriveSpeed();
+	m_driveDiff  = m_rigid.DriveDiff();
+
+	UpdateDriveline(dt, throttle, handbrake, clutchPressed,
+	                in.shiftUp, in.shiftDown, vLong0);
+
+	UpdateReverseGear(dt, throttle, handbrake, vLong0);
+
+	m_rigid.SetDrive(m_driveSpeed, m_driveDiff);
+
+	//===== 剛体を進める =====
+	HjCarRigid::Input ri;
+	ri.throttle     = throttle;
+	ri.steer        = m_steer;
+	ri.handbrake    = handbrake;
+	ri.driveAccel   = m_driveAccel;
+	ri.reverse      = m_reverse;
+	ri.accelPressed = m_reverse ? (throttle < 0.0f) : (throttle > 0.0f);
+	ri.clutchOut    = handbrake || clutchPressed;
+
+	m_rigid.Step(ri, dt);
+
+	m_driveSpeed = m_rigid.DriveSpeed();
+	m_driveDiff  = m_rigid.DriveDiff();
+
+	//===== スピン防止 =====
+	// 旧モデルはタイヤ力の刻みごとに掛けていた。
+	// こちらは1フレームに1回なので、同じ割合を dt で掛ける
+	{
+		const float rate = SpinAssistRate(steerInput, handbrake,
+		                                  vLong0, vLat0, m_rigid.YawRate());
+
+		if (rate > 0.0f) { m_rigid.DampYaw(std::min(rate * dt, 1.0f)); }
+	}
+
+	//===== 転倒からの復帰 =====
+	// ひっくり返ったまま動けなくなるので、一定時間で戻す
+	if (m_rigid.ConsumeNeedReset())
+	{
+		// 位置は接地面の高さで渡す約束。
+		// Pos() は重心なので、そのまま渡すと戻すたびに
+		// 重心の高さぶん浮き上がっていく
+		m_rigid.Place(m_rigid.Pos() - Math::Vector3::Up * RigidCarConst::CgHeight,
+		              m_rigid.Yaw());
+	}
+
+	//===== 結果を旧モデルの変数へ映す =====
+	// 位置は接地面の高さで持つ。旧モデルと揃えないと、
+	// カメラもエフェクトも車体の中へ潜る
+	m_pos = m_rigid.Pos() - Math::Vector3::Up * RigidCarConst::CgHeight;
+
+	m_vel   = m_rigid.Vel();
+	m_velY  = m_vel.y;
+	m_vel.y = 0.0f;
+
+	m_yaw      = m_rigid.Yaw();
+	m_yawRate  = m_rigid.YawRate();
+
+	m_onGround = (m_rigid.GroundedCount() > 0);
+	m_airborne = !m_onGround;
+
+	//===== 空中のエアコントロール =====
+	// 舵で機首のヨーだけ調整して着地姿勢を作れる
+	if (m_airborne)
+	{
+		m_rigid.AddYawRate(steerInput * CarConst::AirSteerControl * dt);
+		m_rigid.DampYaw(std::min(CarConst::AirYawDamp * dt, 1.0f));
+	}
+
+	//===== 車体アライン =====
+	// 中で剛体のヨーを回す。映したあとでないと向きがずれる
+	{
+		const Math::Vector3 fwdEnd(sinf(m_yaw), 0.0f, cosf(m_yaw));
+		UpdateBodyAlignAssist(dt, m_vel.Dot(fwdEnd), handbrake);
+	}
+
+	// アシストでヨーが動いたので取り直す
+	m_yaw     = m_rigid.Yaw();
+	m_yawRate = m_rigid.YawRate();
+
+	// 姿勢はクォータニオンで渡す。
+	// 3つの角では、転倒した姿勢を表せない
+	ApplyVisualRotation(m_rigid.Rot());
+
+	//===== 車輪の見た目 =====
+	// 前輪は路面速度で転がる。後輪は駆動輪の接地面速度で回る＝
+	// アクセル空転で速く回り、サイド中は0でロック
+	{
+		const Math::Vector3 fwdEnd(sinf(m_yaw), 0.0f, cosf(m_yaw));
+
+		const float radius   = std::max(m_wheelH, 0.01f);
+		const float vLongEnd = m_vel.Dot(fwdEnd);
+
+		const float twoPi = 6.2831853f;
+
+		auto wrap = [&](float& a)
+		{
+			if (a >  twoPi) { a -= twoPi; }
+			if (a < -twoPi) { a += twoPi; }
+		};
+
+		m_wheelSpinFront += (vLongEnd / radius) * dt;
+		m_wheelSpinRear  += (m_driveSpeed / radius) * dt;
+
+		wrap(m_wheelSpinFront);
+		wrap(m_wheelSpinRear);
+	}
+
+	//===== 見た目と音 =====
+	const float speed = m_vel.Length();
+
+	m_slipRear01  = m_rigid.SlipRear();
+	m_slipFront01 = m_rigid.SlipFront();
+
+	EmitTireFx(dt, speed, m_slipRear01, m_slipFront01, m_onGround);
+
+	//===== 音 =====
+	// 旧モデルでは UpdateMotionFeedback が鳴らしているが、
+	// 剛体はそこを通らないので無音になっていた。
+	// 音が無いと、段が変わったことも耳で分からない
+	UpdateEngineAudio(dt, throttle);
+
+	// ブレーキ鳴きは前進中にSを踏んでいる量。
+	// 後退中のSは駆動なので鳴らさない
+	const float brake01 = (!m_reverse && throttle < 0.0f) ? fabsf(throttle) : 0.0f;
+
+	m_tireAudio.Update(dt, m_slipRear01, speed, brake01, m_onGround);
+
+	PlaceAudio();
+
+	UpdateEffectParticles(dt);
+}
+
+//----------------------------------------------------------
+// 位置を直に置く
+//
+// 枠組みの SetPos はワールド行列へ書くだけなので、
+// 車が実際に使う m_pos には届かない。
+//
+// 剛体で走らせているときは、そちらの重心も合わせる。
+// 合わせないと、次のフレームに剛体の位置へ引き戻される
+//----------------------------------------------------------
+void CarBase::SetPos(const Math::Vector3& pos)
+{
+	m_pos = pos;
+
+	if (m_useRigid)
+	{
+		// 剛体は重心の高さで持っている
+		m_rigid.Place(pos, m_yaw);
+	}
+
+	// 枠組み側も揃えておく。
+	// 当たり判定の相手としてワールド行列を見る所がある
+	KdGameObject::SetPos(pos);
 }

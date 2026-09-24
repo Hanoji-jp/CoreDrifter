@@ -87,6 +87,19 @@ bool KdPostProcessShader::Init()
 		}
 	}
 
+	// 環境遮蔽(SSAO) PS
+	{
+#include "KdPostProcessShader_PS_SSAO.shaderInc"
+
+		if (FAILED(KdDirect3D::Instance().WorkDev()->CreatePixelShader(
+			compiledBuffer, sizeof(compiledBuffer), nullptr, &m_PS_SSAO)))
+		{
+			assert(0 && "ピクセルシェーダー作成失敗");
+			Release();
+			return false;
+		}
+	}
+
 	// 煙シルエット輪郭 PS
 	{
 #include "KdPostProcessShader_PS_SmokeOutline.shaderInc"
@@ -147,6 +160,9 @@ bool KdPostProcessShader::Init()
 
 	m_cb0_OutlineInfo.Create();
 
+	// 環境遮蔽(SSAO)
+	m_cb0_AOInfo.Create();
+
 	m_cb0_SmokeOutline.Create();
 
 	m_cb0_TextFluid.Create();
@@ -170,6 +186,7 @@ bool KdPostProcessShader::Init()
 
 	// アウトライン合成画像
 	m_outlineRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
+	m_ssaoRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
 
 	// 煙専用の描画先(色+アルファ)。深度は既存シーンの物を流用するのでここでは色のみ。
 	m_smokeRTPack.CreateRenderTarget(backBuffer->GetWidth(), backBuffer->GetHeight());
@@ -217,6 +234,7 @@ void KdPostProcessShader::Release()
 	KdSafeRelease(m_PS_DoF);
 	KdSafeRelease(m_PS_Bright);
 	KdSafeRelease(m_PS_Outline);
+	KdSafeRelease(m_PS_SSAO);
 	KdSafeRelease(m_PS_SmokeOutline);
 	KdSafeRelease(m_PS_TextFluid);
 	KdSafeRelease(m_PS_Desaturate);
@@ -396,6 +414,52 @@ void KdPostProcessShader::PostEffectProcess()
 }
 
 // 不透明シーンにだけアウトラインを適用（この後にエフェクトが上描きされる）
+//----------------------------------------------------------
+// 環境遮蔽(SSAO)を掛ける
+//
+// 不透明を描き終えた直後に掛ける。
+// 半透明やエフェクトの後だと、煙や光にまで陰が乗る
+//----------------------------------------------------------
+void KdPostProcessShader::ApplySceneAO()
+{
+	if (!m_ssaoEnabled) { return; }
+
+	ID3D11DeviceContext* DevCon = KdDirect3D::Instance().WorkDevContext();
+	if (!DevCon) { return; }
+
+	// 画面のテクセルサイズを反映
+	{
+		const auto& bb = KdDirect3D::Instance().GetBackBuffer();
+
+		m_cb0_AOInfo.Work().TexelX = 1.0f / static_cast<float>(bb->GetWidth());
+		m_cb0_AOInfo.Work().TexelY = 1.0f / static_cast<float>(bb->GetHeight());
+		m_cb0_AOInfo.Write();
+
+		DevCon->PSSetConstantBuffers(0, 1, m_cb0_AOInfo.GetAddress());
+	}
+
+	KdShaderManager& shaderMgr = KdShaderManager::Instance();
+
+	if (shaderMgr.SetVertexShader(m_VS))
+	{
+		DevCon->IASetInputLayout(m_inputLayout);
+	}
+
+	shaderMgr.SetPixelShader(m_PS_SSAO);
+	shaderMgr.ChangeSamplerState(KdSamplerState::Linear_Clamp);
+
+	// t0=シーン色、t1=深度
+	std::shared_ptr<KdTexture> srcList[2] =
+	{ m_postEffectRTPack.m_RTTexture, m_postEffectRTPack.m_ZBuffer };
+
+	DrawTexture(srcList, 2, m_ssaoRTPack.m_RTTexture, &m_ssaoRTPack.m_viewPort);
+
+	shaderMgr.UndoSamplerState();
+
+	// 結果をシーンへ書き戻す
+	shaderMgr.m_spriteShader.DrawTex(m_ssaoRTPack.m_RTTexture.get(), 0, 0);
+}
+
 void KdPostProcessShader::ApplySceneOutline()
 {
 	if (!m_sceneOutlineEnabled) { return; }

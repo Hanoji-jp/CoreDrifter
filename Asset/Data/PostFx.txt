@@ -1,4 +1,4 @@
-sceneOutlineOn 0
+sceneOutlineOn 1
 outlineThickness 1.6
 outlineDepthTh 0.35
 outlineNormalTh 0.2
@@ -13,7 +13,7 @@ smokeOutlineStr 1
 smokeOutlineColR 0
 smokeOutlineColG 0
 smokeOutlineColB 0
-halftoneOn 1
+halftoneOn 0
 halftoneScale 5
 halftoneStrength 0.3
 halftoneDarkBias 0.75

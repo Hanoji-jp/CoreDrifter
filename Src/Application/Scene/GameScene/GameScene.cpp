@@ -19,6 +19,14 @@
 #include "../../GameObject/Stage/HjTerrain.h"
 #include "../../GameObject/Stage/HjRoad.h"
 #include "../../GameObject/Stage/HjGuardRail.h"
+#include "../../GameObject/Stage/HjFoliage.h"
+#include "../../GameObject/Stage/HjProps.h"
+#include "../../GameObject/Stage/HjRetainWall.h"
+#include "../../GameObject/Stage/HjRoadMark.h"
+#include "../../GameObject/Stage/HjDelineator.h"
+#include "../../GameObject/Stage/HjRoadSign.h"
+#include "../../GameObject/Stage/HjCurveMirror.h"
+#include "../../GameObject/Stage/HjSpawnPoint.h"
 #include "../../GameObject/Stage/HjStageChoice.h"
 #include "../../GameObject/Stage/HjRoadEditor.h"
 #include "../../Input/HjKeyInput.h"
@@ -251,10 +259,58 @@ void GameScene::Init()
 		rail->Build(*road, &terrain->Field());
 		AddObject(rail);
 
+		// 路面標示(白線)。
+		// 一様な灰色の帯では、カーブでどこに車を置いているのかが読めない
+		auto mark = std::make_shared<HjRoadMark>();
+		mark->Build(*road);
+		AddObject(mark);
+
+		// カーブミラー。見通しの効かないカーブの外側に立てる
+		auto mirror = std::make_shared<HjCurveMirror>();
+		mirror->Build(*road);
+		AddObject(mirror);
+
+		// カーブ注意の標識。入口の手前へ下げて立てる
+		auto sign = std::make_shared<HjRoadSign>();
+		sign->Build(*road);
+		AddObject(sign);
+
+		// 視線誘導標。カーブの外側に等間隔で立てる。
+		// 路面が見えていない段階で、この先の曲がりが読める
+		auto delin = std::make_shared<HjDelineator>();
+		delin->Build(*road);
+		AddObject(delin);
+
+		// 山側の擁壁。制御点ごとに持たせた高さから立てる。
+		// 地形からの自動当てはめは編集パネルのボタンで行う
+		auto wall = std::make_shared<HjRetainWall>();
+		wall->Build(*road);
+		AddObject(wall);
+
+		// 手で置く飾り(木・低木)。置いたものを props.txt から読む
+		auto props = std::make_shared<HjProps>();
+		props->Init();
+		props->Refresh(terrain->Field());
+		AddObject(props);
+
+		// 木と草。斜面の急な所と道の上には生やさない。
+		// 地形と道が決まってからでないと、どちらも判定できない
+		auto foliage = std::make_shared<HjFoliage>();
+		foliage->Init();
+		foliage->BuildGrass(terrain->Field(), road.get());
+		AddObject(foliage);
+
 		// 編集で触り続けるので持っておく
 		m_spTerrain = terrain;
 		m_spRoad    = road;
 		m_spRail    = rail;
+		m_spWall    = wall;
+		m_spMark    = mark;
+		m_spDelin   = delin;
+		m_spSign    = sign;
+		m_spMirror  = mirror;
+		m_spFoliage = foliage;
+		m_spProps   = props;
 	}
 	else
 	{
@@ -276,15 +332,26 @@ void GameScene::Init()
 	if (terrain) { car->SetHeightField(&terrain->Field()); }
 	else         { car->AddCollisionTarget(stage); }
 	if (road)    { car->SetRoad(road.get()); }
+
+	// 剛体側にも地面を渡す。
+	// 旧モデルとは別に持っているので、両方へ渡す必要がある
+	car->SetRigidGround(terrain ? &terrain->Field() : nullptr, road.get());
 	//===== スポーン =====
 	// 自分で決めた場所があれば、何より先にそれを使う。
 	//
 	// 道の始点を無条件で優先していたので、決めても上書きされて
 	// 変えられなかった。道は制御点を動かすたびに始点も動くので、
+	// 自分で決めた場所があれば、何より先にそれを使う。
+	//
+	// 道の始点を無条件で優先していたので、決めても上書きされて
+	// 変えられなかった。道は制御点を動かすたびに始点も動くので、
 	// 何も決めていない間だけ道に任せる
-	if (stage && stage->HasSpawn())
+	HjSpawnPoint::Instance().Load();
+
+	if (HjSpawnPoint::Instance().Has())
 	{
-		car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw());
+		car->SetSpawn(HjSpawnPoint::Instance().Pos(),
+		              HjSpawnPoint::Instance().Yaw());
 	}
 	else if (road)    { car->SetSpawn(road->GetStartPos(), road->GetStartYaw()); }
 	else if (terrain) { car->SetSpawn(terrain->GetSpawnPos(), 0.0f); }
@@ -372,57 +439,58 @@ void GameScene::Init()
 		auto& hier = HjHierarchy::Instance();
 		hier.Begin();
 
-		hier.Add(car->GetTuningName(), [car, stage]()
+		hier.Add(car->GetTuningName(), [car]()
 		{
 			car->DrawImGui();
 
-			// 車とステージの両方を触れるこの場所で、スポーン設定の橋渡しを出す。
-			// Inspector の中なので、そのまま続けて描けばよい。
+			//===== 走り出す場所 =====
+			// 以前は Stage が持っていたが、地形のステージでは Stage を
+			// 作らないので、ボタンが全部素通りして「設定しても変わらない」
+			// 状態になっていた。ステージの作り方に関係なく在るものへ移した
+			auto& sp = HjSpawnPoint::Instance();
+
+			// 保存は「まとめて書き出す」に任せる。
+			// ここだけ即保存だと、他と作法が違って覚えられない
+
 			ImGui::Separator();
+
 			if (ImGui::Button(U8("現在の車位置をスポーンに設定")))
 			{
-				if (stage)
-				{
-					stage->SetSpawn(car->GetPos(), car->GetYaw());
-					stage->SaveConfig();   // 押した時点で即保存
-				}
+				sp.Set(car->GetPos(), car->GetYaw());
 			}
+
 			ImGui::SameLine();
 			if (ImGui::Button(U8("スポーンへ移動(R)")))
 			{
-				if (stage) { car->SetSpawn(stage->GetSpawnPos(), stage->GetSpawnYaw()); }
+				if (sp.Has()) { car->SetSpawn(sp.Pos(), sp.Yaw()); }
 			}
 
 			// いまどちらが使われているかを出す。
 			// 決めたのに道の始点から出る、を見えるようにしておく
-			if (stage)
+			if (!sp.Has())
 			{
-				if (stage->HasSpawn())
-				{
-					ImGui::TextUnformatted(U8("スポーン: 自分で決めた場所"));
-					ImGui::SameLine();
-					if (ImGui::Button(U8("道の始点に任せる")))
-					{
-						stage->ClearSpawn();
-						stage->SaveConfig();
-					}
+				ImGui::TextUnformatted(U8("スポーン: 道の始点"));
+				return;
+			}
 
-					// 数値でも動かせるようにする。
-					// 車を置きに行くほどでもない微調整のため
-					Math::Vector3 pos = stage->GetSpawnPos();
-					float yaw = stage->GetSpawnYaw();
-					bool edited = ImGui::DragFloat3(U8("スポーン位置"), &pos.x, 0.1f);
-					edited |= ImGui::DragFloat(U8("スポーン向き(rad)"), &yaw, 0.01f);
-					if (edited)
-					{
-						stage->SetSpawn(pos, yaw);
-						stage->SaveConfig();
-					}
-				}
-				else
-				{
-					ImGui::TextUnformatted(U8("スポーン: 道の始点"));
-				}
+			ImGui::TextUnformatted(U8("スポーン: 自分で決めた場所"));
+			ImGui::SameLine();
+			if (ImGui::Button(U8("道の始点に任せる")))
+			{
+				sp.Clear();
+			}
+
+			// 数値でも動かせるようにする。
+			// 車を置きに行くほどでもない微調整のため
+			Math::Vector3 pos = sp.Pos();
+			float yaw = sp.Yaw();
+
+			bool edited = ImGui::DragFloat3(U8("スポーン位置"), &pos.x, 0.1f);
+			edited |= ImGui::DragFloat(U8("スポーン向き(rad)"), &yaw, 0.01f);
+
+			if (edited)
+			{
+				sp.Set(pos, yaw);
 			}
 		});
 
@@ -462,7 +530,7 @@ void GameScene::Init()
 						// 抜けたら書き出す。押し忘れて消えるのを防ぐ
 						if (!m_roadEditing)
 						{
-							road->SavePath();
+							SaveAllEdits();
 
 							// 走行中のカメラへ戻す
 							if (auto h = m_wpEditCamHolder.lock()) { h->SetEnabled(false); }
@@ -471,107 +539,248 @@ void GameScene::Init()
 
 					if (m_roadEditing)
 					{
-						// 地形を筆で彫る。
-						// 道より先に置く。地面が無いと道の載る場所が決まらない
-						if (terrain)
+						//===== まとめて書き出す =====
+						// 触るものが増えて、書き出しボタンがあちこちに散っていた。
+						// どれを押したか覚えていられないので、1つにまとめる。
+						//
+						// 保存先は別々のファイルのままだが、押す側から見れば
+						// 「いまの状態を残す」の1つで足りる
+						if (ImGui::Button(U8("まとめて書き出す"), ImVec2(-1.0f, 0.0f)))
 						{
-							ImGui::SeparatorText(U8("地形を彫る"));
-							m_terrainBrush.DrawGui(terrain->WorkField());
+							SaveAllEdits();
 						}
 
-						// ガードレール
-						if (m_spRail)
+						ImGui::TextDisabled(U8("道 / 地形 / 飾り / スポーン"));
+						ImGui::Separator();
+
+						if (ImGui::CollapsingHeader(U8("地形を彫る"), ImGuiTreeNodeFlags_DefaultOpen))
 						{
-							ImGui::SeparatorText(U8("ガードレール"));
-
-							bool vis = m_spRail->IsVisible();
-							if (ImGui::Checkbox(U8("出す"), &vis)) { m_spRail->SetVisible(vis); }
-
-							ImGui::SameLine();
-							if (ImGui::Button(U8("置き直す")) && terrain)
+							// 地形を筆で彫る。
+							// 道より先に置く。地面が無いと道の載る場所が決まらない
+							if (terrain)
 							{
-								m_spRail->Build(*road, &terrain->Field());
+								m_terrainBrush.DrawGui(terrain->WorkField());
+							}
+						}
+
+						if (ImGui::CollapsingHeader(U8("道を引く"), ImGuiTreeNodeFlags_DefaultOpen))
+						{
+							// 一覧から選んで、数値で動かす。
+							// 選んでいる点は3Dの側で球と縦線が出る
+							// 上から見て線を引く。
+							// 3Dで掴むより狙いが合うので、こちらを先に置く
+							if (terrain)
+							{
+								ImGui::SeparatorText(U8("地図で引く"));
+								m_roadMap.DrawGui(*road, terrain->Field());
 							}
 
-							ImGui::Text(U8("全長 %.0f m / 支柱 %d 本"),
-							            m_spRail->GetLength(), m_spRail->GetPostCount());
-						}
+							ImGui::SeparatorText(U8("一覧と数値"));
+							m_roadEditor.DrawGui(*road);
 
-						// 一覧から選んで、数値で動かす。
-						// 選んでいる点は3Dの側で球と縦線が出る
-						// 上から見て線を引く。
-						// 3Dで掴むより狙いが合うので、こちらを先に置く
-						if (terrain)
-						{
-							ImGui::SeparatorText(U8("地図で引く"));
-							m_roadMap.DrawGui(*road, terrain->Field());
-						}
-
-						ImGui::SeparatorText(U8("一覧と数値"));
-						m_roadEditor.DrawGui(*road);
-
-						//===== 選んでいる点の裾の幅 =====
-						// 区間ごとに裾を伸ばしたいので、制御点に持たせている。
-						//
-						// 左右で別に持つ。谷側だけ伸ばして山側は詰める、
-						// という使い方をするので、1つの値だと片側に合わせるしかない
-						{
-							const int sel = (m_roadEditor.GetSelected() >= 0)
-							              ? m_roadEditor.GetSelected()
-							              : m_roadMap.GetSelected();
-
-							if (sel >= 0 && sel < road->PointCount())
+							//===== 選んでいる点の裾の幅 =====
+							// 区間ごとに裾を伸ばしたいので、制御点に持たせている。
+							//
+							// 左右で別に持つ。谷側だけ伸ばして山側は詰める、
+							// という使い方をするので、1つの値だと片側に合わせるしかない
 							{
-								ImGui::TextDisabled(U8("点 %d の裾と平場(進む向きに対して)"), sel);
+								const int sel = (m_roadEditor.GetSelected() >= 0)
+								? m_roadEditor.GetSelected()
+								: m_roadMap.GetSelected();
 
-								float wl = road->GetApronAt(sel, 0);
-								if (ImGui::DragFloat(U8("左の裾(m)"), &wl, 0.1f,
-								                     0.0f, RoadConst::ApronWidthMax))
+								if (sel >= 0 && sel < road->PointCount())
 								{
-									road->SetApronAt(sel, 0, wl);
-								}
+									ImGui::TextDisabled(U8("点 %d の裾と平場(進む向きに対して)"), sel);
+
+									float wl = road->GetApronAt(sel, 0);
+									if (ImGui::DragFloat(U8("左の裾(m)"), &wl, 0.1f,
+									0.0f, RoadConst::ApronWidthMax))
+									{
+										road->SetApronAt(sel, 0, wl);
+									}
 
 								float wr = road->GetApronAt(sel, 1);
 								if (ImGui::DragFloat(U8("右の裾(m)"), &wr, 0.1f,
-								                     0.0f, RoadConst::ApronWidthMax))
+								0.0f, RoadConst::ApronWidthMax))
 								{
 									road->SetApronAt(sel, 1, wr);
 								}
 
-								float fl = road->GetFlatAt(sel, 0);
-								if (ImGui::DragFloat(U8("左の平場(m)"), &fl, 0.05f,
-								                     0.0f, RoadConst::ApronFlatMax))
-								{
-									road->SetFlatAt(sel, 0, fl);
-								}
+							float fl = road->GetFlatAt(sel, 0);
+							if (ImGui::DragFloat(U8("左の平場(m)"), &fl, 0.05f,
+							0.0f, RoadConst::ApronFlatMax))
+							{
+								road->SetFlatAt(sel, 0, fl);
+							}
 
-								float fr = road->GetFlatAt(sel, 1);
-								if (ImGui::DragFloat(U8("右の平場(m)"), &fr, 0.05f,
-								                     0.0f, RoadConst::ApronFlatMax))
-								{
-									road->SetFlatAt(sel, 1, fr);
-								}
+							float fr = road->GetFlatAt(sel, 1);
+							if (ImGui::DragFloat(U8("右の平場(m)"), &fr, 0.05f,
+							0.0f, RoadConst::ApronFlatMax))
+							{
+								road->SetFlatAt(sel, 1, fr);
+							}
 
-								// 片側だけ触ると左右がちぐはぐになりやすい。
-								// 揃えたいときのために一手で戻せるようにする
-								if (ImGui::Button(U8("左右を揃える")))
-								{
-									road->SetApronAt(sel, 1, wl);
-									road->SetFlatAt(sel, 1, fl);
-								}
-								ImGui::SetItemTooltip(U8("右を左に合わせる"));
+							//===== ガードレール =====
+							// 有る無しだけ。柵の高さは規格で決まっている
+							bool rl = road->GetRailAt(sel, 0) > 0.5f;
+							bool rr = road->GetRailAt(sel, 1) > 0.5f;
 
-								ImGui::SetItemTooltip(U8(
-									"制御点の間はなめらかに繋がる。"
-									"向かいの裾と重なる所は、互いの真ん中で止まる"));
+							bool railEdited = ImGui::Checkbox(U8("左の柵"), &rl);
+							ImGui::SameLine();
+							railEdited |= ImGui::Checkbox(U8("右の柵"), &rr);
+
+							if (railEdited)
+							{
+								road->SetRailAt(sel, 0, rl ? 1.0f : 0.0f);
+								road->SetRailAt(sel, 1, rr ? 1.0f : 0.0f);
+								if (m_spRail && terrain)
+								{
+									m_spRail->Build(*road, &terrain->Field());
+								}
+							}
+
+							//===== 擁壁 =====
+							// 0 で壁なし。制御点の間はなめらかに繋がるので、
+							// 端の点を 0 にすれば壁がそこで消えていく
+							float ml = road->GetWallAt(sel, 0);
+							if (ImGui::DragFloat(U8("左の擁壁(m)"), &ml, 0.05f,
+							0.0f, RetainWallConst::MaxHeight))
+							{
+								road->SetWallAt(sel, 0, ml);
+								if (m_spWall) { m_spWall->Build(*road); }
+							}
+
+							float mr = road->GetWallAt(sel, 1);
+							if (ImGui::DragFloat(U8("右の擁壁(m)"), &mr, 0.05f,
+							0.0f, RetainWallConst::MaxHeight))
+							{
+								road->SetWallAt(sel, 1, mr);
+								if (m_spWall) { m_spWall->Build(*road); }
+							}
+
+							// 片側だけ触ると左右がちぐはぐになりやすい。
+							// 揃えたいときのために一手で戻せるようにする
+							if (ImGui::Button(U8("左右を揃える")))
+							{
+								road->SetApronAt(sel, 1, wl);
+								road->SetFlatAt(sel, 1, fl);
+							}
+							ImGui::SetItemTooltip(U8("右を左に合わせる"));
+
+							ImGui::SetItemTooltip(U8(
+							"制御点の間はなめらかに繋がる。"
+							"向かいの裾と重なる所は、互いの真ん中で止まる"));
 							}
 							else
 							{
 								ImGui::TextDisabled(U8("点を選ぶと、その区間の裾の幅を変えられる"));
 							}
+							}
+
+							road->DrawEditImGui();
 						}
 
-						road->DrawEditImGui();
+						if (ImGui::CollapsingHeader(U8("ガードレール")))
+						{
+							//===== ガードレール =====
+							// 置く場所は制御点ごとに決める。
+							// 落差だけで自動に出すと、要らない所に立って欲しい所に立たない
+							if (m_spRail && terrain)
+							{
+								bool vis = m_spRail->IsVisible();
+								if (ImGui::Checkbox(U8("出す##rail"), &vis)) { m_spRail->SetVisible(vis); }
+
+								ImGui::SameLine();
+								if (ImGui::Button(U8("地形から入れる##rail")))
+								{
+									HjGuardRail::AutoFill(*road, &terrain->Field());
+									m_spRail->Build(*road, &terrain->Field());
+								}
+
+							ImGui::SameLine();
+							if (ImGui::Button(U8("全部消す##rail")))
+							{
+								for (int i = 0; i < road->PointCount(); ++i)
+								{
+									road->SetRailAt(i, 0, 0.0f);
+									road->SetRailAt(i, 1, 0.0f);
+								}
+							m_spRail->Build(*road, &terrain->Field());
+							}
+
+							ImGui::Text(U8("全長 %.0f m / 支柱 %d 本"),
+							m_spRail->GetLength(), m_spRail->GetPostCount());
+							}
+						}
+
+						if (ImGui::CollapsingHeader(U8("擁壁")))
+						{
+							//===== 擁壁 =====
+							// 立てる場所は制御点ごとの高さが決める。
+							// 地形からの自動は、手で直す下敷きとして用意する
+							if (m_spWall)
+							{
+								bool wv = m_spWall->IsVisible();
+								if (ImGui::Checkbox(U8("出す##wall"), &wv)) { m_spWall->SetVisible(wv); }
+
+								ImGui::SameLine();
+								if (ImGui::Button(U8("地形から入れる")) && terrain)
+								{
+									HjRetainWall::AutoFill(*road, &terrain->Field());
+									m_spWall->Build(*road);
+								}
+
+							ImGui::SameLine();
+							if (ImGui::Button(U8("全部消す##wall")))
+							{
+								for (int i = 0; i < road->PointCount(); ++i)
+								{
+									road->SetWallAt(i, 0, 0.0f);
+									road->SetWallAt(i, 1, 0.0f);
+								}
+							m_spWall->Build(*road);
+							}
+
+							ImGui::Text(U8("全長 %.0f m"), m_spWall->GetLength());
+							}
+						}
+
+						if (ImGui::CollapsingHeader(U8("飾り(木・低木)")))
+						{
+							//===== 飾り(木・低木) =====
+							// 置く前に、そのモデルを実際の大きさで地面に出す。
+							// 「置いてから直す」の往復が無くなるのが一番効く
+							if (m_spProps && terrain)
+							{
+								m_propEditor.DrawGui(*m_spProps);
+
+								if (ImGui::Button(U8("読み直す##props")))
+								{
+									m_spProps->Load();
+									m_spProps->Refresh(terrain->Field());
+								}
+
+							ImGui::SameLine();
+							if (ImGui::Button(U8("全部消す##props"))) { m_spProps->Clear(); }
+							}
+						}
+
+						if (ImGui::CollapsingHeader(U8("草")))
+						{
+							//===== 草 =====
+							// こちらは撒く。1株ずつ置く意味がない
+							if (m_spFoliage && terrain)
+							{
+								ImGui::Text(U8("%d 株"), m_spFoliage->GetGrassCount());
+
+								// 撒き直すのに時間が掛かるので、押した時だけ
+								if (ImGui::Button(U8("撒き直す")))
+								{
+									m_spFoliage->BuildGrass(terrain->Field(), road.get());
+								}
+							}
+						}
+
 					}
 
 					ImGui::Separator();
@@ -821,7 +1030,15 @@ void GameScene::UpdateRoadEdit()
 		// 筆が動いている間は、点を掴む処理を止める。
 		// 両方が同じ左ボタンを見ているので、混ざると地面を彫りながら
 		// 制御点を動かすことになる
-		if (m_terrainBrush.IsEnabled())
+		// 木を置いている間も、点を掴む処理を止める。
+		// どれも同じ左ボタンを見ているので、混ざると
+		// 木を置きながら制御点が動く
+		if (m_propEditor.IsEnabled() && m_spProps)
+		{
+			m_propEditor.Update(*m_spProps, m_spTerrain->Field(),
+			                    m_spRoad.get(), m_terrainBrush);
+		}
+		else if (m_terrainBrush.IsEnabled())
 		{
 			m_terrainBrush.Update(m_spTerrain->WorkField(), *m_spTerrain, m_spRoad.get());
 
@@ -863,6 +1080,29 @@ void GameScene::UpdateRoadEdit()
 
 		// 柵も置き直す。道が動けば、谷の位置も縁の高さも変わる
 		if (m_spRail) { m_spRail->Build(*m_spRoad, &m_spTerrain->Field()); }
+
+		// 擁壁も組み直す。道が動けば断面の向きも路面の高さも変わる
+		if (m_spWall) { m_spWall->Build(*m_spRoad); }
+
+		// 白線も引き直す。路面の高さも幅も変わっている
+		if (m_spMark) { m_spMark->Build(*m_spRoad); }
+
+		// 視線誘導標も立て直す。曲がりの位置が変わっている
+		if (m_spDelin) { m_spDelin->Build(*m_spRoad); }
+
+		// 標識も立て直す。カーブの入口が動いている
+		if (m_spSign) { m_spSign->Build(*m_spRoad); }
+
+		// ミラーも立て直す。カーブの頂点が動いている
+		if (m_spMirror) { m_spMirror->Build(*m_spRoad); }
+
+		// 飾りは高さだけ取り直す。置いた場所は動かさない
+		if (m_spProps) { m_spProps->Refresh(m_spTerrain->Field()); }
+
+		// 草も撒き直す。
+		// 道が動いた所は法面になっているので、そのままだと
+		// 削った斜面に草が刺さったまま残る
+		if (m_spFoliage) { m_spFoliage->BuildGrass(m_spTerrain->Field(), m_spRoad.get()); }
 	}
 }
 
@@ -1116,4 +1356,31 @@ void GameScene::DrawSpectateImGui()
 	{
 		ImGui::TextDisabled(U8("(他のプレイヤーがいません)"));
 	}
+}
+
+
+//----------------------------------------------------------
+// 編集したものを一度に書き出す
+//
+// ■ なぜまとめるか
+// 触るものが増えて、書き出しボタンがあちこちに散っていた。
+// どれを押したか覚えていられないので、押し忘れて消える。
+//
+// 保存先は別々のファイルのままでよい。道は road_path.txt、
+// 地形は height_edit.r32、飾りは props.txt。
+// まとめるのは操作であって、ファイルではない
+//----------------------------------------------------------
+void GameScene::SaveAllEdits()
+{
+	// 道の制御点。裾・平場・擁壁・柵も同じ行に入っている
+	if (m_spRoad) { m_spRoad->SavePath(); }
+
+	// 彫った地形。書き出すのは素地で、道の削りは焼き込まない
+	if (m_spTerrain) { m_terrainBrush.Save(m_spTerrain->Field()); }
+
+	// 手で置いた飾り
+	if (m_spProps) { m_spProps->Save(); }
+
+	// 走り出す場所
+	HjSpawnPoint::Instance().Save();
 }

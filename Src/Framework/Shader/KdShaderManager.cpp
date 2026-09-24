@@ -439,6 +439,16 @@ void KdShaderManager::WriteCBAmbientLight(const Math::Vector4& col)
 	m_cb9_Light.Write();
 }
 
+void KdShaderManager::WriteCBEnvColors(const Math::Vector4& up,
+                                       const Math::Vector4& side,
+                                       const Math::Vector4& down)
+{
+	m_cb9_Light.Work().EnvUp   = up;
+	m_cb9_Light.Work().EnvSide = side;
+	m_cb9_Light.Work().EnvDown = down;
+	m_cb9_Light.Write();
+}
+
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
 // 平行光のデータをGPUに転送
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -487,6 +497,28 @@ void KdShaderManager::WriteCBPointLight(const std::list<PointLight>& pointLights
 
 		++pointIndex;
 	}
+
+	m_cb9_Light.Write();
+}
+
+void KdShaderManager::WriteCBSpotLight(const std::list<SpotLight>& spotLights)
+{
+	cbLight& light = m_cb9_Light.Work();
+
+	UINT index = 0;
+
+	for (const SpotLight& spot : spotLights)
+	{
+		// 入れ物からあふれたぶんは捨てる。
+		// 詰め続けると、定数バッファの外を踏む
+		if (index >= cbLight::MaxSpotLightNum) { break; }
+
+		light.SpotLights[index] = spot;
+
+		++index;
+	}
+
+	light.SpotLight_Num = static_cast<int>(index);
 
 	m_cb9_Light.Write();
 }

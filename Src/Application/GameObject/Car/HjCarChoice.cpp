@@ -56,6 +56,20 @@ const char* HjCarChoice::NameOf(Kind k)
 	return CC::Names[i];
 }
 
+const char* HjCarChoice::MakerOf(Kind k)
+{
+	const int i = static_cast<int>(k);
+	if (i < 0 || i >= static_cast<int>(CC::Kind::Count)) { return ""; }
+	return CC::Makers[i];
+}
+
+const char* HjCarChoice::ModelOf(Kind k)
+{
+	const int i = static_cast<int>(k);
+	if (i < 0 || i >= static_cast<int>(CC::Kind::Count)) { return ""; }
+	return CC::Models[i];
+}
+
 const char* HjCarChoice::Name() const
 {
 	return NameOf(m_kind);

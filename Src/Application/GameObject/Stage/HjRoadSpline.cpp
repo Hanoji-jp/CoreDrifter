@@ -1,4 +1,5 @@
 ﻿#include "HjRoadSpline.h"
+#include "../../Const/RetainWallConst.h"
 
 #include <fstream>
 #include <sstream>
@@ -29,6 +30,8 @@ bool HjRoadSpline::LoadFromFile(const std::string& path)
 	std::vector<Math::Vector3> pts;
 	std::vector<float> apronL, apronR;
 	std::vector<float> flatL, flatR;
+	std::vector<float> wallL, wallR;
+	std::vector<float> railL, railR;
 	std::string line;
 
 	while (std::getline(ifs, line))
@@ -63,11 +66,26 @@ bool HjRoadSpline::LoadFromFile(const std::string& path)
 		float fr = RC::ApronFlat;
 		if (Next(fl)) { fr = fl; Next(fr); }
 
+		// 擁壁は無い行を 0(壁なし)にする。
+		// 既定で立てると、古いファイルを読んだ瞬間に全線が壁になる
+		float ml = 0.0f;
+		float mr = 0.0f;
+		if (Next(ml)) { mr = ml; Next(mr); }
+
+		// 柵も無い行は 0(無し)
+		float gl = 0.0f;
+		float gr = 0.0f;
+		if (Next(gl)) { gr = gl; Next(gr); }
+
 		pts.push_back(Math::Vector3(x, y, z));
 		apronL.push_back(wl);
 		apronR.push_back(wr);
 		flatL.push_back(fl);
 		flatR.push_back(fr);
+		wallL.push_back(ml);
+		wallR.push_back(mr);
+		railL.push_back(gl);
+		railR.push_back(gr);
 	}
 
 	if (static_cast<int>(pts.size()) < RC::MinPoints) { return false; }
@@ -77,6 +95,10 @@ bool HjRoadSpline::LoadFromFile(const std::string& path)
 	m_apron[1] = apronR;
 	m_flat[0] = flatL;
 	m_flat[1] = flatR;
+	m_wall[0] = wallL;
+	m_wall[1] = wallR;
+	m_rail[0] = railL;
+	m_rail[1] = railR;
 	SyncApron();
 	return true;
 }
@@ -362,6 +384,10 @@ bool HjRoadSpline::InsertAfter(int index)
 	m_apron[1].insert(m_apron[1].begin() + index + 1, ApronAt(index, 1));
 	m_flat[0].insert(m_flat[0].begin() + index + 1, FlatAt(index, 0));
 	m_flat[1].insert(m_flat[1].begin() + index + 1, FlatAt(index, 1));
+	m_wall[0].insert(m_wall[0].begin() + index + 1, WallAt(index, 0));
+	m_wall[1].insert(m_wall[1].begin() + index + 1, WallAt(index, 1));
+	m_rail[0].insert(m_rail[0].begin() + index + 1, RailAt(index, 0));
+	m_rail[1].insert(m_rail[1].begin() + index + 1, RailAt(index, 1));
 	BuildLengthTable();
 	return true;
 }
@@ -384,6 +410,14 @@ bool HjRoadSpline::ErasePoint(int index)
 		{
 			m_apron[side].erase(m_apron[side].begin() + index);
 		}
+		if (index < static_cast<int>(m_rail[side].size()))
+		{
+			m_rail[side].erase(m_rail[side].begin() + index);
+		}
+		if (index < static_cast<int>(m_wall[side].size()))
+		{
+			m_wall[side].erase(m_wall[side].begin() + index);
+		}
 		if (index < static_cast<int>(m_flat[side].size()))
 		{
 			m_flat[side].erase(m_flat[side].begin() + index);
@@ -398,7 +432,7 @@ bool HjRoadSpline::SaveToFile(const std::string& path) const
 	std::ofstream ofs(path);
 	if (!ofs) { return false; }
 
-	ofs << "# 道の制御点。1行に x y z 左の裾 右の裾 左の平場 右の平場\n";
+	ofs << "# 道の制御点。1行に x y z 左の裾 右の裾 左の平場 右の平場 左の擁壁 右の擁壁 左の柵 右の柵\n";
 	ofs << "# 高さを書いておくと、その高さが道になる(地形がそれに合わせて削れる)\n";
 	ofs << "# 裾の幅は省ける。1つだけなら両側に使う\n";
 
@@ -408,9 +442,100 @@ bool HjRoadSpline::SaveToFile(const std::string& path) const
 		const int k = static_cast<int>(i);
 		ofs << p.x << " " << p.y << " " << p.z << " "
 		    << ApronAt(k, 0) << " " << ApronAt(k, 1) << " "
-		    << FlatAt(k, 0)  << " " << FlatAt(k, 1)  << "\n";
+		    << FlatAt(k, 0)  << " " << FlatAt(k, 1)  << " "
+		    << WallAt(k, 0)  << " " << WallAt(k, 1)  << " "
+		    << RailAt(k, 0)  << " " << RailAt(k, 1)  << "\n";
 	}
 	return true;
+}
+
+//----------------------------------------------------------
+// 制御点ごとの擁壁の高さ
+//
+// 0 なら壁なし。0 と 0 でない値の境目が壁の始まりと終わりになる
+//----------------------------------------------------------
+float HjRoadSpline::WallAt(int index, int side) const
+{
+	const std::vector<float>& v = m_wall[std::clamp(side, 0, 1)];
+	if (v.empty()) { return 0.0f; }
+
+	return v[std::clamp(index, 0, static_cast<int>(v.size()) - 1)];
+}
+
+void HjRoadSpline::SetWallAt(int index, int side, float h)
+{
+	SyncApron();
+
+	std::vector<float>& v = m_wall[std::clamp(side, 0, 1)];
+	if (index < 0 || index >= static_cast<int>(v.size())) { return; }
+
+	v[index] = std::clamp(h, 0.0f, RetainWallConst::MaxHeight);
+}
+
+//----------------------------------------------------------
+// 道のりから擁壁の高さを引く
+//
+// 制御点の間はなめらかに繋ぐ。
+// そのまま切り替えると、壁の天端がそこで階段になる
+//----------------------------------------------------------
+float HjRoadSpline::WallAtS(float s, int side) const
+{
+	const std::vector<float>& v = m_wall[std::clamp(side, 0, 1)];
+	if (v.empty()) { return 0.0f; }
+
+	int seg = 0;
+	float t = 0.0f;
+	ToSegment(s, seg, t);
+
+	const int n = static_cast<int>(v.size());
+	const int i0 = std::clamp(seg,     0, n - 1);
+	const int i1 = std::clamp(seg + 1, 0, n - 1);
+
+	// 端で折れないよう滑らかに
+	const float k = t * t * (3.0f - 2.0f * t);
+
+	return v[i0] + (v[i1] - v[i0]) * k;
+}
+
+//----------------------------------------------------------
+// 制御点ごとのガードレール
+//
+// 0 なら無し、1 なら有り。間は繋ぐので 0.5 を境に切り替わる
+//----------------------------------------------------------
+float HjRoadSpline::RailAt(int index, int side) const
+{
+	const std::vector<float>& v = m_rail[std::clamp(side, 0, 1)];
+	if (v.empty()) { return 0.0f; }
+
+	return v[std::clamp(index, 0, static_cast<int>(v.size()) - 1)];
+}
+
+void HjRoadSpline::SetRailAt(int index, int side, float on)
+{
+	SyncApron();
+
+	std::vector<float>& v = m_rail[std::clamp(side, 0, 1)];
+	if (index < 0 || index >= static_cast<int>(v.size())) { return; }
+
+	v[index] = std::clamp(on, 0.0f, 1.0f);
+}
+
+float HjRoadSpline::RailAtS(float s, int side) const
+{
+	const std::vector<float>& v = m_rail[std::clamp(side, 0, 1)];
+	if (v.empty()) { return 0.0f; }
+
+	int seg = 0;
+	float t = 0.0f;
+	ToSegment(s, seg, t);
+
+	const int n = static_cast<int>(v.size());
+	const int i0 = std::clamp(seg,     0, n - 1);
+	const int i1 = std::clamp(seg + 1, 0, n - 1);
+
+	const float k = t * t * (3.0f - 2.0f * t);
+
+	return v[i0] + (v[i1] - v[i0]) * k;
 }
 
 //----------------------------------------------------------
@@ -538,6 +663,15 @@ void HjRoadSpline::SyncApron()
 	m_apron[1].resize(m_points.size(), RC::ApronWidth);
 	m_flat[0].resize(m_points.size(), RC::ApronFlat);
 	m_flat[1].resize(m_points.size(), RC::ApronFlat);
+
+	// 擁壁は既定で無し。
+	// 既定で立てると、古い road_path.txt を読んだ瞬間に全線が壁になる
+	m_wall[0].resize(m_points.size(), 0.0f);
+	m_wall[1].resize(m_points.size(), 0.0f);
+
+	// 柵も既定で無し
+	m_rail[0].resize(m_points.size(), 0.0f);
+	m_rail[1].resize(m_points.size(), 0.0f);
 }
 
 //----------------------------------------------------------

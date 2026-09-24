@@ -46,6 +46,26 @@ public:
 	// 不透明シーンにだけ適用する（この後に描くエフェクトには線が乗らない）。
 	void ApplySceneOutline();
 
+	//===== 環境遮蔽(SSAO) =====
+	// 物と物が近い所へ陰を落とす。
+	//
+	// 平行光の影は形の大きな面にしか落ちない。
+	// タイヤと地面の間、ドアの隙間、バンパーの奥。
+	// そういう所の陰は光源の影では出せないので、別に出す。
+	//
+	// これが無いと、物が置かれているのではなく
+	// 浮いた絵を重ねたように見える
+	void ApplySceneAO();
+
+	void SetSSAOEnabled(bool enable) { m_ssaoEnabled = enable; }
+	bool IsSSAOEnabled() const { return m_ssaoEnabled; }
+
+	float& WorkAORadius()   { return m_cb0_AOInfo.Work().Radius; }
+	float& WorkAOBias()     { return m_cb0_AOInfo.Work().Bias; }
+	float& WorkAOStrength() { return m_cb0_AOInfo.Work().Strength; }
+	float& WorkAOMaxDist()  { return m_cb0_AOInfo.Work().MaxDist; }
+
+
 	// 画面エッジ検出アウトライン(トゥーン輪郭)の ON/OFF と調整用アクセサ
 	void SetSceneOutlineEnabled(bool enable) { m_sceneOutlineEnabled = enable; }
 
@@ -168,6 +188,7 @@ private:
 	ID3D11PixelShader* m_PS_DoF = nullptr;
 	ID3D11PixelShader* m_PS_Bright = nullptr;
 	ID3D11PixelShader* m_PS_Outline = nullptr;
+	ID3D11PixelShader*	m_PS_SSAO = nullptr;
 	ID3D11PixelShader* m_PS_SmokeOutline = nullptr;   // 煙シルエット輪郭
 	ID3D11PixelShader* m_PS_TextFluid    = nullptr;   // 文字流体化
 	ID3D11PixelShader* m_PS_Desaturate   = nullptr;   // 彩度(グレースケール)
@@ -225,6 +246,20 @@ private:
 		float _pad[3]  = { 0.0f, 0.0f, 0.0f };
 	};
 	KdConstantBuffer<cbHalftone>		m_cb0_Halftone;
+
+	// 環境遮蔽(SSAO)パラメータ
+	struct cbAOInfo
+	{
+		float TexelX = 0.0f;
+		float TexelY = 0.0f;
+		float Radius   = 0.55f;   // 見る範囲(ビュー空間の距離)
+		float Bias     = 0.03f;   // 自己遮蔽よけ
+
+		float Strength = 1.35f;   // 効き具合
+		float MaxDist  = 1.60f;   // これより遠い面は無視する
+		float _aopad[2] = { 0.0f, 0.0f };
+	};
+	KdConstantBuffer<cbAOInfo>		m_cb0_AOInfo;
 
 	// アウトライン（画面エッジ検出）パラメータ
 	struct cbOutlineInfo
@@ -334,9 +369,10 @@ private:
 	// 3Dシーンの背景色。既定は元の青。
 	// 背景を持たない画面(タイトルなど)では、この色がそのまま出る
 	Math::Color   m_sceneClearColor    = kBlueColor;
+	bool          m_ssaoEnabled = true;        // 環境遮蔽 ON/OFF
 	bool          m_sceneOutlineEnabled = true; // 画面エッジ検出アウトライン(トゥーン輪郭)ON/OFF
 	bool          m_smokeOutlineEnabled = true; // 煙シルエット輪郭 ON/OFF
-	bool          m_halftoneEnabled     = true; // 画面全体のハーフトーン ON/OFF
+	bool          m_halftoneEnabled     = false; // 画面全体のハーフトーン ON/OFF
 
 	// 被ダメ赤フラッシュ（0=消灯 〜 1=最大）
 	float         m_damageFlashTimer = 0.0f;
@@ -347,6 +383,7 @@ private:
 
 	KdRenderTargetPack	m_depthOfFieldRTPack;
 	KdRenderTargetPack	m_outlineRTPack;   // アウトライン合成結果
+	KdRenderTargetPack	m_ssaoRTPack;      // 環境遮蔽の合成結果
 	KdRenderTargetPack	m_smokeRTPack;     // 煙専用の描画先(色+アルファ。シルエット輪郭用)
 	KdRenderTargetPack	m_smokeBlurRTPack; // 煙をガウスぼかしした版(縁を柔らかく＋ポップ目立たなく)
 	KdRenderTargetChanger m_smokeRTChanger;

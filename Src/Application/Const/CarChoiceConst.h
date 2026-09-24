@@ -27,6 +27,26 @@ namespace CarChoiceConst
 		"HONDA NSX",
 	};
 
+	// 作り手の名前。中央の見出しの小さい方に出す
+	constexpr const char* Makers[] =
+	{
+		"NISSAN",
+		"HONDA",
+	};
+
+	// 型番。中央の見出しの大きい方(96px)に出す。
+	//
+	// ■ モデルのファイル名を使わないこと
+	// 見た目の差し替え(MOD)を当てるとファイル名が変わるので、
+	// 車を替えていないのに型番が変わってしまう。
+	// しかも自動出力の名前は "silvia_body" のように長く、
+	// 大見出しに収まらず台の下へ潜り込む
+	constexpr const char* Models[] =
+	{
+		"S15",
+		"NSX",
+	};
+
 	// 選んだ車を覚えておくファイル。
 	// 1行しかないので、既存の「名前 値」の作法に合わせる
 	constexpr const char* SavePath = "Asset/Data/CarChoice.txt";

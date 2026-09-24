@@ -31,6 +31,12 @@ public:
 	// 道と地形から組む。道を作り直したら、こちらも呼ぶ
 	void Build(const HjRoad& road, const HjHeightField* field);
 
+	// 地形の落ち方から当てはめる。
+	//
+	// 手で置く前の下敷き。落差のある所へ柵を入れて、
+	// そこから要らない区間を外していく使い方を想定している
+	static void AutoFill(HjRoad& road, const HjHeightField* field);
+
 	void DrawLit() override;
 	void GenerateDepthMapFromLight() override;
 

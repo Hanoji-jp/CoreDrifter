@@ -1,5 +1,6 @@
 ﻿#include "HjRoad.h"
 #include "../../Const/SplatConst.h"
+#include "../../Const/RetainWallConst.h"
 #include "HjTerrain.h"
 
 #include "HjHeightField.h"
@@ -856,6 +857,47 @@ void HjRoad::DeformTerrain(HjHeightField* field)
 					bedY = SurfaceY(i, edge);
 				}
 
+				//===== 擁壁のある所は、壁より手前の土を削り切る =====
+				//
+				// 擁壁は土を留めるもの。壁の手前に土があってはいけない。
+				//
+				// 寄せる重みは外へ向かって緩むので、山が高いほど削り残しが出る。
+				// 23mかけて戻す作りなので、壁のある5.4m地点でも1割ほど残り、
+				// 山を盛るとその1割が壁を貫いて顔を出す。
+				//
+				// 壁の内側だけは、重みを使わず高さそのものを切る
+				{
+					const int wside = (signedOff >= 0.0f) ? 1 : 0;
+
+					if (dist < RetainWallConst::Offset
+					 && m_spline.WallAtS(s, wside) > 0.0f)
+					{
+						const float edge = (signedOff >= 0.0f)
+							? RC::MatchEdge : -RC::MatchEdge;
+
+						// 路肩の高さまで落とす。壁の足元はここで平らになる
+						const float flat = SurfaceY(i, edge);
+
+						const int k2 = iz * nx + ix;
+						auto c2 = touched.find(k2);
+
+						if (c2 == touched.end())
+						{
+							Cell cut;
+							cut.target = flat;
+							cut.weight = 1.0f;   // 緩めない。切り切る
+							touched[k2] = cut;
+						}
+						else
+						{
+							c2->second.target = std::min(c2->second.target, flat);
+							c2->second.weight = 1.0f;
+						}
+
+						continue;
+					}
+				}
+
 				const int key = iz * nx + ix;
 				auto it = touched.find(key);
 
@@ -1083,6 +1125,144 @@ void HjRoad::CrossAt(int i, Math::Vector3& outCenter,
 }
 
 //----------------------------------------------------------
+// 道のりを指して断面を引く
+//
+// 中心はスプラインから直に取る。刻みの粗さに影響されない。
+// 向きとミターは前後の刻みから繋ぐ
+//----------------------------------------------------------
+void HjRoad::FrameAtS(float s, Math::Vector3& outCenter,
+                      Math::Vector3& outRight, float& outMiter) const
+{
+	outCenter = m_spline.PositionAt(s);
+	outRight  = Math::Vector3::Right;
+	outMiter  = 1.0f;
+
+	const int n = StationCount();
+	if (n < 1) { return; }
+
+	int   i0 = 0;
+	float t  = 0.0f;
+	FindStation(s, i0, t);
+
+	i0 = std::clamp(i0, 0, n - 1);
+	const int i1 = std::min(i0 + 1, n - 1);
+
+	Math::Vector3 r0, r1;
+	float m0 = 1.0f, m1 = 1.0f;
+	CrossFrame(i0, r0, m0);
+	CrossFrame(i1, r1, m1);
+
+	outRight = r0 + (r1 - r0) * t;
+	if (outRight.LengthSquared() > 1e-8f) { outRight.Normalize(); }
+
+	outMiter = m0 + (m1 - m0) * t;
+}
+
+//----------------------------------------------------------
+// どちらへどれだけ曲がっているか
+//
+// 1mあたりのラジアン。符号は曲がる向きで、正なら右。
+//
+// ■ 符号の根拠
+// 左手系で 前=+Z / 右=+X とする。
+// +Z へ進みながら右(+X)へ θ 曲がると、
+//   v1 = (0, 0, 1)
+//   v2 = (sinθ, 0, cosθ)
+// となり
+//   v1.z * v2.x - v1.x * v2.z = sinθ > 0
+// なので、この式が正なら右へ曲がっている
+//----------------------------------------------------------
+float HjRoad::TurnAt(int step) const
+{
+	const int n = StationCount();
+	if (n < 3) { return 0.0f; }
+
+	const float total = TotalLength();
+	const float s     = StationS(std::clamp(step, 0, n - 1));
+
+	// 前後をどれだけ離して見るか(m)。
+	// 近すぎると刻みの揺れを拾い、遠すぎるとヘアピンが均されて消える
+	const float d = RC::TurnSampleDist;
+
+	const float s0 = std::max(s - d, 0.0f);
+	const float s2 = std::min(s + d, total);
+	if (s2 - s0 < 0.1f) { return 0.0f; }
+
+	const Math::Vector3 p0 = m_spline.PositionAt(s0);
+	const Math::Vector3 p1 = m_spline.PositionAt(s);
+	const Math::Vector3 p2 = m_spline.PositionAt(s2);
+
+	// 高さは見ない。坂を曲がりと取り違える
+	Math::Vector3 v1(p1.x - p0.x, 0.0f, p1.z - p0.z);
+	Math::Vector3 v2(p2.x - p1.x, 0.0f, p2.z - p1.z);
+
+	if (v1.LengthSquared() < 1e-8f || v2.LengthSquared() < 1e-8f) { return 0.0f; }
+
+	v1.Normalize();
+	v2.Normalize();
+
+	const float cross = v1.z * v2.x - v1.x * v2.z;
+	const float dot   = std::clamp(v1.x * v2.x + v1.z * v2.z, -1.0f, 1.0f);
+
+	const float ang = acosf(dot) * ((cross >= 0.0f) ? 1.0f : -1.0f);
+
+	return ang / (s2 - s0);
+}
+
+//----------------------------------------------------------
+// 路肩の外に物を置くときの高さ
+//
+// 断面式は舗装の外では一定値になるので、そのまま使うと
+// 柵も標識もミラーも「路面を延ばした平面」の上に立つ。
+//
+// 高さマップには道の面(裾を含む)を焼き戻してあるので、そちらを引く
+//----------------------------------------------------------
+float HjRoad::GroundAt(int step, float offset) const
+{
+	const float fallback = SurfaceY(step, offset);
+
+	if (!m_pField || !m_pField->IsValid()) { return fallback; }
+
+	Math::Vector3 center, right;
+	float miter = 1.0f;
+	CrossAt(step, center, right, miter);
+
+	const float off = offset * miter;
+	const float wx = center.x + right.x * off;
+	const float wz = center.z + right.z * off;
+
+	if (!m_pField->Contains(wx, wz)) { return fallback; }
+
+	const float h = m_pField->HeightAt(wx, wz);
+
+	// 地形の外(データが無い所)は断面式で代用する
+	if (h <= TerrainConst::OutsideHeight) { return fallback; }
+
+	return h;
+}
+
+//----------------------------------------------------------
+// 道のりと横位置での路面の高さ
+//----------------------------------------------------------
+float HjRoad::HeightAtS(float s, float offset) const
+{
+	const int n = StationCount();
+	if (n < 1) { return 0.0f; }
+
+	int   i0 = 0;
+	float t  = 0.0f;
+	FindStation(s, i0, t);
+
+	i0 = std::clamp(i0, 0, n - 1);
+	const int i1 = std::min(i0 + 1, n - 1);
+
+	const float a2 = SurfaceY(i0, offset);
+	const float b2 = SurfaceY(i1, offset);
+
+	return a2 + (b2 - a2) * t;
+}
+
+//----------------------------------------------------------
 // 道のりで並んだ値を、任意の道のりで引く
 //
 // 刻みは曲がりに合わせて変わるので、番号では引けない。
@@ -1189,6 +1369,24 @@ void HjRoad::ResolveApronSpan()
 			m_apronSpan[side][i] = std::clamp(
 				m_apronSpan[side][i] + extra * m_apronFollowFlat,
 				0.0f, RC::ApronWidthMax);
+
+			//===== 擁壁のある所は、平場を壁の足元まで伸ばす =====
+			//
+			// 擁壁は土を留めるもの。壁より手前に土があってはいけない。
+			//
+			// 平場が壁まで届いていないと、その先で裾が地形へ向かって
+			// 登り始めるので、壁の足元に土が盛り上がって壁を貫く。
+			// 壁の位置まで平らに保てば、壁が土を留めている形になる
+			if (m_spline.WallAtS(s, side) > 0.0f)
+			{
+				const float want = RetainWallConst::Offset - inner;
+
+				m_apronFlatSpan[side][i] =
+					std::max(m_apronFlatSpan[side][i], want);
+
+				m_apronSpan[side][i] =
+					std::max(m_apronSpan[side][i], m_apronFlatSpan[side][i]);
+			}
 		}
 
 		//===== 向かいの道を探す =====
@@ -1333,6 +1531,13 @@ void HjRoad::MarkCover(const HjHeightField* field,
 	// 面から直に出せば、残った所だけが消える
 	std::vector<unsigned char> inside(static_cast<size_t>(nx) * nz, 0);
 
+	// 面の高さも一緒に取る。
+	//
+	// これを高さマップへ焼き戻すことで、当たり判定と見た目を揃える。
+	// 焼かないと、裾は「見えている面」と「DeformTerrain が寄せた地形」の
+	// 2つの別々の面になり、車は見えていない面の上を走ることになる
+	m_surfaceY.clear();
+
 	for (const auto& f : faces)
 	{
 		const Math::Vector3& a = verts[f.Idx[0]].Pos;
@@ -1356,6 +1561,12 @@ void HjRoad::MarkCover(const HjHeightField* field,
 		if (fabsf(e) < 1e-6f) { continue; }
 		const float invE = 1.0f / e;
 
+		// 縦に近い面か。裾の外端の壁がこれに当たる
+		Math::Vector3 fn = (b - a).Cross(cpos - a);
+		const float fl = fn.Length();
+		const bool steep = (fl < 1e-8f)
+		                || (fabsf(fn.y / fl) < RC::BakeUpMin);
+
 		for (int iz = z0; iz <= z1; ++iz)
 		{
 			const float wz = iz * cs - offZ;
@@ -1370,7 +1581,27 @@ void HjRoad::MarkCover(const HjHeightField* field,
 
 				if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) { continue; }
 
-				inside[static_cast<size_t>(iz) * nx + ix] = 1;
+				const int cell = iz * nx + ix;
+				inside[static_cast<size_t>(cell)] = 1;
+
+				// 縦の壁は飛ばす。
+				// 真上から見ると潰れているので、高さを取ると
+				// 壁の上端と下端のどちらが来るか決まらない
+				if (!steep)
+				{
+					// 三角の面の上での高さ。重心座標で混ぜる
+					const float y = a.y * w1 + b.y * w2 + cpos.y * w0;
+
+					auto it = m_surfaceY.find(cell);
+
+					// 重なっている所は高いほうを採る。
+					// ヘアピンで裾が折り重なると、下の面を採ったら
+					// 車が上の面を突き抜けて落ちる
+					if (it == m_surfaceY.end() || y > it->second)
+					{
+						m_surfaceY[cell] = y;
+					}
+				}
 			}
 		}
 	}
@@ -1407,6 +1638,34 @@ void HjRoad::MarkCover(const HjHeightField* field,
 
 			if (all) { m_coverCells.insert(iz * nx + ix); }
 		}
+	}
+}
+
+//----------------------------------------------------------
+// 道の面の高さを高さマップへ焼き戻す
+//
+// ■ なぜ要るか
+// 裾は「見えている面」と「DeformTerrain が寄せた地形」の2つがあり、
+// 別々の式で作られているので一致しない。
+// 車は地形のほうを走るので、見た目と当たり判定がずれる。
+// 木を置くときの狙いも、見えている面ではなく地形に当たる。
+//
+// 面から取った高さをそのまま書けば、両者が同じものになる。
+//
+// ■ 積み上がらない理由
+// Rebuild は毎回 RestoreCell で素地へ戻してから削り直す。
+// 焼いた値もその範囲に入っているので、次の回には消えている
+//----------------------------------------------------------
+void HjRoad::BakeSurface(HjHeightField* field)
+{
+	if (!field || !field->IsValid()) { return; }
+	if (m_surfaceY.empty()) { return; }
+
+	const int nx = field->GetSizeX();
+
+	for (const auto& kv : m_surfaceY)
+	{
+		field->SetHeightAtCell(kv.first % nx, kv.first / nx, kv.second);
 	}
 }
 
@@ -1970,6 +2229,38 @@ void HjRoad::SetFlatAt(int i, int side, float w)
 }
 
 //----------------------------------------------------------
+// 擁壁の高さ
+//
+// 道の形は変わらないので Rebuild は呼ばない。
+// 呼ぶと制御点を1つ触るたびに地形の削り直しまで走る
+//----------------------------------------------------------
+// 制御点に一番近い刻み
+//----------------------------------------------------------
+int HjRoad::StepOfPoint(int i) const
+{
+	const int n = StationCount();
+	if (n < 1) { return 0; }
+
+	const float want = m_spline.StationOfPoint(i);
+
+	int   best = 0;
+	float bestD = 1e18f;
+
+	for (int k = 0; k < n; ++k)
+	{
+		const float d = fabsf(StationS(k) - want);
+		if (d < bestD) { bestD = d; best = k; }
+	}
+
+	return best;
+}
+
+void HjRoad::SetWallAt(int i, int side, float h)
+{
+	m_spline.SetWallAt(i, side, h);
+}
+
+//----------------------------------------------------------
 Math::Vector3 HjRoad::GetPoint(int i) const
 {
 	const auto& pts = m_spline.GetPoints();
@@ -2038,6 +2329,10 @@ void HjRoad::Rebuild()
 	DeformTerrain(m_pField);
 	SmoothDeformed(m_pField);
 	BuildMesh(m_pField);
+
+	// 道の面の高さを高さマップへ焼き戻す。
+	// これで当たり判定と見た目が同じ面になる
+	BakeSurface(m_pField);
 
 	// 地形のメッシュも組み直す必要がある
 	m_dirty = true;

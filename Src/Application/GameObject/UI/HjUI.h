@@ -76,6 +76,15 @@ namespace HjUI
 	void TexRectTL(const KdTexture* tex, float dx, float dy, float w, float h,
 	               const Math::Color& col = kWhiteColor);
 
+	// 同じものを、指定した矩形からはみ出すぶんだけ切り落として貼る。
+	//
+	// 絵を縮めるのではなく、外へ出た部分を捨てる。
+	// 縮めると、切りたいだけなのに中身の大きさまで変わる。
+	// (cx,cy,cw,ch) が残す範囲
+	void TexRectClipTL(const KdTexture* tex, float dx, float dy, float w, float h,
+	                   float cx, float cy, float cw, float ch,
+	                   const Math::Color& col = kWhiteColor);
+
 	void DotField(float dx, float dy, float w, float h, const Math::Color& col);            // ハーフトーン点
 	void DotFieldTwinkle(float dx, float dy, float w, float h, const Math::Color& base, float phase);  // 明滅するドット
 	// 波打つドット・ディゾルブ(矩形を密なドットで埋め、各ドットのサイズが波で0↔最大に=溶ける)

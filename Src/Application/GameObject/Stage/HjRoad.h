@@ -87,6 +87,51 @@ public:
 	// この刻みの、中心線から offset ずれた所の路面の高さ
 	float HeightAtOffset(int i, float offset) const { return SurfaceY(i, offset); }
 
+	//===== 道のりを指して断面を引く =====
+	// 刻みの番号ではなく道のり(m)で受ける。
+	//
+	// ■ なぜ要るか
+	// 横向きの標示(停止線・減速マーク・横断歩道)は、刻みと関係ない
+	// 位置へ置きたい。一番近い刻みで代用すると、そこから直線で
+	// 外挿することになり、カーブで道から外れて斜めに寝る。
+	//
+	// 中心はスプラインから直に取るので、刻みの粗さに影響されない
+	void  FrameAtS(float s, Math::Vector3& outCenter,
+	               Math::Vector3& outRight, float& outMiter) const;
+
+	// 道のりと横位置での路面の高さ。刻みの間は繋ぐ
+	float HeightAtS(float s, float offset) const;
+
+	// 道の全長(m)
+	float TotalLength() const { return StationS(StationCount() - 1); }
+
+	//===== 路肩の外に物を置くときの高さ =====
+	// 断面式(SurfaceY)は舗装の外では一定値を返す。横断勾配だけを
+	// 外挿し続けるので、路面を延ばした平面の高さになる。
+	//
+	// 裾や地形がそこでどうなっているかは見ていないので、
+	// 平場を詰めた区間や、ヘアピンで裾が削られた所では浮くか沈む。
+	//
+	// 高さマップには道の面を焼き戻してあるので、そちらが本当の接地面。
+	// 格子の外に出たときだけ断面式へ戻す
+	float GroundAt(int step, float offset) const;
+
+	//===== どちらへどれだけ曲がっているか =====
+	// 1mあたりのラジアン。符号は曲がる向きで、正なら右。
+	//
+	// ■ なぜ道に持たせるか
+	// 標識・視線誘導標・カーブミラー・路面標示が、それぞれ
+	// 同じ式を写して持っていた。写した式の符号が逆だったので、
+	// 右カーブに左向きの矢印が立ち、外側のつもりで内側に物が並んだ。
+	//
+	// 向きの決め方は1つでよい。ここを直せば全部直る。
+	//
+	// ■ 断面の向きではなく中心線の位置から出す
+	// 断面の向きは前後の平均(ミター)なので、隣り合う刻みでほとんど
+	// 同じ値になり、その差から符号を取ると刻みの粗さに埋もれる。
+	// 中心線を3点取って曲がりを見るほうが素直で、桁も稼げる
+	float TurnAt(int step) const;
+
 	//===== 編集 =====
 	// 点を動かしたら、道と地形を作り直す。
 	//
@@ -101,6 +146,12 @@ public:
 	void BakeHeightFromTerrain(const HjHeightField* field);
 
 	int  PointCount() const { return m_spline.PointCount(); }
+
+	// 制御点に一番近い刻みの番号。
+	//
+	// 断面の向き(ミター)は刻みでしか持っていないので、
+	// 制御点ごとの値を地形と突き合わせるときに要る
+	int  StepOfPoint(int i) const;
 	Math::Vector3 GetPoint(int i) const;
 
 	// 制御点を画面に出す位置。
@@ -118,6 +169,27 @@ public:
 	// 制御点ごとの平場の幅。道と平行に伸ばす部分
 	float GetFlatAt(int i, int side) const { return m_spline.FlatAt(i, side); }
 	void  SetFlatAt(int i, int side, float w);
+
+	//===== 制御点ごとの擁壁の高さ(m) =====
+	// 0 なら壁なし。0 と 0 でない値の境目が壁の始まりと終わりになる
+	float GetWallAt(int i, int side) const { return m_spline.WallAt(i, side); }
+	void  SetWallAt(int i, int side, float h);
+
+	// 刻みの位置での擁壁の高さ。壁を組む側が引く
+	float WallAtStep(int step, int side) const
+	{
+		return m_spline.WallAtS(StationS(step), side);
+	}
+
+	//===== 制御点ごとのガードレール =====
+	// 0 なら無し、1 なら有り
+	float GetRailAt(int i, int side) const { return m_spline.RailAt(i, side); }
+	void  SetRailAt(int i, int side, float on) { m_spline.SetRailAt(i, side, on); }
+
+	bool  RailAtStep(int step, int side) const
+	{
+		return m_spline.RailAtS(StationS(step), side) > 0.5f;
+	}
 	void InsertAfter(int i);
 	void AppendPoint(const Math::Vector3& pos);
 	void ErasePoint(int i);
@@ -210,6 +282,9 @@ private:
 	// 指定した幅ではなく、折り返しや交差の判定を通ったあとの値。
 	// 指定から穴を開けると、面が落ちた所で空が見える
 	std::vector<float> m_coverReach[2];
+
+	// マス目ごとの、道の面の高さ。MarkCover で作って BakeSurface で書く
+	std::unordered_map<int, float> m_surfaceY;
 
 	// 前回削った範囲(ワールド)。
 	// 地形のメッシュを組み直す所を、この範囲だけに絞る
@@ -327,6 +402,10 @@ private:
 	void MarkCover(const HjHeightField* field,
 	               const std::vector<KdMeshVertex>& verts,
 	               const std::vector<KdMeshFace>& faces);
+
+	// 道の面の高さを高さマップへ焼き戻す。
+	// 当たり判定と見た目を同じ面にするため
+	void BakeSurface(HjHeightField* field);
 
 
 	// 触りながら決める値。

@@ -364,6 +364,9 @@
     <ClInclude Include="Src\Application\main.h" />
     <ClInclude Include="Src\Application\Const\CarConst.h" />
     <ClInclude Include="Src\Application\GameObject\Car\CarBase.h" />
+    <ClInclude Include="Src\Application\Physics\HjRigidBody.h" />
+    <ClInclude Include="Src\Application\GameObject\Car\HjCarRigid.h" />
+    <ClInclude Include="Src\Application\Const\RigidCarConst.h" />
     <ClInclude Include="Src\Application\GameObject\Car\Silvia.h" />
     <ClInclude Include="Src\Application\GameObject\Car\HjCarChoice.h" />
     <ClInclude Include="Src\Application\GameObject\Car\Nsx.h" />
@@ -390,8 +393,24 @@
     <ClInclude Include="Src\Application\GameObject\Stage\Stage.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\HjTerrain.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\HjRoad.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjFoliage.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjProps.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjPropEditor.h" />
+    <ClInclude Include="Src\Application\Const\PropConst.h" />
+    <ClInclude Include="Src\Application\Const\FoliageConst.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\HjTerrainBrush.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\HjGuardRail.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjRetainWall.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjRoadMark.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjDelineator.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjRoadSign.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjCurveMirror.h" />
+    <ClInclude Include="Src\Application\Const\CurveMirrorConst.h" />
+    <ClInclude Include="Src\Application\GameObject\Stage\HjSpawnPoint.h" />
+    <ClInclude Include="Src\Application\Const\RoadSignConst.h" />
+    <ClInclude Include="Src\Application\Const\DelineatorConst.h" />
+    <ClInclude Include="Src\Application\Const\RoadMarkConst.h" />
+    <ClInclude Include="Src\Application\Const\RetainWallConst.h" />
     <ClInclude Include="Src\Application\GameObject\Stage\HjStageChoice.h" />
     <ClInclude Include="Src\Application\Const\StageChoiceConst.h" />
     <ClInclude Include="Src\Application\Const\TerrainBrushConst.h" />
@@ -496,6 +515,7 @@
     <ClInclude Include="Src\Application\Util\HjSaveFile.h" />
     <ClInclude Include="Src\Application\Util\HjPostFxSettings.h" />
     <ClInclude Include="Src\Application\Util\HjProfiler.h" />
+    <ClInclude Include="Src\Application\Util\HjMeshUtil.h" />
     <ClInclude Include="Src\Application\Util\AssetCrypt.h" />
     <ClInclude Include="Src\Application\Util\BuildConfig.h" />
     <ClInclude Include="Src\resource.h" />
@@ -560,6 +580,8 @@
     <ClCompile Include="..\Library\imgui\imgui_widgets.cpp" />
     <ClCompile Include="Src\Application\GameObject\Camera\CameraBase.cpp" />
     <ClCompile Include="Src\Application\GameObject\Car\CarBase.cpp" />
+    <ClCompile Include="Src\Application\Physics\HjRigidBody.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Car\HjCarRigid.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\TitleMenuUI.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\HjUI.cpp" />
     <ClCompile Include="Src\Application\GameObject\UI\HjCursor.cpp" />
@@ -627,8 +649,17 @@
     <ClCompile Include="Src\Application\GameObject\Stage\Stage.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjTerrain.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjRoad.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjFoliage.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjProps.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjPropEditor.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjTerrainBrush.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjGuardRail.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjRetainWall.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjRoadMark.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjDelineator.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjRoadSign.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjCurveMirror.cpp" />
+    <ClCompile Include="Src\Application\GameObject\Stage\HjSpawnPoint.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjStageChoice.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjRoadEditor.cpp" />
     <ClCompile Include="Src\Application\GameObject\Stage\HjRoadMap.cpp" />
@@ -823,6 +854,13 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Distribute|x64'">Vertex</ShaderType>
     </FxCompile>
     <FxCompile Include="Src\Framework\Shader\StandardShader\KdStandardShader_PS_Outline.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Distribute|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Src\Framework\Shader\PostProcessShader\KdPostProcessShader_PS_SSAO.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>

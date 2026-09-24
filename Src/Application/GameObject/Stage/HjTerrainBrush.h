@@ -67,12 +67,23 @@ public:
 	void SetEnabled(bool on) { m_enabled = on; }
 
 private:
+
+
+public:
 	// 画面の位置から光線を作り、地形へ当てる。
 	//
 	// 光線を刻んで進めて、高さを下回った所で二分する。
-	// 面を1枚ずつ調べるより速く、しかも抜けない
+	// 面を1枚ずつ調べるより速く、しかも抜けない。
+	//
+	// 木を置くときも同じ当て方を使う。
+	// 2つ持つと、片方だけ直したときに狙いが食い違う
 	bool PickGround(const HjHeightField& field, Math::Vector3& outHit) const;
 
+	// 彫った形を書き出す。
+	// ボタンは持たない。書き出しは1か所にまとめてある
+	bool Save(const HjHeightField& field);
+
+private:
 	// 触る範囲をマス目で出す
 	void CellRange(const HjHeightField& field, const Math::Vector3& center,
 	               int& outX0, int& outZ0, int& outX1, int& outZ1) const;

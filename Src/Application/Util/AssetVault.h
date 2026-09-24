@@ -26,4 +26,13 @@ namespace AssetVault
 
     // 指定パスのアセットのサイズ（バイト数）を取得（成功で true）
     bool Size(const std::string& path, size_t& out);
+
+    // 指定フォルダ以下にあるアセットのパスを集める（元の大小のまま）。
+    //
+    // 配布ビルドは Asset/ が exe の中にあり、フォルダとしては存在しない。
+    // フォルダを走査して中身を数える処理は、そこで 0 件になる。
+    // 数えたい側が、フォルダの代わりにここを引けるようにしておく。
+    //
+    // 開発ビルドでは常に空を返す（実フォルダがあるので、そちらを走査する）
+    void List(const std::string& dirPrefix, std::vector<std::string>& out);
 }

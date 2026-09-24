@@ -21,15 +21,46 @@ body{margin:0;background:#4a4a48;font-family:"Archivo",system-ui,sans-serif}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.16)}}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
 @keyframes growbar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@property --dot{syntax:'<length>';inherits:false;initial-value:0px}
+@keyframes diss-cover{from{--dot:0px}to{--dot:19px}}
+@keyframes diss-reveal{from{--dot:19px}to{--dot:0px}}
+@keyframes wipe-cover{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes wipe-reveal{from{clip-path:inset(0 0 0 0)}to{clip-path:inset(0 0 0 100%)}}
+@keyframes lbl-in{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:translateX(0)}}
+@keyframes lbl-out{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(28px)}}
 </style>
 </helmet>
-<div style="width:1536px;background:#3f3f3d;padding:0;display:flex;flex-direction:column;gap:2px">
+<div ref="{{ stageRef }}" style="width:1536px;background:#3f3f3d;padding:0;display:flex;flex-direction:column;gap:2px">
+
+  <!-- transition toolbar -->
+  <div style="position:sticky;top:0;z-index:40;background:#141414;display:flex;align-items:center;gap:10px;padding:12px 18px">
+    <span style="color:#cfe021;font-weight:900;font-size:14px;letter-spacing:.06em;margin-right:8px">PANEL WIPE ▸</span>
+    <sc-for list="{{ screens }}" as="sx" hint-placeholder-count="5">
+      <div onClick="{{ sx.select }}" style="{{ sx.style }}">{{ sx.label }}</div>
+    </sc-for>
+    <div onClick="{{ toggleMode }}" style="{{ allStyle }}">ALL</div>
+  </div>
+
+  <!-- dissolve overlay -->
+  <div key="{{ overlayKey }}" style="{{ overlayStyle }}"><span style="{{ overlayLabelStyle }}">{{ overlayLabel }}</span></div>
+
 
   <!-- ══ SCREEN 1 — MAIN MENU (full-width hero) ══ -->
   <section data-screen-label="Main Menu" style="position:relative;background:#f1f0ec;padding:40px 54px 30px;overflow:hidden;height:864px">
     <!-- deco layer -->
     <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:5;color:#141414">
       <defs><pattern id="d1" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <!-- interrupted vertical construction lines -->
+      <g stroke="currentColor" stroke-width="1" opacity=".07">
+        <line x1="470" y1="0" x2="470" y2="180"/><line x1="470" y1="240" x2="470" y2="560"/>
+        <line x1="770" y1="120" x2="770" y2="430"/><line x1="770" y1="500" x2="770" y2="864"/>
+        <line x1="1120" y1="0" x2="1120" y2="120"/><line x1="1120" y1="300" x2="1120" y2="700"/>
+      </g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22">
+        <line x1="465" y1="180" x2="475" y2="180"/><line x1="465" y1="240" x2="475" y2="240"/>
+        <line x1="765" y1="430" x2="775" y2="430"/><line x1="765" y1="500" x2="775" y2="500"/>
+        <line x1="1115" y1="120" x2="1125" y2="120"/><line x1="1115" y1="300" x2="1125" y2="300"/>
+      </g>
       <!-- scattered + crosses top -->
       <g stroke="currentColor" stroke-width="2.5">
         <line x1="640" y1="80" x2="656" y2="80"/><line x1="648" y1="72" x2="648" y2="88"/>
@@ -130,19 +161,34 @@ body{margin:0;background:#4a4a48;font-family:"Archivo",system-ui,sans-serif}
   <!-- ══ SCREEN 2 — SETTINGS ══ -->
   <section data-screen-label="Settings" style="position:relative;background:#f1f0ec;padding:48px 64px;overflow:hidden;height:864px">
     <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:4;color:#141414">
+      <!-- faint vertical construction guides (run through the open gutters) -->
+      <g stroke="currentColor" stroke-width="1" opacity=".07"><line x1="360" y1="0" x2="360" y2="864"/><line x1="1300" y1="0" x2="1300" y2="864"/><line x1="1400" y1="0" x2="1400" y2="864"/></g>
+      <!-- crop-mark ticks on the guides -->
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22"><line x1="355" y1="70" x2="365" y2="70"/><line x1="360" y1="65" x2="360" y2="75"/><line x1="1295" y1="70" x2="1305" y2="70"/><line x1="1300" y1="65" x2="1300" y2="75"/><line x1="355" y1="800" x2="365" y2="800"/><line x1="360" y1="795" x2="360" y2="805"/></g>
       <defs><pattern id="d2" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
-      <rect x="1180" y="90" width="170" height="120" fill="url(#d2)" opacity=".5" style="animation:twinkle 5s ease-in-out infinite .6s"/>
-      <rect x="1360" y="90" width="90" height="120" fill="url(#d2)" opacity=".28"/>
-      <rect x="1210" y="560" width="120" height="90" fill="url(#d2)" opacity=".4"/>
-      <rect x="1210" y="740" width="200" height="46" fill="url(#d2)" opacity=".38"/> x2="1516" y2="110"/><line x1="1508" y1="102" x2="1508" y2="118"/><line x1="1500" y1="520" x2="1516" y2="520"/><line x1="1508" y1="512" x2="1508" y2="528"/><line x1="1500" y1="640" x2="1516" y2="640"/><line x1="1508" y1="632" x2="1508" y2="648"/><line x1="1500" y1="740" x2="1516" y2="740"/><line x1="1508" y1="732" x2="1508" y2="748"/></g>
-      <rect x="1496" y="230" width="24" height="72" fill="#cfe021"/>
-      <g stroke="currentColor" stroke-width="2" style="animation:blink 2.4s steps(2,end) infinite"><line x1="1496" y1="340" x2="1496" y2="440"/><line x1="1503" y1="340" x2="1503" y2="440"/><line x1="1510" y1="340" x2="1510" y2="440"/><line x1="1517" y1="340" x2="1517" y2="440"/><line x1="1522" y1="340" x2="1522" y2="440"/></g>
+      <rect x="1150" y="90" width="150" height="110" fill="url(#d2)" opacity=".5" style="animation:twinkle 5s ease-in-out infinite .6s"/>
+      <rect x="1150" y="560" width="120" height="90" fill="url(#d2)" opacity=".4"/>
+      <!-- top-right acid corner mark + diagonal hatch (overlaps the rail text) -->
+      <rect x="1476" y="60" width="40" height="80" fill="#cfe021"/>
+      <g stroke="#141414" stroke-width="1.5"><line x1="1476" y1="140" x2="1516" y2="60"/><line x1="1476" y1="116" x2="1500" y2="60"/></g>
+      <!-- right rail divider -->
+      <line x1="1400" y1="80" x2="1400" y2="720" stroke="currentColor" stroke-width="1.5" opacity=".35"/>
     </svg>
-    <div style="position:absolute;right:52px;top:44px;font-size:30px;letter-spacing:16px;color:#141414;z-index:3;animation:floaty 5s ease-in-out infinite">＋＋</div>
-    <h2 style="font-size:64px;font-weight:900;letter-spacing:-.02em;margin:20px 0 0;color:#141414;border-bottom:4px solid #cfe021;display:inline-block;padding-bottom:4px;position:relative;z-index:3">SETTINGS</h2>
 
-    <div style="display:grid;grid-template-columns:280px minmax(0,880px);gap:64px;margin-top:56px;position:relative;z-index:3">
-      <div style="display:flex;flex-direction:column;gap:22px">
+    <!-- top-right + marks -->
+    <div style="position:absolute;right:120px;top:30px;display:flex;gap:22px;font-size:30px;font-weight:400;color:#141414;z-index:3;animation:floaty 5s ease-in-out infinite">＋＋</div>
+
+    <!-- right rail: vertical text -->
+    <div style="position:absolute;right:26px;top:60px;height:520px;writing-mode:vertical-rl;font-size:15px;font-weight:800;letter-spacing:.22em;color:#141414;z-index:3;display:flex;align-items:center">FOCUS &nbsp;//&nbsp; ADAPT &nbsp;//&nbsp; OVERCOME</div>
+
+    <!-- right rail: descending +/◆ column -->
+    <div style="position:absolute;right:60px;bottom:40px;display:flex;flex-direction:column;align-items:center;gap:22px;font-size:18px;font-weight:400;color:#141414;z-index:3">
+      <span>＋</span><span>＋</span><span style="font-size:12px">◆</span><span style="font-size:12px">◆</span><span style="font-size:12px">◆</span>
+    </div>
+    <h2 style="font-size:64px;font-weight:900;letter-spacing:-.02em;margin:-12px 0 0;color:#141414;border-bottom:4px solid #cfe021;display:inline-block;padding-bottom:4px;position:relative;z-index:3">SETTINGS</h2>
+
+    <div style="display:grid;grid-template-columns:280px minmax(0,880px);gap:64px;margin-top:34px;position:relative;z-index:3">
+      <div style="display:flex;flex-direction:column;gap:22px;margin-top:60px">
         <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
           <div onClick="{{ t.select }}" style="{{ t.style }}">{{ t.label }}</div>
         </sc-for>
@@ -418,12 +464,468 @@ body{margin:0;background:#4a4a48;font-family:"Archivo",system-ui,sans-serif}
     </div>
   </section>
 
+  <!-- ══ SCREEN 6 — LOBBY / ROOM LIST ══ -->
+  <section data-screen-label="Lobby" style="position:relative;background:#f1f0ec;padding:44px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs><pattern id="d6" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <g stroke="currentColor" stroke-width="1" opacity=".07"><line x1="360" y1="0" x2="360" y2="200"/><line x1="360" y1="260" x2="360" y2="864"/><line x1="1290" y1="0" x2="1290" y2="140"/><line x1="1290" y1="300" x2="1290" y2="864"/></g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22"><line x1="355" y1="200" x2="365" y2="200"/><line x1="355" y1="260" x2="365" y2="260"/><line x1="1285" y1="140" x2="1295" y2="140"/><line x1="1285" y1="300" x2="1295" y2="300"/></g>
+      <rect x="1210" y="760" width="150" height="52" fill="url(#d6)" opacity=".4" style="animation:twinkle 5.2s ease-in-out infinite .5s"/>
+      <rect x="1400" y="60" width="34" height="70" fill="#cfe021"/>
+    </svg>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;position:relative;z-index:1">
+      <h2 style="font-size:56px;font-weight:900;letter-spacing:-.02em;margin:0;color:#141414">LOBBY <span style="font-weight:400;color:#9a9a98">/</span> <span style="color:#cfe021">ROOM LIST</span></h2>
+      <div style="text-align:right;font-weight:700;color:#141414"><div style="font-size:12px;letter-spacing:.1em;color:#555">ONLINE NOW</div><div style="font-size:24px">1,284 DRIVERS</div></div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:30px;position:relative;z-index:1">
+      <sc-for list="{{ lobbyFilters }}" as="f" hint-placeholder-count="4">
+        <div onClick="{{ f.select }}" style="{{ f.style }}">{{ f.label }}</div>
+      </sc-for>
+    </div>
+
+    <div style="border:2px solid #141414;margin-top:22px;position:relative;z-index:1">
+      <div style="display:grid;grid-template-columns:1fr 150px 240px 120px 110px;background:#141414;color:#fff;font-size:11px;font-weight:800;letter-spacing:.08em;padding:12px 20px;gap:20px">
+        <span>ROOM NAME</span><span>MODE</span><span>TRACK</span><span>PLAYERS</span><span>PING</span>
+      </div>
+      <sc-for list="{{ lobbyRooms }}" as="r" hint-placeholder-count="6">
+        <div onClick="{{ r.select }}" style="{{ r.rowStyle }}">
+          <span style="font-weight:800;font-size:16px">{{ r.name }}</span>
+          <span style="font-weight:700;font-size:14px">{{ r.mode }}</span>
+          <span style="font-weight:700;font-size:14px;color:#555">{{ r.track }}</span>
+          <span style="font-weight:800;font-size:15px">{{ r.players }}</span>
+          <span style="{{ r.pingStyle }}">{{ r.ping }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:30px;margin-top:34px;font-size:14px;font-weight:700;position:relative;z-index:1">
+      <div style="display:flex;align-items:center;justify-content:flex-start;background:#cfe021;color:#141414;font-weight:800;font-size:15px;padding:14px 20px;cursor:pointer;min-width:210px">▶&nbsp;&nbsp;QUICK JOIN</div>
+      <div style="display:flex;align-items:center;justify-content:flex-start;border:2px solid #141414;color:#141414;font-weight:800;font-size:15px;padding:14px 20px;cursor:pointer">CREATE ROOM</div>
+      <div style="display:flex;align-items:center;gap:9px;margin-left:auto"><span style="border:2px solid #141414;padding:3px 8px">F5</span>REFRESH</div>
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">ESC</span>BACK</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 7 — ROOM / READY UP ══ -->
+  <section data-screen-label="Room" style="position:relative;background:#f1f0ec;padding:44px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs><pattern id="d7" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <g stroke="currentColor" stroke-width="1" opacity=".07"><line x1="768" y1="0" x2="768" y2="120"/><line x1="768" y1="700" x2="768" y2="864"/></g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22"><line x1="763" y1="120" x2="773" y2="120"/><line x1="763" y1="700" x2="773" y2="700"/></g>
+      <rect x="60" y="790" width="140" height="46" fill="url(#d7)" opacity=".4"/>
+      <rect x="1400" y="52" width="34" height="76" fill="#cfe021"/>
+      <g stroke="#141414" stroke-width="1.5"><line x1="1400" y1="128" x2="1434" y2="52"/><line x1="1400" y1="106" x2="1420" y2="52"/></g>
+    </svg>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;position:relative;z-index:1">
+      <div>
+        <div style="font-size:13px;font-weight:800;letter-spacing:.06em;color:#555">ROOM · RANKED</div>
+        <h2 style="font-size:52px;font-weight:900;letter-spacing:-.02em;margin:4px 0 0;color:#141414">MIDNIGHT <span style="color:#cfe021">RUN</span></h2>
+      </div>
+      <div style="display:flex;align-items:center">
+        <span style="border:2px solid #141414;padding:8px 15px;font-weight:800;font-size:14px">TRACK</span>
+        <span style="background:#cfe021;border:2px solid #141414;border-left:0;padding:8px 15px;font-weight:800;font-size:14px">NEXUS CIRCUIT</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:34px;position:relative;z-index:1">
+      <sc-for list="{{ roomSlots }}" as="p" hint-placeholder-count="8">
+        <div style="{{ p.slotStyle }}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <span style="font-size:11px;font-weight:800;letter-spacing:.08em;color:#555">{{ p.num }}</span>
+            <span style="{{ p.hostStyle }}">HOST</span>
+          </div>
+          <div style="{{ p.swatchStyle }}"></div>
+          <div style="font-weight:900;font-size:19px;letter-spacing:-.01em;color:#141414">{{ p.name }}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:auto">
+            <span style="font-size:12px;font-weight:700;color:#555">{{ p.lv }}</span>
+            <span style="{{ p.readyStyle }}">{{ p.readyLabel }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:26px;margin-top:34px;position:relative;z-index:1">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.06em;color:#141414">READY <span style="color:#cfe021">6</span> / 8</div>
+      <div style="flex:1;height:14px;background:#141414"><div style="height:100%;width:75%;background:#cfe021;transform-origin:left;animation:growbar .8s ease-out both"></div></div>
+      <div style="display:flex;align-items:center;justify-content:flex-start;background:#141414;color:#fff;font-weight:800;font-size:15px;padding:14px 24px;cursor:pointer">START RACE&nbsp;&nbsp;↗</div>
+    </div>
+
+    <div style="display:flex;gap:30px;margin-top:26px;font-size:14px;font-weight:700;position:relative;z-index:1">
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">SPACE</span>READY</div>
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">T</span>CHAT</div>
+      <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">ESC</span>LEAVE ROOM</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 8 — MATCHMAKING ══ -->
+  <section data-screen-label="Matchmaking" style="position:relative;background:#f1f0ec;padding:44px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs>
+        <pattern id="d8" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern>
+        <path id="ml1" d="M -210 -6 C -150 -84 -50 -96 44 -70 C 150 -40 236 -26 202 42 C 172 100 56 82 -54 80 C -158 78 -244 60 -210 -6 Z"/>
+        <path id="ml2" d="M -176 34 C -214 -38 -104 -90 -6 -80 C 124 -66 222 -30 172 30 C 134 82 30 60 -66 92 C -148 118 -150 92 -176 34 Z"/>
+      </defs>
+      <g fill="none" stroke="currentColor" opacity=".2" stroke-width="1" transform="translate(1120 432)"><g style="animation:spin 90s linear infinite;transform-origin:0px 0px">
+        <use href="#ml1" transform="rotate(0)"/><use href="#ml2" transform="rotate(34) scale(1.14)"/>
+        <use href="#ml1" transform="rotate(72) scale(.9)"/><use href="#ml2" transform="rotate(112) scale(1.24)"/>
+        <use href="#ml1" transform="rotate(158) scale(1.06)"/><use href="#ml2" transform="rotate(206) scale(.94)"/>
+        <use href="#ml1" transform="rotate(254) scale(1.18)"/><use href="#ml2" transform="rotate(304) scale(1)"/>
+      </g></g>
+      <rect x="70" y="740" width="160" height="60" fill="url(#d8)" opacity=".45" style="animation:twinkle 4.4s ease-in-out infinite"/>
+      <g stroke="currentColor" stroke-width="1" opacity=".07"><line x1="470" y1="0" x2="470" y2="240"/><line x1="470" y1="320" x2="470" y2="864"/></g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22"><line x1="465" y1="240" x2="475" y2="240"/><line x1="465" y1="320" x2="475" y2="320"/></g>
+    </svg>
+
+    <div style="position:relative;z-index:1;max-width:900px">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.06em;color:#141414">MATCHMAKING · RANKED</div>
+      <h2 style="font-size:118px;font-weight:900;line-height:.85;letter-spacing:-.035em;margin:14px 0 0;color:#141414">SEARCHING<span style="color:#cfe021">...</span></h2>
+      <div style="display:inline-block;margin-top:22px;background:#141414;color:#fff;font-size:14px;font-weight:800;letter-spacing:.05em;padding:10px 16px">FINDING DRIVERS OF SIMILAR TIER&nbsp;&nbsp;<span style="color:#cfe021">+</span></div>
+
+      <div style="display:flex;gap:12px;margin-top:64px">
+        <sc-for list="{{ matchPips }}" as="pip" hint-placeholder-count="8">
+          <div style="{{ pip.style }}"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:56px;margin-top:20px;font-size:13px;font-weight:800;letter-spacing:.04em;color:#141414">
+        <span>DRIVERS FOUND <span style="color:#cfe021">4</span> / 8</span>
+        <span>ELAPSED 00:23</span>
+        <span>REGION ASIA · PING 24MS</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,200px);gap:0;margin-top:74px;border:2px solid #141414">
+        <div style="padding:18px 20px;border-right:2px solid #141414"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#555">TIER</div><div style="font-size:26px;font-weight:900;margin-top:4px">A</div></div>
+        <div style="padding:18px 20px;border-right:2px solid #141414"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#555">EST. WAIT</div><div style="font-size:26px;font-weight:900;margin-top:4px">0:40</div></div>
+        <div style="padding:18px 20px;background:#cfe021"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#141414">MODE</div><div style="font-size:26px;font-weight:900;margin-top:4px">DRIFT</div></div>
+      </div>
+
+      <div style="display:flex;gap:30px;margin-top:66px;font-size:14px;font-weight:700">
+        <div style="display:flex;align-items:center;justify-content:flex-start;border:2px solid #141414;color:#141414;font-weight:800;font-size:15px;padding:14px 22px;cursor:pointer">CANCEL SEARCH</div>
+        <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #141414;padding:3px 8px">TAB</span>EXPAND SEARCH</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 9 — RESULTS ══ -->
+  <section data-screen-label="Results" style="position:relative;background:#f1f0ec;padding:44px 64px;overflow:hidden;height:864px">
+    <svg viewBox="0 0 1536 864" preserveAspectRatio="none" width="100%" height="100%" style="position:absolute;inset:0;pointer-events:none;z-index:0;color:#141414">
+      <defs><pattern id="d9" width="13" height="13" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.3" fill="currentColor"/></pattern></defs>
+      <rect x="1180" y="70" width="160" height="100" fill="url(#d9)" opacity=".45" style="animation:twinkle 5.6s ease-in-out infinite .8s"/>
+      <rect x="1360" y="70" width="80" height="100" fill="url(#d9)" opacity=".24"/>
+      <g stroke="currentColor" stroke-width="1" opacity=".07"><line x1="420" y1="0" x2="420" y2="180"/><line x1="420" y1="250" x2="420" y2="864"/></g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".22"><line x1="415" y1="180" x2="425" y2="180"/><line x1="415" y1="250" x2="425" y2="250"/></g>
+      <path d="M1000 840 L1536 840 L1536 864 L960 864 Z" fill="#141414"/>
+    </svg>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;position:relative;z-index:1">
+      <div>
+        <div style="font-size:13px;font-weight:800;letter-spacing:.06em;color:#555">NEXUS TOUGE · 2 RUNS</div>
+        <h2 style="font-size:56px;font-weight:900;letter-spacing:-.02em;margin:4px 0 0;color:#141414">RESULTS</h2>
+      </div>
+      <div style="text-align:right;font-weight:700;color:#141414"><div style="font-size:12px;letter-spacing:.1em;color:#555">CREDITS EARNED</div><div style="font-size:24px">+ ¥ 18,400</div></div>
+    </div>
+
+    <div style="border:2px solid #141414;margin-top:32px;position:relative;z-index:1">
+      <div style="display:grid;grid-template-columns:80px 1fr 160px 240px 90px;background:#141414;color:#fff;font-size:11px;font-weight:800;letter-spacing:.08em;padding:12px 20px;gap:20px">
+        <span>RANK</span><span>DRIVER</span><span>BEST RUN</span><span>JUDGE &nbsp;A / L / S</span><span>PTS</span>
+      </div>
+      <sc-for list="{{ resultRows }}" as="rr" hint-placeholder-count="6">
+        <div style="{{ rr.rowStyle }}">
+          <span style="font-weight:900;font-size:22px">{{ rr.pos }}</span>
+          <span style="font-weight:800;font-size:17px">{{ rr.driver }}</span>
+          <span style="font-weight:700;font-size:15px">{{ rr.best }}</span>
+          <span style="display:flex;align-items:center;gap:12px"><span style="{{ rr.trackStyle }}"><span style="{{ rr.barStyle }}"></span></span><span style="font-weight:800;font-size:13px;min-width:74px">{{ rr.judge }}</span></span>
+          <span style="font-weight:900;font-size:18px">{{ rr.pts }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:26px;margin-top:34px;position:relative;z-index:1">
+      <div style="display:flex;align-items:center;justify-content:flex-start;background:#cfe021;color:#141414;font-weight:800;font-size:15px;padding:14px 22px;cursor:pointer">▶&nbsp;&nbsp;NEXT RACE</div>
+      <div style="display:flex;align-items:center;justify-content:flex-start;border:2px solid #141414;color:#141414;font-weight:800;font-size:15px;padding:14px 22px;cursor:pointer">SAVE REPLAY</div>
+      <div style="display:flex;align-items:center;gap:9px;margin-left:auto;font-size:14px;font-weight:700"><span style="border:2px solid #141414;padding:3px 8px">ESC</span>BACK TO LOBBY</div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 10 — DRIFT RUN HUD (line-only ground) ══ -->
+  <section data-screen-label="Drift Run HUD" style="position:relative;background:#1c1c1a;overflow:hidden;width:1536px;height:864px">
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px">
+      <image-slot id="race-cam" shape="rect" style="position:absolute;left:0;top:0;width:1536px;height:864px" placeholder="TRACK CAMERA"></image-slot>
+    </div>
+
+    <!-- corner frame rules -->
+    <svg viewBox="0 0 1536 864" width="1536" height="864" style="position:absolute;left:0;top:0;pointer-events:none;z-index:2;color:#f1f0ec">
+      <g stroke="currentColor" stroke-width="2" fill="none" opacity=".9">
+        <path d="M40 96 L40 40 L150 40"/><path d="M1496 96 L1496 40 L1386 40"/>
+        <path d="M40 768 L40 824 L150 824"/><path d="M1496 768 L1496 824 L1386 824"/>
+      </g>
+      <g stroke="currentColor" stroke-width="1" opacity=".25"><line x1="768" y1="40" x2="768" y2="96"/><line x1="768" y1="768" x2="768" y2="824"/></g>
+    </svg>
+
+    <!-- top-left: run + course + section -->
+    <div style="position:absolute;left:64px;top:64px;z-index:3;color:#f1f0ec">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-size:12px;font-weight:800;letter-spacing:.14em">RUN</span>
+        <span style="font-size:44px;font-weight:900;line-height:1;letter-spacing:-.03em">1<span style="font-size:20px;opacity:.7">/2</span></span>
+      </div>
+      <div style="width:230px;height:2px;background:#f1f0ec;margin:14px 0 12px"></div>
+      <div style="font-size:16px;font-weight:800;letter-spacing:.05em">NEXUS TOUGE</div>
+      <div style="font-size:12px;font-weight:700;letter-spacing:.08em;opacity:.75;margin-top:6px">SECTION 2 / 4 · UPHILL</div>
+    </div>
+
+    <!-- top-center: live drift angle -->
+    <div style="position:absolute;left:768px;top:56px;transform:translateX(-50%);z-index:3;text-align:center;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.75">DRIFT ANGLE</div>
+      <div style="font-size:44px;font-weight:900;letter-spacing:-.02em;line-height:1.1">47<span style="font-size:20px;opacity:.7">°</span></div>
+      <div style="display:flex;gap:3px;justify-content:center;margin-top:10px">
+        <sc-for list="{{ angleTicks }}" as="at" hint-placeholder-count="18">
+          <div style="{{ at.style }}"></div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- top-right: judge panel -->
+    <div style="position:absolute;right:64px;top:60px;z-index:3;color:#f1f0ec;width:260px">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.14em;text-align:right">JUDGE</div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+        <sc-for list="{{ judgePanel }}" as="jp" hint-placeholder-count="3">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:12px;font-weight:800;letter-spacing:.1em">{{ jp.label }}</span>
+            <span style="flex:1;height:2px;background:#f1f0ec;opacity:.3"></span>
+            <span style="{{ jp.valStyle }}">{{ jp.value }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- bottom-left: course line + clipping points -->
+    <div style="position:absolute;left:64px;bottom:56px;z-index:3">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.14em;color:#f1f0ec;margin-bottom:10px">CLIPPING POINTS</div>
+      <svg viewBox="0 0 264 116" width="264" height="116" style="display:block">
+        <path d="M6 104 C 60 100 74 54 118 42 C 168 28 190 70 240 58" fill="none" stroke="#f1f0ec" stroke-width="2" opacity=".45"/>
+        <path d="M6 104 C 60 100 74 54 118 42" fill="none" stroke="#cfe021" stroke-width="4"/>
+        <circle cx="60" cy="100" r="6" fill="#cfe021"/>
+        <circle cx="118" cy="42" r="6" fill="#cfe021"/>
+        <circle cx="190" cy="70" r="6" fill="none" stroke="#f1f0ec" stroke-width="2"/>
+        <circle cx="240" cy="58" r="6" fill="none" stroke="#f1f0ec" stroke-width="2" opacity=".45"/>
+      </svg>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <sc-for list="{{ clipPoints }}" as="cp" hint-placeholder-count="4">
+          <div style="{{ cp.style }}">{{ cp.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- bottom-center: run score + chain -->
+    <div style="position:absolute;left:768px;bottom:60px;transform:translateX(-50%);z-index:3;text-align:center;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.75">RUN SCORE</div>
+      <div style="font-size:58px;font-weight:900;letter-spacing:-.03em;line-height:1.05">12,480</div>
+      <div style="display:flex;align-items:baseline;justify-content:center;gap:10px;margin-top:4px">
+        <span style="font-size:32px;font-weight:900;color:#cfe021;line-height:1">x4.2</span>
+        <span style="font-size:11px;font-weight:800;letter-spacing:.12em;opacity:.75">CHAIN</span>
+      </div>
+    </div>
+
+    <!-- bottom-right: speed + gear + tach -->
+    <div style="position:absolute;right:64px;bottom:56px;z-index:3;text-align:right;color:#f1f0ec">
+      <div style="display:flex;gap:4px;justify-content:flex-end;align-items:flex-end;height:34px;margin-bottom:10px">
+        <sc-for list="{{ tachTicks }}" as="tk" hint-placeholder-count="30">
+          <div style="{{ tk.style }}"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:16px">
+        <div style="font-size:126px;font-weight:900;line-height:.78;letter-spacing:-.055em">184</div>
+        <div style="text-align:left;padding-bottom:14px">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.14em;opacity:.75">KM/H</div>
+          <div style="font-size:11px;font-weight:800;letter-spacing:.14em;opacity:.75;margin-top:16px">GEAR</div>
+          <div style="font-size:44px;font-weight:900;line-height:1;color:#cfe021">4</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 12 — DRIFT SCORING OVERLAY ══ -->
+  <section data-screen-label="Drift Scoring" style="position:relative;background:#1c1c1a;overflow:hidden;width:1536px;height:864px">
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px">
+      <image-slot id="drift-cam" shape="rect" style="position:absolute;left:0;top:0;width:1536px;height:864px" placeholder="DRIFT MOMENT CAM"></image-slot>
+    </div>
+
+    <svg viewBox="0 0 1536 864" width="1536" height="864" style="position:absolute;left:0;top:0;pointer-events:none;z-index:2;color:#f1f0ec">
+      <g stroke="currentColor" stroke-width="2" fill="none" opacity=".9"><path d="M40 96 L40 40 L150 40"/><path d="M1496 768 L1496 824 L1386 824"/></g>
+      <!-- angle arc -->
+      <g transform="translate(220 620)">
+        <path d="M -140 0 A 140 140 0 0 1 140 0" fill="none" stroke="#f1f0ec" stroke-width="2" opacity=".35"/>
+        <path d="M -140 0 A 140 140 0 0 1 46 -132" fill="none" stroke="#cfe021" stroke-width="6"/>
+        <line x1="0" y1="0" x2="46" y2="-132" stroke="#f1f0ec" stroke-width="2"/>
+      </g>
+    </svg>
+
+    <!-- judgment flash -->
+    <div style="position:absolute;left:64px;top:150px;z-index:3">
+      <div style="display:inline-block;background:#cfe021;color:#141414;font-size:15px;font-weight:900;letter-spacing:.12em;padding:8px 16px">PERFECT</div>
+      <div style="font-size:150px;font-weight:900;line-height:.82;letter-spacing:-.05em;color:#f1f0ec;margin-top:16px">CHAIN</div>
+      <div style="display:flex;align-items:baseline;gap:18px;margin-top:6px">
+        <span style="font-size:118px;font-weight:900;line-height:.85;letter-spacing:-.05em;color:#cfe021">x4.2</span>
+        <span style="font-size:16px;font-weight:800;letter-spacing:.1em;color:#f1f0ec">MULTIPLIER</span>
+      </div>
+    </div>
+
+    <!-- angle readout -->
+    <div style="position:absolute;left:64px;bottom:120px;z-index:3;color:#f1f0ec;width:320px;text-align:center">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.75">DRIFT ANGLE</div>
+      <div style="font-size:46px;font-weight:900;line-height:1.1;letter-spacing:-.02em">47<span style="font-size:22px;opacity:.7">°</span></div>
+    </div>
+
+    <!-- chain timer + accumulating score -->
+    <div style="position:absolute;right:64px;bottom:110px;z-index:3;text-align:right;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.75">THIS CHAIN</div>
+      <div style="font-size:88px;font-weight:900;line-height:.86;letter-spacing:-.04em">3,180</div>
+      <div style="font-size:12px;font-weight:800;letter-spacing:.1em;margin-top:12px;opacity:.75">CHAIN HOLD</div>
+      <div style="width:340px;height:14px;background:#f1f0ec;margin-top:8px"><div style="height:100%;width:64%;background:#cfe021;float:right"></div></div>
+    </div>
+
+    <!-- tick ladder of recent judgments -->
+    <div style="position:absolute;right:64px;top:64px;z-index:3;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      <sc-for list="{{ judgments }}" as="j" hint-placeholder-count="4">
+        <div style="{{ j.style }}">{{ j.label }}</div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 13 — PAUSE MENU ══ -->
+  <section data-screen-label="Pause" style="position:relative;background:#1c1c1a;overflow:hidden;width:1536px;height:864px">
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px">
+      <image-slot id="pause-cam" shape="rect" style="position:absolute;left:0;top:0;width:1536px;height:864px" placeholder="FROZEN GAMEPLAY"></image-slot>
+    </div>
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px;background:#141414;opacity:.72;z-index:2"></div>
+
+    <svg viewBox="0 0 1536 864" width="1536" height="864" style="position:absolute;left:0;top:0;pointer-events:none;z-index:3;color:#f1f0ec">
+      <g stroke="currentColor" stroke-width="1" opacity=".2"><line x1="620" y1="0" x2="620" y2="200"/><line x1="620" y1="280" x2="620" y2="864"/></g>
+      <g stroke="currentColor" stroke-width="1.5" opacity=".4"><line x1="615" y1="200" x2="625" y2="200"/><line x1="615" y1="280" x2="625" y2="280"/></g>
+      <rect x="1440" y="60" width="34" height="76" fill="#cfe021"/>
+    </svg>
+
+    <div style="position:absolute;left:64px;top:110px;z-index:4">
+      <div style="font-size:13px;font-weight:800;letter-spacing:.1em;color:#cfe021">RACE PAUSED</div>
+      <h2 style="font-size:96px;font-weight:900;line-height:.85;letter-spacing:-.04em;margin:12px 0 0;color:#f1f0ec">PAUSE</h2>
+      <div style="display:flex;flex-direction:column;margin-top:44px;width:420px">
+        <sc-for list="{{ pauseItems }}" as="pi" hint-placeholder-count="5">
+          <div onClick="{{ pi.select }}" style="{{ pi.style }}">
+            <span style="width:26px;display:inline-flex;justify-content:center">{{ pi.glyph }}</span>
+            <span style="font-weight:800;font-size:20px;letter-spacing:.01em">{{ pi.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- right: live standing snapshot -->
+    <div style="position:absolute;right:64px;top:130px;width:420px;z-index:4;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.75">CURRENT SCORE</div>
+      <div style="border:2px solid #f1f0ec;margin-top:14px">
+        <div style="display:flex;justify-content:space-between;padding:14px 16px;border-bottom:2px solid #f1f0ec;background:#cfe021;color:#141414;font-weight:900;font-size:15px"><span>01 &nbsp; KAZE_9</span><span>14,020</span></div>
+        <div style="display:flex;justify-content:space-between;padding:14px 16px;border-bottom:2px solid #f1f0ec;font-weight:800;font-size:15px"><span>02 &nbsp; DRIVER01</span><span>12,480</span></div>
+        <div style="display:flex;justify-content:space-between;padding:14px 16px;font-weight:700;font-size:15px;opacity:.75"><span>03 &nbsp; MIRA.S</span><span>11,340</span></div>
+      </div>
+      <div style="display:flex;gap:22px;margin-top:30px;font-size:13px;font-weight:700">
+        <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #f1f0ec;padding:3px 8px">ESC</span>RESUME</div>
+        <div style="display:flex;align-items:center;gap:9px"><span style="border:2px solid #f1f0ec;padding:3px 8px">R</span>RESTART</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 14 — RACE START COUNTDOWN ══ -->
+  <section data-screen-label="Countdown" style="position:relative;background:#1c1c1a;overflow:hidden;width:1536px;height:864px">
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px">
+      <image-slot id="grid-cam" shape="rect" style="position:absolute;left:0;top:0;width:1536px;height:864px" placeholder="STARTING GRID CAM"></image-slot>
+    </div>
+
+    <svg viewBox="0 0 1536 864" width="1536" height="864" style="position:absolute;left:0;top:0;pointer-events:none;z-index:2;color:#f1f0ec">
+      <g stroke="currentColor" stroke-width="2" fill="none" opacity=".9"><path d="M40 96 L40 40 L150 40"/><path d="M1496 96 L1496 40 L1386 40"/><path d="M40 768 L40 824 L150 824"/><path d="M1496 768 L1496 824 L1386 824"/></g>
+      <g stroke="currentColor" stroke-width="1" opacity=".18"><line x1="768" y1="120" x2="768" y2="300"/><line x1="768" y1="600" x2="768" y2="760"/></g>
+    </svg>
+
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:3">
+      <div style="font-size:14px;font-weight:800;letter-spacing:.24em;color:#f1f0ec">NEXUS TOUGE · RUN 1 OF 2</div>
+      <div style="font-size:400px;font-weight:900;line-height:.8;letter-spacing:-.06em;color:#cfe021;animation:pulse 1s ease-in-out infinite">3</div>
+      <div style="display:inline-block;background:#f1f0ec;color:#141414;font-size:15px;font-weight:900;letter-spacing:.18em;padding:9px 20px;margin-top:10px">GET READY</div>
+    </div>
+
+    <!-- grid order pips -->
+    <div style="position:absolute;left:0;bottom:70px;width:1536px;display:flex;justify-content:center;gap:12px;z-index:3">
+      <sc-for list="{{ gridPips }}" as="gp" hint-placeholder-count="8">
+        <div style="{{ gp.style }}">{{ gp.label }}</div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- ══ SCREEN 15 — TOAST NOTIFICATIONS ══ -->
+  <section data-screen-label="Toasts" style="position:relative;background:#1c1c1a;overflow:hidden;width:1536px;height:864px">
+    <div style="position:absolute;left:0;top:0;width:1536px;height:864px">
+      <image-slot id="toast-cam" shape="rect" style="position:absolute;left:0;top:0;width:1536px;height:864px" placeholder="GAMEPLAY CAM"></image-slot>
+    </div>
+
+    <svg viewBox="0 0 1536 864" width="1536" height="864" style="position:absolute;left:0;top:0;pointer-events:none;z-index:2;color:#f1f0ec">
+      <g stroke="currentColor" stroke-width="2" fill="none" opacity=".9"><path d="M40 96 L40 40 L150 40"/><path d="M1496 768 L1496 824 L1386 824"/></g>
+    </svg>
+
+    <div style="position:absolute;left:64px;top:120px;z-index:3;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.7">NOTIFICATION STACK</div>
+      <div style="display:flex;flex-direction:column;gap:14px;margin-top:20px;width:520px">
+        <sc-for list="{{ toasts }}" as="t" hint-placeholder-count="4">
+          <div style="{{ t.rowStyle }}">
+            <span style="{{ t.kickerStyle }}">{{ t.kicker }}</span>
+            <span style="font-weight:800;font-size:17px;letter-spacing:.01em">{{ t.text }}</span>
+            <span style="{{ t.valueStyle }}">{{ t.value }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="position:absolute;right:64px;bottom:80px;z-index:3;text-align:right;color:#f1f0ec">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.16em;opacity:.7">ANATOMY</div>
+      <div style="font-size:13px;font-weight:700;line-height:1.7;margin-top:8px;opacity:.85">KICKER CHIP · MESSAGE · VALUE<br>2PX RULE · NO FILL EXCEPT ACID<br>SLIDES IN FROM LEFT, 240MS</div>
+    </div>
+  </section>
+
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  state = { menu: 'PLAY', tab: 'GAMEPLAY', brand: 'ALL', car: 0,
-    toggles: { TRACTION:true, STABILITY:true, ABS:true, STEERING:true, REWIND:true } };
+  state = { menu: 'PLAY', tab: 'GAMEPLAY', brand: 'ALL', car: 0, lobbyFilter: 'ALL', room: 0,
+    toggles: { TRACTION:true, STABILITY:true, ABS:true, STEERING:true, REWIND:true },
+    active: 0, mode: 'all', phase: null, counter: 0 };
+
+  componentDidMount() { this.applyView(0, 'all'); }
+
+  applyView(i, mode) {
+    if (!this._stage) return;
+    const secs = this._stage.querySelectorAll(':scope > section');
+    secs.forEach((s, idx) => {
+      s.style.display = (mode === 'all' || idx === i) ? '' : 'none';
+    });
+  }
+
+  go(i) {
+    const S = this.state;
+    if (S.phase) return;
+    if (S.mode === 'all') {            // entering the transition demo
+      this.setState({ mode: 'stage', active: i });
+      this.applyView(i, 'stage');
+      return;
+    }
+    if (i === S.active) return;
+    this.setState(s => ({ phase: 'cover', counter: s.counter + 1, target: i }));
+    setTimeout(() => { this.applyView(i, 'stage'); this.setState(s => ({ active: i, phase: 'reveal', counter: s.counter + 1 })); }, 420);
+    setTimeout(() => this.setState({ phase: null }), 860);
+  }
+
+  toggleMode() {
+    const next = this.state.mode === 'all' ? 'stage' : 'all';
+    this.setState({ mode: next, phase: null });
+    this.applyView(this.state.active, next);
+  }
 
   renderVals() {
     const S = this.state;
@@ -448,7 +950,7 @@ class Component extends DCLogic {
     });
 
     // ── setting rows (control = React element)
-    const arrows = (val) => React.createElement('span',{style:{display:'inline-flex',alignItems:'center',gap:'18px',fontWeight:700,fontSize:'16px'}},
+    const arrows = (val) => React.createElement('span',{style:{display:'inline-flex',alignItems:'center',gap:'18px',fontWeight:700,fontSize:'16px',lineHeight:1}},
       React.createElement('span',{style:{cursor:'pointer'}},'◄'),
       React.createElement('span',{style:{minWidth:'110px',textAlign:'center'}},val),
       React.createElement('span',{style:{cursor:'pointer'}},'►'));
@@ -508,7 +1010,161 @@ class Component extends DCLogic {
       mk('INFORMATION', '#c9c2b4', INK, 'Connect to online services?', INK, [btn('ONLINE','primary'), btn('OFFLINE','ghost')]),
     ];
 
-    return { menu, tabs, settings, brands, stats, cars, modals };
+    // ── transition toolbar + dot-dissolve overlay
+    const names = ['MENU','SETTINGS','GARAGE','MODAL','ELEMENTS','LOBBY','ROOM','MATCH','RESULTS',
+      'RUN HUD','SCORING','PAUSE','START','TOAST'];
+    const screens = names.map((label, i) => {
+      const on = S.mode === 'stage' && S.active === i;
+      return { label, select: () => this.go(i),
+        style: `padding:8px 14px;font-weight:800;font-size:12px;letter-spacing:.04em;cursor:pointer;`
+          + (on ? `background:${ACID};color:${INK};` : `color:#fff;border:2px solid #fff;`) };
+    });
+    const allStyle = `padding:8px 14px;font-weight:800;font-size:12px;letter-spacing:.04em;cursor:pointer;margin-left:auto;`
+      + (S.mode === 'all' ? `background:${ACID};color:${INK};` : `color:#fff;border:2px solid #cfe021;`);
+    const overlayStyle = S.phase
+      ? `position:fixed;inset:0;z-index:60;pointer-events:none;background:${ACID};`
+        + `display:flex;align-items:center;justify-content:flex-start;padding:0 8vw;`
+        + `animation:wipe-${S.phase} .4s cubic-bezier(.7,0,.2,1) forwards;`
+      : `display:none`;
+    const overlayLabel = names[S.target ?? S.active];
+    const overlayLabelStyle = `color:${INK};font-weight:900;font-size:8vw;line-height:.9;`
+      + `letter-spacing:-.02em;white-space:nowrap;`
+      + (S.phase === 'cover' ? 'animation:lbl-in .4s ease forwards;' : 'animation:lbl-out .4s ease forwards;');
+
+    // ── LOBBY
+    const lobbyFilters = ['ALL','RANKED','CASUAL','PRIVATE'].map(label => {
+      const on = S.lobbyFilter === label;
+      return { label, select: () => this.setState({ lobbyFilter: label }),
+        style: `padding:9px 16px;font-weight:800;font-size:14px;letter-spacing:.02em;cursor:pointer;color:${INK};`
+          + (on ? `background:${ACID};` : `border:2px solid ${INK};`) };
+    });
+    const roomData = [
+      ['MIDNIGHT RUN','RANKED','NEXUS CIRCUIT','6 / 8', 24],
+      ['TOUGE NIGHTS','CASUAL','KATANA PASS','4 / 8', 38],
+      ['APEX HUNTERS','RANKED','VORTEX BAY','8 / 8', 52],
+      ['SLIDE SCHOOL','CASUAL','TRAINING YARD','2 / 8', 18],
+      ['OUTLAW TAG','CASUAL','DOWNTOWN LOOP','5 / 8', 96],
+      ['TIER A ONLY','PRIVATE','PHOENIX RIDGE','3 / 8', 31],
+    ];
+    const lobbyRooms = roomData.map(([name,mode,track,players,ping], i) => {
+      const on = S.room === i;
+      const full = players === '8 / 8';
+      return { name, mode, track, players, ping: `${ping}MS`,
+        select: () => this.setState({ room: i }),
+        rowStyle: `display:grid;grid-template-columns:1fr 150px 240px 120px 110px;gap:20px;align-items:center;`
+          + `padding:25px 20px;cursor:pointer;color:${INK};`
+          + (i < roomData.length - 1 ? `border-bottom:2px solid ${INK};` : '')
+          + (on ? `background:${ACID};` : full ? `opacity:.45;` : ''),
+        pingStyle: `font-weight:800;font-size:14px;color:${ping > 80 ? '#b0402c' : INK}` };
+    });
+
+    // ── ROOM slots
+    const slotData = [
+      ['DRIVER01','LV.23',true,true,ACID],['KAZE_9','LV.31',false,true,'#e0563c'],
+      ['NOCTURN','LV.18',false,true,'#2c2c2c'],['MIRA.S','LV.44',false,true,'#e79ec0'],
+      ['TAKT','LV.12',false,true,'#c9c2b4'],['V0RTEX','LV.27',false,false,'#4a97b8'],
+      ['SLIDEBOY','LV.9',false,true,'#c6c6c6'],['','',false,false,null],
+    ];
+    const roomSlots = slotData.map(([name,lv,host,ready,col], i) => {
+      const empty = !name;
+      return { num: `P${String(i+1).padStart(2,'0')}`,
+        name: empty ? 'OPEN' : name, lv: empty ? 'WAITING FOR PLAYER' : lv,
+        readyLabel: empty ? '' : ready ? 'READY' : 'NOT READY',
+        slotStyle: `display:flex;flex-direction:column;gap:10px;padding:18px;min-height:232px;`
+          + `border:2px solid ${INK};` + (empty ? `opacity:.35;` : `background:#fbfbf9;`),
+        hostStyle: `font-size:10px;font-weight:900;letter-spacing:.08em;padding:3px 8px;background:${INK};color:#fff;`
+          + (host ? '' : 'display:none;'),
+        swatchStyle: `height:44px;background:${col || 'transparent'};`
+          + (empty ? `border:2px dashed ${INK};` : ''),
+        readyStyle: `font-size:11px;font-weight:900;letter-spacing:.06em;padding:5px 10px;`
+          + (empty ? 'display:none;' : ready ? `background:${ACID};color:${INK};` : `border:2px solid ${INK};color:${INK};`) };
+    });
+
+    // ── MATCHMAKING pips
+    const matchPips = [0,1,2,3,4,5,6,7].map(i => ({
+      style: `width:74px;height:74px;border:2px solid ${INK};`
+        + (i < 4 ? `background:${ACID};` : `background:transparent;opacity:.4;`)
+        + (i === 4 ? `animation:blink 1.4s steps(2,end) infinite;opacity:1;` : '') }));
+
+    // ── RESULTS
+    const resData = [
+      ['01','DRIVER01','14,020', 48250, '92 / 88 / 95', '25'], ['02','KAZE_9','13,610', 44100, '90 / 86 / 91', '18'],
+      ['03','MIRA.S','12,480', 39880, '88 / 84 / 87', '15'], ['04','NOCTURN','10,905', 31240, '82 / 79 / 80', '12'],
+      ['05','V0RTEX','9,740', 28905, '78 / 76 / 74', '10'], ['06','TAKT','7,120', 19470, '70 / 68 / 66', '8'],
+    ];
+    const maxDrift = 48250;
+    const resultRows = resData.map(([pos,driver,best,drift,judge,pts], i) => ({
+      pos, driver, best, judge, pts,
+      rowStyle: `display:grid;grid-template-columns:80px 1fr 160px 240px 90px;gap:20px;align-items:center;`
+        + `padding:25px 20px;color:${INK};`
+        + (i < resData.length - 1 ? `border-bottom:2px solid ${INK};` : '')
+        + (i === 0 ? `background:${ACID};` : ''),
+      trackStyle: `display:block;width:130px;height:12px;background:${INK}`,
+      barStyle: `display:block;height:100%;width:${(drift/maxDrift*100).toFixed(0)}%;`
+        + `background:${i === 0 ? INK : ACID};transform-origin:left;animation:growbar ${.6+i*.1}s ease-out both` }));
+
+    // ── DRIFT RUN HUD
+    const PAPER = '#f1f0ec';
+    const judgePanel = [['ANGLE','92'],['LINE','88'],['STYLE','95']]
+      .map(([label,value]) => ({ label, value,
+        valStyle: `font-size:24px;font-weight:900;letter-spacing:-.02em;color:${ACID};min-width:46px;text-align:right` }));
+    // angle meter: filled ticks up to the current angle, tail is the safe-zone marker
+    const angleTicks = Array.from({length:18}, (_,i) => ({
+      style: `width:6px;height:${i === 12 ? 22 : 14}px;`
+        + `background:${i < 11 ? PAPER : i === 12 ? ACID : PAPER};`
+        + (i > 12 ? 'opacity:.3;' : i === 11 ? 'opacity:.55;' : '') }));
+    const clipPoints = [['CP1',true],['CP2',true],['CP3',false],['CP4',false]]
+      .map(([label,hit]) => ({ label,
+        style: `font-size:11px;font-weight:900;letter-spacing:.06em;padding:5px 10px;`
+          + (hit ? `background:${ACID};color:${INK};` : `border:2px solid ${PAPER};color:${PAPER};opacity:.6;`) }));
+    const tachTicks = Array.from({length:30}, (_,i) => ({
+      style: `width:5px;height:${10 + i*0.8}px;background:${i < 20 ? PAPER : ACID};`
+        + (i > 25 ? 'opacity:.35;' : '') }));
+
+    // ── DRIFT SCORING
+    const judgments = [['PERFECT',true],['GOOD',false],['PERFECT',true],['CLIP',false]]
+      .map(([label,hot]) => ({ label,
+        style: `font-size:12px;font-weight:900;letter-spacing:.1em;padding:6px 12px;`
+          + (hot ? `background:${ACID};color:${INK};` : `border:2px solid ${PAPER};color:${PAPER};opacity:.7;`) }));
+
+    // ── PAUSE
+    const pauseLabels = [['▶','RESUME'],['↻','RESTART RACE'],['⚙','SETTINGS'],['▤','CONTROLS'],['⇥','QUIT TO LOBBY']];
+    const pauseItems = pauseLabels.map(([glyph,label], i) => {
+      const on = i === 0;
+      return { glyph, label, select: () => {},
+        style: `display:flex;align-items:center;gap:16px;padding:16px 18px;cursor:pointer;`
+          + (on ? `background:${ACID};color:${INK};`
+                : `color:${PAPER};border-bottom:2px solid rgba(241,240,236,.35);`) };
+    });
+
+    // ── COUNTDOWN grid pips
+    const gridPips = ['DRIVER01','KAZE_9','MIRA.S','NOCTURN','TAKT','V0RTEX','SLIDEBOY','APEX']
+      .map((label, i) => ({ label: `P${i+1}`,
+        style: `width:70px;height:44px;display:flex;align-items:center;justify-content:center;`
+          + `font-size:13px;font-weight:900;letter-spacing:.04em;border:2px solid ${PAPER};`
+          + (i === 1 ? `background:${ACID};color:${INK};` : `color:${PAPER};`) }));
+
+    // ── TOASTS
+    const toastData = [
+      ['POS','OVERTOOK MIRA.S','P2', true],
+      ['BEST','NEW PERSONAL BEST','0:38.905', true],
+      ['CHAIN','DRIFT CHAIN BANKED','+3,180', false],
+      ['RIVAL','KAZE_9 CLOSING IN','-0.84', false],
+    ];
+    const toasts = toastData.map(([kicker,text,value,hot]) => ({ kicker, text, value,
+      rowStyle: `display:flex;align-items:center;gap:16px;padding:14px 16px;`
+        + `border:2px solid ${PAPER};color:${PAPER};background:rgba(20,20,20,.5);`,
+      kickerStyle: `font-size:11px;font-weight:900;letter-spacing:.1em;padding:5px 10px;`
+        + (hot ? `background:${ACID};color:${INK};` : `border:2px solid ${PAPER};color:${PAPER};`),
+      valueStyle: `margin-left:auto;font-size:17px;font-weight:900;letter-spacing:-.01em;`
+        + `color:${hot ? ACID : PAPER};` }));
+
+    return { menu, tabs, settings, brands, stats, cars, modals,
+      lobbyFilters, lobbyRooms, roomSlots, matchPips, resultRows,
+      judgePanel, angleTicks, clipPoints, tachTicks, judgments, pauseItems, gridPips, toasts,
+      screens, allStyle, overlayStyle, overlayLabel, overlayLabelStyle, overlayKey: `${S.phase}-${S.counter}`,
+      toggleMode: () => this.toggleMode(),
+      stageRef: (el) => { this._stage = el; } };
   }
 }
 </script>

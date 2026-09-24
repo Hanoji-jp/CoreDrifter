@@ -241,6 +241,45 @@ namespace HjUI
 		             ws, hs, nullptr, &col);
 	}
 
+	// 枠へ貼る所は同じで、指定した矩形からはみ出すぶんを捨てる。
+	//
+	// 絵の側(テクスチャ)を切り出して、残る範囲にだけ描く。
+	// 枠を縮めて済ませると、切りたいだけなのに中身まで縮む
+	void TexRectClipTL(const KdTexture* tex, float dx, float dy, float w, float h,
+	                   float cx, float cy, float cw, float ch,
+	                   const Math::Color& col)
+	{
+		if (!tex || w <= 0.0f || h <= 0.0f) { return; }
+
+		// 枠と残す範囲の重なり(デザイン座標)
+		const float x0 = std::max(dx, cx);
+		const float y0 = std::max(dy, cy);
+		const float x1 = std::min(dx + w,  cx + cw);
+		const float y1 = std::min(dy + h,  cy + ch);
+
+		if (x1 <= x0 || y1 <= y0) { return; }
+
+		// 重なりが絵のどこに当たるか(0〜1)
+		const auto& info = tex->GetInfo();
+
+		const float tw = static_cast<float>(info.Width);
+		const float th = static_cast<float>(info.Height);
+
+		Math::Rectangle src;
+		src.x      = static_cast<long>((x0 - dx) / w * tw);
+		src.y      = static_cast<long>((y0 - dy) / h * th);
+		src.width  = std::max(1L, static_cast<long>((x1 - x0) / w * tw));
+		src.height = std::max(1L, static_cast<long>((y1 - y0) / h * th));
+
+		const int ws = std::max(1, static_cast<int>((x1 - x0) * UIConst::Scale + 0.5f));
+		const int hs = std::max(1, static_cast<int>((y1 - y0) * UIConst::Scale + 0.5f));
+
+		SP().DrawTex(tex,
+		             static_cast<int>(MapX((x0 + x1) * 0.5f) + 0.5f),
+		             static_cast<int>(MapY((y0 + y1) * 0.5f) + 0.5f),
+		             ws, hs, &src, &col);
+	}
+
 	void RectTL(float dx, float dy, float w, float h, const Math::Color& col, bool fill)
 	{
 		const int hw = std::max(1, static_cast<int>(w * UIConst::Scale * 0.5f + 0.5f));

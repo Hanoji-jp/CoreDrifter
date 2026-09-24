@@ -153,4 +153,16 @@ HjSaveOStream::~HjSaveOStream()
 {
 	HjSaveFile::Set(m_key, str());
 	HjSaveFile::Save();
+
+#ifndef DISTRIBUTE_BUILD
+	// 配る既定も一緒に更新する。
+	//
+	// 開発中の調整が save.dat にしか残らないと、pak へ入るのは昔の既定。
+	// 手元では合っているのに、配ったものだけ昔の値で動く
+	if (!m_assetPath.empty())
+	{
+		std::ofstream a(m_assetPath, std::ios::binary | std::ios::trunc);
+		if (a) { a << str(); }
+	}
+#endif
 }

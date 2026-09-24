@@ -61,7 +61,7 @@ void HjPostFxSettings::Save() const
 	// ParamList は今の状態を取り出す都合で非constにしてある
 	auto params = const_cast<HjPostFxSettings*>(this)->ParamList();
 
-	HjSaveOStream ofs("postfx");
+	HjSaveOStream ofs("postfx", SettingsPath);
 	if (!ofs) { return; }
 	for (const auto& p : params) { ofs << p.first << " " << *p.second << "\n"; }
 }

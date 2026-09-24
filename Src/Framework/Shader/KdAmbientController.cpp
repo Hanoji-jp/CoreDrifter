@@ -1,5 +1,8 @@
 ﻿#include "KdAmbientController.h"
 
+#include <algorithm>
+#include <cmath>
+
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
 // シェーダーマネージャで設定したシェーダーの初期値を取得してくる
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -48,6 +51,7 @@ void KdAmbientController::Init()
 void KdAmbientController::Update()
 {
 	m_pointLights.clear();
+	m_spotLights.clear();
 }
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -75,6 +79,31 @@ void KdAmbientController::AddPointLight(const Math::Vector3& Color, float Radius
 void KdAmbientController::AddPointLight(const PointLight& pointLight)
 {
 	m_pointLights.push_back(pointLight);
+}
+
+// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
+// スポットライトの追加
+// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
+void KdAmbientController::AddSpotLight(const Math::Vector3& color,
+	const Math::Vector3& pos, const Math::Vector3& target,
+	float outerDeg, float innerDeg, float range)
+{
+	Math::Vector3 dir = target - pos;
+
+	// 置き場所と狙う所が同じ。向きが出せないので置かない
+	if (dir.LengthSquared() < 0.000001f) { return; }
+
+	dir.Normalize();
+
+	// 内側が外側より広いと、境目の割り算が負になって縁が反転する
+	const float outer = std::clamp(outerDeg, 0.1f, 89.0f);
+	const float inner = std::clamp(innerDeg, 0.0f, outer);
+
+	constexpr float kDeg = 3.14159265f / 180.0f;
+
+	m_spotLights.push_back(SpotLight(color, range, pos, dir,
+		 std::cos(outer * kDeg),
+		 std::cos(inner * kDeg)));
 }
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -109,6 +138,22 @@ void KdAmbientController::SetAmbientLight(const Math::Vector4& col)
 	m_parameter.m_ambientLightColor = col;
 
 	m_dirtyLightAmb = true;
+}
+
+//----------------------------------------------------------
+// 環境の映り込み
+//
+// キューブマップの代わりに、まわりの景色を3色で持つ。
+// 車体へ映るのは「上に何があるか」「横に何があるか」で
+// ほぼ決まるので、これだけでも金属らしさが出る
+//----------------------------------------------------------
+void KdAmbientController::SetEnvColors(const Math::Vector3& up,
+                                       const Math::Vector3& side,
+                                       const Math::Vector3& down)
+{
+	m_envUp   = Math::Vector4(up.x,   up.y,   up.z,   1.0f);
+	m_envSide = Math::Vector4(side.x, side.y, side.z, 1.0f);
+	m_envDown = Math::Vector4(down.x, down.y, down.z, 1.0f);
 }
 
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
@@ -152,6 +197,8 @@ void KdAmbientController::SetheightFog(const Math::Vector3& col, float topValue,
 // ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// ///// /////
 void KdAmbientController::WriteLightParams()
 {
+	KdShaderManager::Instance().WriteCBEnvColors(m_envUp, m_envSide, m_envDown);
+
 	// 環境光
 	if (m_dirtyLightAmb)
 	{
@@ -174,6 +221,12 @@ void KdAmbientController::WriteLightParams()
 	{
 		KdShaderManager::Instance().WriteCBPointLight(m_pointLights);
 	}
+
+	// スポット光。
+	//
+	// 空でも書く。書かないと使用数が前のまま残って、
+	// 車庫を出た後も同じ所に光が当たり続ける
+	KdShaderManager::Instance().WriteCBSpotLight(m_spotLights);
 
 	// 影描画エリアの更新
 	KdShaderManager::Instance().WriteCBShadowArea(m_shadowProj, m_dirLightHeight);

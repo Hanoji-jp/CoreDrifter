@@ -59,6 +59,21 @@ REM     毎回「更新があります」になる
 > "%ROOT%\version.txt" echo %VERSION%
 echo [INFO] version.txt = %VERSION%
 
+REM ---- 上げ先が使えるか先に見ておく ----
+REM     リリースはタグに紐づくので、コミットが1つも無いリポジトリには作れない。
+REM     ビルドとzipを全部終えてから気づくと、そのぶんが丸ごと無駄になる
+echo [INFO] 上げ先を確かめています...
+gh api "repos/%REPO%/commits?per_page=1" >NUL 2>&1
+if errorlevel 1 (
+    echo [ERROR] 上げ先 %REPO% が使えません。よくある原因:
+    echo         - リポジトリが空^(コミットが1つも無い^)
+    echo           リリースはタグに紐づくので、最初のコミットが要ります。
+    echo           GitHub で README を1つ作るだけで足ります。
+    echo         - リポジトリ名が違う / 権限が無い
+    echo         - gh の認証切れ ... gh auth login
+    pause ^& exit /b 1
+)
+
 REM ---- Distribute をビルド ----
 echo [INFO] MSBuild を探しています...
 for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe`) do set "MSBUILD=%%i"
@@ -137,7 +152,10 @@ REM ---- GitHub のリリースを作る ----
 echo [INFO] リリースを作っています...
 gh release create "%VERSION%" "%ZIP%" --repo %REPO% --title "Release %VERSION%" --notes-file "%NOTES%"
 if errorlevel 1 (
-    echo [ERROR] gh release に失敗しました。gh auth login を試してください。
+    echo [ERROR] リリースの作成に失敗しました。よくある原因:
+    echo         - 上げ先が空^(コミットが1つも無い^)。README を1つ作れば直ります
+    echo         - 同じ版が既にある。別の版にするか、先に消してください
+    echo         - gh の認証切れ ... gh auth login
     del "%ZIP%"   2>NUL
     del "%NOTES%" 2>NUL
     pause & exit /b 1

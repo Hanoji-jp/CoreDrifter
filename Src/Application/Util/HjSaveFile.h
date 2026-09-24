@@ -84,9 +84,20 @@ public:
 class HjSaveOStream : public std::ostringstream
 {
 public:
-	explicit HjSaveOStream(const std::string& key) : m_key(key) {}
+	// assetPath を渡すと、開発ビルドでは配る既定(Asset/Data/～)も同じ中身にする。
+	//
+	// 配る既定は、以前は保存先そのものだったので手を入れる必要が無かった。
+	// 保存先が save.dat へ移った今は、開発中に合わせ込んだ値が save.dat に
+	// しか残らない。pak へ入るのは昔の既定のままなので、
+	// 配ったものだけ別の値で動くことになる。
+	//
+	// 配布ビルドでは書かない。遊ぶ側の設定であって、配る既定ではない
+	explicit HjSaveOStream(const std::string& key, const char* assetPath = nullptr)
+		: m_key(key), m_assetPath(assetPath ? assetPath : "") {}
+
 	~HjSaveOStream();
 
 private:
 	std::string m_key;
+	std::string m_assetPath;
 };

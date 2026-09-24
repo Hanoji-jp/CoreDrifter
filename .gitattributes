@@ -4,6 +4,17 @@
 * text=auto
 
 ###############################################################################
+# Windows batch files must keep CRLF.
+#
+# cmd.exe splits a batch file on CR+LF only. With bare LF it cannot find the
+# line breaks, so variable names and comments get cut in half and the halves
+# are run as commands (e.g. %OUTDIR% turning into a stray "TDIR").
+###############################################################################
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

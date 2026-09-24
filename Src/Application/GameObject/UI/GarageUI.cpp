@@ -5,6 +5,9 @@
 #include "../../Input/HjKeyInput.h"
 #include "HjCarPortrait.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace U  = HjUI;
 namespace GC = GarageConst;
 
@@ -30,38 +33,60 @@ namespace
 	// 素の値で右端合わせをすると、native と違う大きさで描いた文字だけ
 	// ずれる。描く大きさとの比を掛けて揃える
 	//======================================================
+	//======================================================
+	// 暗い空間の上に置く色
+	//
+	// 画面全体が3Dになったので、墨のままでは読めない。
+	// 明暗を入れ替えた色をここから配る
+	//======================================================
+	// 濃さを渡せるようにしてある。
+	// 切り替えの途中で、行ごとに薄い所から入ってくる
+	Math::Color Ink(float alpha = 1.0f)
+	{
+		return { GC::InkCol[0], GC::InkCol[1], GC::InkCol[2], alpha };
+	}
+
+	Math::Color Sub(float alpha = 1.0f)
+	{
+		return { GC::SubCol[0], GC::SubCol[1], GC::SubCol[2], alpha };
+	}
+
+	//======================================================
+	// 終わり際をゆっくりにする
+	//
+	// 等速で動かすと、止まった瞬間が機械的に見える。
+	// 入りを速く、締めを緩くすると、動いて止まったように見える
+	//======================================================
+	float EaseOut(float t)
+	{
+		const float u = 1.0f - std::clamp(t, 0.0f, 1.0f);
+		return 1.0f - u * u * u;
+	}
+
+	//======================================================
+	// 1つずつ遅らせて動かすときの進み
+	//
+	// 一斉に動かすと、棒が何本あっても1本の塊が動いたようにしか
+	// 見えない。ずらすと本数が読める
+	//======================================================
+	float StaggerT(float animT, float lead)
+	{
+		const float span = std::max(GC::UiAnimTime - lead, 0.0001f);
+
+		return std::clamp((animT * GC::UiAnimTime - lead) / span, 0.0f, 1.0f);
+	}
+
+	Math::Color Line(float alpha = 1.0f)
+	{
+		return { GC::LineCol[0], GC::LineCol[1], GC::LineCol[2], alpha };
+	}
+
 	float TextWidthD(int fontId, const char* str, float pxH)
 	{
 		const float native = UIConst::FontPx(fontId);
 		if (native <= 0.0f) { return 0.0f; }
 
 		return (U::Measure(fontId, str, 0.0f) / UIConst::Scale) * (pxH / native);
-	}
-
-	//======================================================
-	// 背景のハーフトーン
-	//
-	// タイトルと同じ HjUI::DotFieldTwinkle で打つ。
-	//
-	// これは大きさ(デザイン単位)で受けるが、点の間隔は
-	// UIConst::DotCell (画面px)で固定されている。
-	// 幅をそのまま渡すと、解像度が変わった瞬間に点の数が変わって
-	// 端が欠けたり一列はみ出したりする。
-	//
-	// 点の数から必要な幅を逆算して渡す
-	//======================================================
-	void DotPatch(const GarageConst::DotPatch& p)
-	{
-		const float step = UIConst::DotCell / UIConst::Scale;   // 1点ぶん(デザイン単位)
-
-		Math::Color col = p.grey ? UIConst::GREY9 : UIConst::DOTS;
-		col.w = p.alpha;
-
-		// 最後の1点まで含めたいので、間隔は (個数-1) 本ぶん
-		U::DotFieldTwinkle(p.x, p.y,
-		                   step * (p.cols - 1),
-		                   step * (p.rows - 1),
-		                   col, p.phase);
 	}
 
 	//======================================================
@@ -72,7 +97,7 @@ namespace
 	//======================================================
 	void CropTick(float y)
 	{
-		const Math::Color col = UIConst::GREY;
+		const Math::Color col(GC::SubCol[0], GC::SubCol[1], GC::SubCol[2], 1.0f);
 
 		const float h[] = {
 			GC::TickX,                y,
@@ -86,97 +111,6 @@ namespace
 			cx, y + GC::TickHalf,
 		};
 		U::PolylineD(v, 2, GC::TickPx, col);
-	}
-
-	// 3本ぶんの制御点。4区間 x (始点・制御1・制御2・終点) x (x,y)
-	// 原点まわりに閉じている
-	const float WL1[] = {
-		-210,-6,  -150,-84,  -50,-96,   44,-70,
-		  44,-70,  150,-40,   236,-26,  202, 42,
-		 202, 42,  172,100,    56, 82,  -54, 80,
-		 -54, 80, -158, 78,  -244, 60, -210, -6,
-	};
-	const float WL2[] = {
-		-176, 34, -214,-38,  -104,-90,   -6,-80,
-		  -6,-80,  124,-66,   222,-30,  172, 30,
-		 172, 30,  134, 82,    30, 60,  -66, 92,
-		 -66, 92, -148,118,  -150, 92, -176, 34,
-	};
-	const float WL3[] = {
-		-150,-34,  -74,-96,   66,-78,  152,-46,
-		 152,-46,  214,-22,  196, 34,  146, 58,
-		 146, 58,   74, 92,  -46, 66, -126, 58,
-		-126, 58, -196, 50, -204, 18, -150,-34,
-	};
-
-	// 3次ベジェを点の列にする
-	void SampleCubic(float x0, float y0, float x1, float y1,
-	                 float x2, float y2, float x3, float y3,
-	                 int steps, float* out, int& n)
-	{
-		for (int i = 0; i <= steps; ++i)
-		{
-			const float t = static_cast<float>(i) / steps;
-			const float u = 1.0f - t;
-
-			const float b0 = u * u * u;
-			const float b1 = 3.0f * u * u * t;
-			const float b2 = 3.0f * u * t * t;
-			const float b3 = t * t * t;
-
-			out[n++] = b0 * x0 + b1 * x1 + b2 * x2 + b3 * x3;
-			out[n++] = b0 * y0 + b1 * y1 + b2 * y2 + b3 * y3;
-		}
-	}
-
-	// 1本ぶんを、回して・伸ばして・置いて描く
-	void DrawLoop(const float* segs, float cx, float cy,
-	              float rot, float scale, const Math::Color& col)
-	{
-		// 4区間 x (steps+1)点 x 2成分
-		float pts[4 * (GC::LoopSteps + 1) * 2] = {};
-		int   n = 0;
-
-		for (int s = 0; s < 4; ++s)
-		{
-			const float* p = segs + s * 8;
-			SampleCubic(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
-			            GC::LoopSteps, pts, n);
-		}
-
-		const float ca = cosf(rot), sa = sinf(rot);
-		for (int i = 0; i < n; i += 2)
-		{
-			const float x = pts[i]     * scale;
-			const float y = pts[i + 1] * scale;
-
-			pts[i]     = cx + x * ca - y * sa;
-			pts[i + 1] = cy + x * sa + y * ca;
-		}
-
-		U::PolylineD(pts, n / 2, 1.0f, col);
-	}
-
-	// 12枚を回して絡ませる
-	void DriftLoops(float cx, float cy, float spin, const Math::Color& col)
-	{
-		struct Copy { const float* segs; float rotDeg, scale; };
-
-		static const Copy kCopies[] = {
-			{ WL1,   0.0f, 1.00f }, { WL2,  28.0f, 1.00f },
-			{ WL3,  54.0f, 1.00f }, { WL1,  80.0f, 1.16f },
-			{ WL2, 108.0f, 0.88f }, { WL3, 134.0f, 1.10f },
-			{ WL1, 162.0f, 0.94f }, { WL2, 196.0f, 1.22f },
-			{ WL3, 228.0f, 0.98f }, { WL1, 262.0f, 1.08f },
-			{ WL2, 300.0f, 0.92f }, { WL3, 332.0f, 1.14f },
-		};
-
-		constexpr float Deg = 3.14159265f / 180.0f;
-
-		for (const Copy& k : kCopies)
-		{
-			DrawLoop(k.segs, cx, cy, spin + k.rotDeg * Deg, k.scale, col);
-		}
 	}
 
 	// 決めた範囲に対する位置(0〜1)。
@@ -210,7 +144,8 @@ void GarageUI::BuildEntries()
 		Entry e;
 		e.kind  = kind;
 		e.name  = HjCarChoice::NameOf(kind);
-		e.model = probe.GetOwnBodyName();
+		e.maker = HjCarChoice::MakerOf(kind);
+		e.model = HjCarChoice::ModelOf(kind);
 
 		// 煙の色をそのまま札の色にする。
 		// 走っているときに出る色と揃うので、見分けが付く
@@ -234,6 +169,25 @@ void GarageUI::BuildEntries()
 			                              GC::DriftMin, GC::DriftMax) },
 			{ "BRAKING",      Norm(probe.GetBrakePowerSpec(),   GC::BrakeMin, GC::BrakeMax) },
 		};
+
+		//===== 諸元表 =====
+		// 車ごとに違う実寸だけを並べる
+		{
+			char buf[32] = {};
+
+			e.spec.push_back({ "LAYOUT", "FR" });
+
+			snprintf(buf, sizeof(buf), "%.0f km/h",
+			         probe.GetMaxSpeedSpec() * CarConst::HudMsToKmh);
+			e.spec.push_back({ "TOP SPEED", buf });
+
+			// 前後と左右の半分で持っているので倍にする
+			snprintf(buf, sizeof(buf), "%.2f m", probe.GetBaseSpec() * 2.0f);
+			e.spec.push_back({ "WHEELBASE", buf });
+
+			snprintf(buf, sizeof(buf), "%.2f m", probe.GetTrackSpec() * 2.0f);
+			e.spec.push_back({ "TRACK", buf });
+		}
 
 		m_entries.push_back(std::move(e));
 	}
@@ -264,9 +218,27 @@ CarChoiceConst::Kind GarageUI::Selected() const
 //----------------------------------------------------------
 void GarageUI::Update()
 {
-	m_spin += KdFPSController::GetDt() * GC::LoopSpinDeg * (3.14159265f / 180.0f);
-
 	U::BeginInput();
+
+	// 選択が変わったかは、前のフレームとの差で見る。
+	//
+	// 選び直す所が一覧・帯・キーと分かれていて、
+	// 途中で抜ける道もある。変えた所ごとに書くと必ず漏れる
+	if (m_sel != m_selPrev)
+	{
+		// 今出ている長さを控える。
+		// 目標だけ差し替えると、動いている途中から別の値へ跳ぶ
+		m_barFrom = m_barNow;
+
+		m_animT   = 0.0f;
+		m_selPrev = m_sel;
+	}
+
+	const float dt = KdFPSController::GetDt();
+
+	m_animT = std::min(m_animT + dt / GC::UiAnimTime, 1.0f);
+
+	UpdateAnim(dt);
 
 	auto& key = HjKeyInput::Instance();
 	const int n = static_cast<int>(m_entries.size());
@@ -277,10 +249,49 @@ void GarageUI::Update()
 	if (key.Pressed(VK_LEFT) || key.Pressed('A')) { m_sel = (m_sel - 1 + n) % n; }
 	if (key.Pressed(VK_RIGHT)|| key.Pressed('D')) { m_sel = (m_sel + 1) % n; }
 
+	//===== 車を手で回す =====
+	// 勝手に回していると、見たい角度で止められない。
+	// 絵の上を引きずるか、Q・E を押している間だけ回す
+	{
+		const float mx = U::MouseX();
+
+		const bool down = key.Down(VK_LBUTTON);
+
+		// 掴むのは絵の上だけ。一覧や帯を押したときに回らないように
+		if (down && !m_dragging
+		 && U::Hover(GC::SpinAreaX, GC::SpinAreaY,
+		             GC::SpinAreaW, GC::SpinAreaH))
+		{
+			m_dragging = true;
+		}
+
+		if (!down) { m_dragging = false; }
+
+		float yaw = 0.0f;
+
+		if (m_dragging) { yaw += (mx - m_lastMouse) * GC::DragYawPerPx; }
+
+		if (key.Down('Q')) { yaw -= GC::KeyYawSpeed * dt; }
+		if (key.Down('E')) { yaw += GC::KeyYawSpeed * dt; }
+
+		if (yaw != 0.0f)
+		{
+			if (auto p = m_wpPortrait.lock())
+			{
+				p->AddYaw(yaw * (3.14159265f / 180.0f));
+			}
+		}
+
+		m_lastMouse = mx;
+	}
+
 	if (key.Pressed(VK_RETURN) || key.Pressed(VK_SPACE)) { m_decided = true; }
 	if (key.Pressed(VK_ESCAPE))                          { m_back    = true; }
 
 	//===== 押しても選べる =====
+	// 回している間は拾わない。引きずり終わりで車が変わる
+	if (m_dragging) { return; }
+
 	// 左の一覧
 	for (int i = 0; i < n; ++i)
 	{
@@ -290,16 +301,15 @@ void GarageUI::Update()
 
 	// 下の帯。矢印を枠で描いておいて押せないと、
 	// 壊れているのか飾りなのか区別が付かない
-	const float rightAx = UIConst::DesignW - GC::PadX - GC::ArrowW;
+	const float rightAx = GC::DesignRight - GC::ArrowW;
 
 	if (U::Clicked(GC::PadX,  GC::StripY, GC::ArrowW, GC::StripH)) { m_sel = (m_sel - 1 + n) % n; }
 	if (U::Clicked(rightAx, GC::StripY, GC::ArrowW, GC::StripH)) { m_sel = (m_sel + 1) % n; }
 
 	{
-		const float band = rightAx - (GC::PadX + GC::ArrowW) - GC::StripGap * 2.0f;
-		const float cw   = (band - GC::StripGap * (n - 1)) / n;
+		float x = 0.0f, cw = 0.0f;
+		StripLayout(n, x, cw);
 
-		float x = GC::PadX + GC::ArrowW + GC::StripGap;
 		for (int i = 0; i < n; ++i)
 		{
 			if (U::Clicked(x, GC::StripY, cw, GC::StripH)) { m_sel = i; }
@@ -309,13 +319,71 @@ void GarageUI::Update()
 }
 
 //----------------------------------------------------------
+// 切り替えの動きを進める
+//
+// 描く側は const なので、動く値はここで作って持たせる。
+// 描画の中で時間を進めると、1フレームに2回描いた時に倍進む
+//----------------------------------------------------------
+void GarageUI::UpdateAnim(float dt)
+{
+	if (m_entries.empty()) { return; }
+
+	const Entry& e = m_entries[
+		std::clamp(m_sel, 0, static_cast<int>(m_entries.size()) - 1)];
+
+	//===== 性能の棒 =====
+	const size_t n = e.stats.size();
+
+	m_barNow.resize(n, 0.0f);
+	m_barFrom.resize(n, 0.0f);
+
+	for (size_t i = 0; i < n; ++i)
+	{
+		const float t = StaggerT(m_animT, GC::BarStagger * i);
+
+		m_barNow[i] = m_barFrom[i]
+			        + (e.stats[i].value - m_barFrom[i]) * EaseOut(t);
+	}
+
+	//===== 選択の地 =====
+	// 行を飛び越すのではなく、遅れて追いつく
+	const float target = GC::ListY + m_sel * GC::ListStep;
+
+	if (!m_selInit)
+	{
+		// 開いた1フレーム目。ここで寄せ始めると、
+		// 画面の外から地が飛んでくる
+		m_selY    = target;
+		m_selInit = true;
+		return;
+	}
+
+	// フレーム時間に依らない寄せ方。
+	// 単純に差の何割かを足すと、フレームが落ちたときだけ遅くなる
+	const float k = 1.0f - std::exp(-GC::SelFollow * dt);
+
+	m_selY += (target - m_selY) * k;
+}
+
+//----------------------------------------------------------
 // 見出し
 //----------------------------------------------------------
 void GarageUI::DrawHeader() const
 {
-	const float w1 = U::Text(FontHead, GC::PadX, GC::PadY, 47.0f, "GARAGE ", INK);
-	const float w2 = U::Text(FontHead, w1, GC::PadY, 47.0f, "/ ", GREY);
-	U::Text(FontHead, w2, GC::PadY, 47.0f, "CAR SELECT", ACID);
+	// 元絵は 56px/900。FontTitle(125/900)を縮めて描く。
+	//
+	// HjUI::Text では大きさが変わらない(第4引数は縦位置)。
+	// 焼いた 125px のまま出てしまうので、TextScaled を通す
+	float x = GC::PadX;
+
+	const char* part[] = { "GARAGE ", "/ ", "CAR SELECT" };
+	const Math::Color col[] = { Ink(), Sub(), ACID };
+
+	for (int i = 0; i < 3; ++i)
+	{
+		U::TextScaled(FontTitle, x, GC::PadY, GC::HeadPx, part[i], col[i]);
+		x += TextWidthD(FontTitle, part[i], GC::HeadPx);
+	}
 
 	//===== 右上 =====
 	// 元案はここに所持金があったが、この作品に通貨は無い。
@@ -325,13 +393,13 @@ void GarageUI::DrawHeader() const
 		char value[8] = {};
 		sprintf_s(value, "%02d", static_cast<int>(m_entries.size()));
 
-		const float lw = TextWidthD(FontRow, label, GC::CountLabelPx);
-		const float vw = TextWidthD(FontTab, value, GC::CountValuePx);
+		const float lw = TextWidthD(FontFoot, label, GC::CountLabelPx);
+		const float vw = TextWidthD(FontTab,  value, GC::CountValuePx);
 
-		const float right = UIConst::DesignW - GC::PadX;
-
-		U::Text(FontRow, right - lw, GC::CountLabelY, GC::CountLabelPx, label, GREY);
-		U::Text(FontTab, right - vw, GC::CountValueY, GC::CountValuePx, value, INK);
+		U::TextScaled(FontFoot, GC::DesignRight - lw, GC::CountLabelY,
+		              GC::CountLabelPx, label, Sub());
+		U::TextScaled(FontTab, GC::DesignRight - vw, GC::CountValueY,
+		              GC::CountValuePx, value, Ink());
 	}
 }
 
@@ -342,23 +410,44 @@ void GarageUI::DrawHeader() const
 //----------------------------------------------------------
 void GarageUI::DrawList() const
 {
-	for (size_t i = 0; i < m_entries.size(); ++i)
+	const int n = static_cast<int>(m_entries.size());
+	if (n <= 0) { return; }
+
+	const int sel = std::clamp(m_sel, 0, n - 1);
+
+	//===== 選ばれている行の地 =====
+	// 行の位置ではなく、追いかけている位置に出す。
+	// 地が遅れて付いてくると、一覧が動いた形になる
+	{
+		const float w =
+			TextWidthD(FontTab, m_entries[sel].name.c_str(), GC::ListPx)
+			+ GC::ListIconW + GC::ListPadX * 2.0f;
+
+		U::RectTL(GC::PadX - GC::ListPadX, m_selY - GC::ListPadY,
+			  w, GC::ListRowH, ACID, true);
+	}
+
+	// 地が今どの行に一番近いか。
+	//
+	// 地は遅れて動くので、選んだ行で墨に戻すと、
+	// 地の来ていない行が先に墨になって背景に溶ける。
+	// 幅で見ると、行と行の間で1つも当たらない瞬間ができて、
+	// そこだけ地の上に薄い字が乗る。必ず1行に決まる形にする
+	const int lit = std::clamp(
+		static_cast<int>(std::lround((m_selY - GC::ListY) / GC::ListStep)),
+		0, n - 1);
+
+	for (int i = 0; i < n; ++i)
 	{
 		const float y = GC::ListY + i * GC::ListStep;
-		const bool  active = (static_cast<int>(i) == m_sel);
 
-		if (active)
-		{
-			const float w = U::Measure(FontTab, m_entries[i].name.c_str(), 0.0f)
-			              / UIConst::Scale + 60.0f;
+		const bool on = (i == lit);
 
-			U::RectTL(GC::PadX - GC::ListPadX, y - 6.0f, w, 38.0f, ACID, true);
-		}
+		const Math::Color ink = on ? INK : Sub();
 
-		const Math::Color ink = active ? INK : SUBTXT;
-
-		U::Text(FontTab, GC::PadX, y, 17.0f, "///", ink);
-		U::Text(FontTab, GC::PadX + 34.0f, y, 17.0f, m_entries[i].name.c_str(), ink);
+		U::TextScaled(FontTab, GC::PadX, y, GC::ListPx, "///", ink);
+		U::TextScaled(FontTab, GC::PadX + GC::ListIconW, y, GC::ListPx,
+			      m_entries[i].name.c_str(), ink);
 	}
 }
 
@@ -367,43 +456,44 @@ void GarageUI::DrawList() const
 //----------------------------------------------------------
 void GarageUI::DrawStage(const Entry& e) const
 {
-	U::Text(FontTab,  GC::StageX, GC::StageY, 17.0f, e.name.c_str(), INK);
-	U::Text(FontHead, GC::StageX, GC::StageY + 26.0f, 47.0f, e.model.c_str(), INK);
+	// 車名は横から入れる。
+	//
+	// 名前が瞬時に差し替わると、絵が切り替わっただけに見える。
+	// 車の入れ替えに合わせて動かすと、同じ台の上で乗り換わって見える
+	const float k  = EaseOut(m_animT);
+	const float dx = (1.0f - k) * GC::NameSlide;
+
+	// 元絵は 作り手20px / 型番96px。どちらも weight 900。
+	//
+	// 型番にモデルのファイル名を出していたときは "silvia_body" と
+	// 並んで、96pxでは台の下まではみ出して読めなかった
+	U::TextScaled(FontHead, GC::StageX + dx, GC::StageY, GC::NamePx,
+		      e.maker.c_str(), Ink(k));
+
+	// 型名は 96px の大見出し。
+	// FontHead(47px)では倍に引き伸ばすことになるので、
+	// もっと大きく焼いてある FontTitle(125px)を縮めて使う。
+	//
+	// 大きい字ほど大きく動かす。同じ量だと、下の小さい字だけが目立つ
+	U::TextScaled(FontTitle, GC::StageX + dx * 1.6f, GC::ModelY, GC::ModelPx,
+		       e.model.c_str(), Ink(k));
 
 	//===== 等級の札 =====
+	// 札は動かさない。枠まで動くと、画面の骨組みごと揺れて見える
 	{
-		const float lw = U::Measure(FontRow, "TIER", 0.0f) / UIConst::Scale + 24.0f;
-		const float rw = U::Measure(FontRow, e.tier.c_str(), 0.0f) / UIConst::Scale + 32.0f;
+		const float lw = TextWidthD(FontRow, "TIER", GC::TierPx) + GC::TierPadL * 2.0f;
+		const float rw = TextWidthD(FontRow, e.tier.c_str(), GC::TierPx) + GC::TierPadR * 2.0f;
 
-		U::FrameTL(GC::StageX, GC::TierY, lw, GC::TierH, 2.0f, INK);
-		U::Text(FontRow, GC::StageX + 12.0f,
-		        GC::TierY + CenterInBox(GC::TierH, 14.0f), 14.0f, "TIER", INK);
+		U::FrameTL(GC::StageX, GC::TierY, lw, GC::TierH, 2.0f, Ink());
+		U::TextScaled(FontRow, GC::StageX + GC::TierPadL,
+			      GC::TierY + CenterInBox(GC::TierH, GC::TierPx),
+			      GC::TierPx, "TIER", Ink());
 
-		U::FrameTL(GC::StageX + lw, GC::TierY, rw, GC::TierH, 2.0f, INK);
-		U::Text(FontRow, GC::StageX + lw + 16.0f,
-		        GC::TierY + CenterInBox(GC::TierH, 14.0f), 14.0f, e.tier.c_str(), INK);
-	}
-
-	//===== アシッドの台 =====
-	// 斜めに切る。矩形で代用すると、画面の他の要素と同じ形になって
-	// 台に見えない
-	{
-		const float sh = GC::SlabW * GC::SlabShear;
-
-		const float quad[] = {
-			GC::SlabX + sh,           GC::SlabY,
-			GC::SlabX + GC::SlabW,    GC::SlabY,
-			GC::SlabX + GC::SlabW - sh, GC::SlabY + GC::SlabH,
-			GC::SlabX,                GC::SlabY + GC::SlabH,
-		};
-		U::PolyFillD(quad, 4, ACID);
-	}
-
-	//===== 車 =====
-	// 台の"後"に貼る。順番を逆にすると台が車を塗り潰す
-	if (auto p = m_wpPortrait.lock())
-	{
-		U::TexRectTL(p->GetTexture(), GC::CarX, GC::CarY, GC::CarW, GC::CarH);
+		// 等級そのものは車で変わるので、こちらは濃さだけ合わせる
+		U::FrameTL(GC::StageX + lw, GC::TierY, rw, GC::TierH, 2.0f, Ink());
+		U::TextScaled(FontRow, GC::StageX + lw + GC::TierPadR,
+			      GC::TierY + CenterInBox(GC::TierH, GC::TierPx),
+			      GC::TierPx, e.tier.c_str(), Ink(k));
 	}
 }
 
@@ -412,17 +502,88 @@ void GarageUI::DrawStage(const Entry& e) const
 //----------------------------------------------------------
 void GarageUI::DrawStats(const Entry& e) const
 {
-	const float x = UIConst::DesignW - GC::PadX - GC::StatW;
+	const float x = GC::DesignRight - GC::StatW;
 
 	for (size_t i = 0; i < e.stats.size(); ++i)
 	{
 		const float y = GC::StatY + i * GC::StatStep;
 
-		U::Text(FontRow, x, y, 14.0f, e.stats[i].label, INK);
+		U::TextScaled(FontRow, x, y, GC::StatPx, e.stats[i].label, Ink());
 
-		U::RectTL(x, y + 24.0f, GC::StatW, GC::StatBarH, INK, true);
-		U::RectTL(x, y + 24.0f, GC::StatW * e.stats[i].value, GC::StatBarH, ACID, true);
+		const float by = y + GC::StatBarDy;
+
+		// 地は薄く。暗い上では墨の地が背景と見分けが付かない
+		U::RectTL(x, by, GC::StatW, GC::StatBarH, Line(GC::BarBackAlpha), true);
+
+		// 長さは車の値ではなく、追いかけている長さ。
+		// 直に描くと、選び直した瞬間に別の長さへ跳ぶ
+		const float v = (i < m_barNow.size()) ? m_barNow[i] : e.stats[i].value;
+
+		U::RectTL(x, by, GC::StatW * v, GC::StatBarH, ACID, true);
 	}
+}
+
+//----------------------------------------------------------
+// 諸元表(左の列の下)
+//
+// 右の棒は「他と比べてどうか」しか言わない。
+// 実寸を並べて補うと、選ぶ手がかりが増えるうえ、
+// 台数が少ないときに空く左下も埋まる
+//----------------------------------------------------------
+void GarageUI::DrawSpec(const Entry& e) const
+{
+	U::TextScaled(FontFoot, GC::PadX, GC::SpecY, GC::SpecHeadPx, "SPEC", Sub());
+
+	float y = GC::SpecY + GC::SpecHeadGap;
+
+	int row = 0;
+
+	for (const auto& r : e.spec)
+	{
+		// 上の行から順に入ってくる。
+		// 一斉に出すと、表が丸ごと差し替わったように見える
+		const float k = EaseOut(StaggerT(m_animT, GC::SpecStagger * row));
+
+		// 横から入れる。薄いまま出すだけだと、何も動いていないように見える
+		const float dx = (1.0f - k) * GC::SpecSlide;
+
+		U::TextScaled(FontRow, GC::PadX + dx, y, GC::SpecPx, r.label, Sub(k));
+
+		// 値は右端で揃える。桁が変わっても列が崩れない
+		const float vw = TextWidthD(FontRow, r.value.c_str(), GC::SpecPx);
+
+		U::TextScaled(FontRow, GC::PadX + GC::ListW - vw + dx, y,
+			      GC::SpecPx, r.value.c_str(), Ink(k));
+
+		// 行の下に細い罫線。並びが表に見える
+		U::RectTL(GC::PadX, y + GC::SpecLineY, GC::ListW, 1.0f,
+			  Line(0.30f * k), true);
+
+		y += GC::SpecStep;
+		++row;
+	}
+}
+
+//----------------------------------------------------------
+// 下の帯の札の位置
+//
+// ■ 幅に上限を置く
+// 元絵は5台前提で、帯を等分して並べていた。
+// 台数が少ないまま等分すると1枚が画面幅いっぱいまで伸びて、
+// 車の札ではなく色の帯に見える。
+// 5台のときの幅を上限にして、余ったぶんは中央へ寄せる
+//----------------------------------------------------------
+void GarageUI::StripLayout(int n, float& outX, float& outW) const
+{
+	const float rightAx = GC::DesignRight - GC::ArrowW;
+
+	const float band = rightAx - (GC::PadX + GC::ArrowW) - GC::ArrowGap * 2.0f;
+
+	outW = std::min((band - GC::StripGap * (n - 1)) / n, GC::StripCellMax);
+
+	const float used = outW * n + GC::StripGap * (n - 1);
+
+	outX = GC::PadX + GC::ArrowW + GC::ArrowGap + (band - used) * 0.5f;
 }
 
 //----------------------------------------------------------
@@ -430,23 +591,23 @@ void GarageUI::DrawStats(const Entry& e) const
 //----------------------------------------------------------
 void GarageUI::DrawStrip() const
 {
-	const float rightAx = UIConst::DesignW - GC::PadX - GC::ArrowW;
+	const float rightAx = GC::DesignRight - GC::ArrowW;
 
-	U::FrameTL(GC::PadX, GC::StripY, GC::ArrowW, GC::StripH, 2.0f, INK);
-	U::TextC(FontTab, GC::PadX + GC::ArrowW * 0.5f,
-	         GC::StripY + CenterInBox(GC::StripH, 17.0f), 17.0f, "<", INK);
+	U::FrameTL(GC::PadX, GC::StripY, GC::ArrowW, GC::StripH, 2.0f, Ink());
+	U::TextScaledC(FontTab, GC::PadX + GC::ArrowW * 0.5f,
+	               GC::StripY + CenterInBox(GC::StripH, GC::ArrowPx),
+	               GC::ArrowPx, "<", Ink());
 
-	U::FrameTL(rightAx, GC::StripY, GC::ArrowW, GC::StripH, 2.0f, INK);
-	U::TextC(FontTab, rightAx + GC::ArrowW * 0.5f,
-	         GC::StripY + CenterInBox(GC::StripH, 17.0f), 17.0f, ">", INK);
+	U::FrameTL(rightAx, GC::StripY, GC::ArrowW, GC::StripH, 2.0f, Ink());
+	U::TextScaledC(FontTab, rightAx + GC::ArrowW * 0.5f,
+	               GC::StripY + CenterInBox(GC::StripH, GC::ArrowPx),
+	               GC::ArrowPx, ">", Ink());
 
 	const int n = static_cast<int>(m_entries.size());
 	if (n <= 0) { return; }
 
-	const float band = rightAx - (GC::PadX + GC::ArrowW) - GC::StripGap * 2.0f;
-	const float cw   = (band - GC::StripGap * (n - 1)) / n;
-
-	float x = GC::PadX + GC::ArrowW + GC::StripGap;
+	float x = 0.0f, cw = 0.0f;
+	StripLayout(n, x, cw);
 	for (int i = 0; i < n; ++i)
 	{
 		U::RectTL(x, GC::StripY, cw, GC::StripH, m_entries[i].swatch, true);
@@ -454,11 +615,11 @@ void GarageUI::DrawStrip() const
 		// 選んでいることは枠の太さで見せる。
 		// 光らせたり影を落としたりしない
 		U::FrameTL(x, GC::StripY, cw, GC::StripH,
-		           (i == m_sel) ? 3.0f : 2.0f, INK);
+		           (i == m_sel) ? 3.0f : 2.0f, Ink());
 
-		U::TextC(FontRow, x + cw * 0.5f,
-		         GC::StripY + GC::StripH - 26.0f, 14.0f,
-		         m_entries[i].model.c_str(), INK);
+		U::TextScaledC(FontRow, x + cw * 0.5f,
+		               GC::StripY + GC::StripH - GC::StripTextUp, GC::StatPx,
+		               m_entries[i].model.c_str(), INK);
 
 		x += cw + GC::StripGap;
 	}
@@ -467,29 +628,32 @@ void GarageUI::DrawStrip() const
 //----------------------------------------------------------
 void GarageUI::DrawSprite()
 {
-	U::RectTL(0.0f, 0.0f, UIConst::DesignW, UIConst::DesignH, PAPER, true);
+	// 地は塗らない。後ろは3Dの空間がそのまま見えている。
+	//
+	// 網点とぐにゃぐにゃの線もやめた。紙の上の図案だったもので、
+	// 空間の手前に浮くと窓に貼った紙くずに見える
 
 	if (m_entries.empty()) { return; }
 
 	const Entry& e = m_entries[std::clamp(m_sel, 0, static_cast<int>(m_entries.size()) - 1)];
 
-	// 背景。一番下に敷く
-	{
-		Math::Color loop = INK; loop.w = 0.22f;
-		DriftLoops(GC::LoopCx, GC::LoopCy, m_spin, loop);
-	}
-	for (int i = 0; i < GC::DotCount; ++i) { DotPatch(GC::Dots[i]); }
+	// 裁ち切りのトンボだけは残す。画面の端の飾りで、空間には掛からない
 	for (int i = 0; i < GC::TickCount; ++i) { CropTick(GC::TickYs[i]); }
 
 	DrawHeader();
 	DrawList();
+
 	DrawStage(e);
 	DrawStats(e);
+	DrawSpec(e);
 	DrawStrip();
 
 	//===== 下端のキー案内 =====
 	{
-		const float w1 = U::Keycap(GC::PadX, GC::KeyY, "ENTER", "SELECT");
-		U::Keycap(GC::PadX + w1 + 30.0f, GC::KeyY, "ESC", "BACK");
+		float x = GC::PadX;
+
+		x += U::Keycap(x, GC::KeyY, "ENTER", "SELECT") + GC::KeyGap;
+		x += U::Keycap(x, GC::KeyY, "Q / E", "TURN") + GC::KeyGap;
+		U::Keycap(x, GC::KeyY, "ESC", "BACK");
 	}
 }

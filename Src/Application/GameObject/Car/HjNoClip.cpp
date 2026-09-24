@@ -37,11 +37,15 @@ void HjNoClip::Update(CarBase& car, bool enabled, float dt)
 		// 動かしている間に回すと、位置を毎フレーム引き戻されて震える
 		m_haltedBefore = car.IsHalted();
 		car.SetHalted(true);
+
+		// 接地も切る。切らないと、止めている間も地面へ引き戻される
+		car.SetNoClip(true);
 	}
 	else if (!enabled && m_prev)
 	{
 		// 入る前へ戻す。着地した所からそのまま走れる
 		car.SetHalted(m_haltedBefore);
+		car.SetNoClip(false);
 	}
 	m_prev = enabled;
 

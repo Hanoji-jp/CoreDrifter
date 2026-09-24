@@ -76,38 +76,11 @@ float SplatNoise(float3 p)
 static const float k_RimPower    = 3.0f;   // 縁の鋭さ（大きいほど縁だけ光る）
 static const float k_RimStrength = 0.12f;  // 縁光の強さ（地上マップ向けに弱め。0で完全OFF）
 // トゥーンリム：縁光をくっきりした1本の帯にする（NFS Unbound風の輪郭発光）
-static const float k_RimThreshold = 0.35f; // この値を超えた縁だけ光る
-static const float k_RimSoftness  = 0.05f; // 帯の境界の柔らかさ
 // 擬似環境反射（スペキュラIBL近似）：滑らかな面に宇宙が映り込む
-static const float k_EnvReflectUpMul   = 4.0f;  // 上方向（星空側）の反射の明るさ倍率
-static const float k_EnvReflectDownMul = 0.8f;  // 下方向（暗い宇宙）の反射の明るさ倍率
 // トゥーン反射：映り込みの明るさを数段に量子化してアニメ調のバンドにする
-static const float k_EnvToonSteps = 3.0f;   // 反射の段数
-
 //=============================================================
 // トーンマッピング / 色変換
 //=============================================================
-
-// セル(トゥーン)ランプ：明るさ t を数段に量子化する。境界はわずかに滑らかにしてジャギを抑える。
-// シーン全体をアニメ調のフラットな陰影にして、暗い輪郭を際立たせる用途。
-float ToonRamp(float t)
-{
-	t = saturate(t);
-	// しきい値（暗→明）と各段の明るさ（3段：影 / 中 / 光）
-	const float t0 = 0.25f;   // 影→中 の境界
-	const float t1 = 0.60f;   // 中→光 の境界
-	const float lvShadow = 0.32f;
-	const float lvMid    = 0.66f;
-	const float lvLit    = 1.00f;
-	const float aa = 0.03f;   // 境界の柔らかさ
-
-	float s0 = smoothstep(t0 - aa, t0 + aa, t);
-	float s1 = smoothstep(t1 - aa, t1 + aa, t);
-	float lv = lvShadow;
-	lv = lerp(lv, lvMid, s0);
-	lv = lerp(lv, lvLit, s1);
-	return lv;
-}
 
 // ACES フィルミックトーンマッピング近似（HDR → LDR、FORZA等の映える階調）
 float3 ACESFilm(float3 x)
@@ -585,23 +558,23 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	//------------------------------------------
 	float3 outColor = 0.0f;
 
-	// ---- 平行光 (トゥーン/セルシェード) ----
-	// 明るさを段階化してフラットなアニメ調に。これで輪郭が際立つ。
+	// ---- 平行光 ----
+	// 受けた光の量をそのまま明るさにする。
+	// 段階化していたころは輪郭線と組で見せていたが、
+	// 線をやめたので陰影だけで形を出す
 	{
 		float3 lightDir = normalize(-g_DL_Dir);
 
-		// 自己陰影＋落ち影をまとめて段階化
+		// 自己陰影＋落ち影。受けた光の量をそのまま使う
 		float lightAmt = saturate(dot(wN, lightDir)) * shadow;
-		float toon     = ToonRamp(lightAmt);
-		outColor += albedo * g_DL_Color * toon;
+		outColor += albedo * g_DL_Color * lightAmt;
 
-		// トゥーンスペキュラ：くっきりした1段のハイライト
+		// ハイライト。境目を作らず、なだらかに落とす
 		float3 H   = normalize(vCam + lightDir);
 		float  ndh = saturate(dot(wN, H));
-		float  shininess = exp2(lerp(8.0f, 1.0f, roughness));   // 粗いほど鈍い
-		float  spec      = pow(ndh, shininess);
-		float  specToon  = smoothstep(0.48f, 0.52f, spec) * (1.0f - roughness);
-		outColor += g_DL_Color * specToon * shadow * 0.6f;
+		float  shininess = exp2(lerp(10.0f, 1.0f, roughness));  // 粗いほど鈍い
+		float  spec      = pow(ndh, shininess) * (1.0f - roughness);
+		outColor += g_DL_Color * spec * shadow * 0.6f;
 	}
 
 	// ---- 点光 (PBR Cook-Torrance) ----
@@ -628,6 +601,43 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 								 g_PointLights[i].Color, atte);
 	}
 
+	// ---- スポット光 ----
+	// 点光と同じ足し方に、円錐で切る処理を挟む。
+	//
+	// これが無いと、当てたい物を明るくしようとして置いた光が
+	// 床も壁も一緒に持ち上げてしまい、暗い場所でなくなる
+	for (int s = 0; s < g_SpotLightNum.x; ++s)
+	{
+		float3 toSpot = g_SpotLights[s].Pos - In.wPos;
+		float  spotDist = length(toSpot);
+		if (spotDist >= g_SpotLights[s].Range)
+			continue;
+
+		float3 spotDir = toSpot / spotDist;
+
+		// 光源から見て、その点が軸からどれだけ外れているか。
+		// spotDir は点から光源への向きなので、比べるときは裏返す
+		float cone = dot(-spotDir, g_SpotLights[s].Dir);
+		if (cone <= g_SpotLights[s].AngleCos)
+			continue;
+
+		// 内側から外側へ向かって落とす。
+		// 切りっぱなしだと縁が硬くなり、床に置いた円盤に見える
+		float edge = saturate((cone - g_SpotLights[s].AngleCos)
+								 / max(g_SpotLights[s].InnerCos - g_SpotLights[s].AngleCos, 0.0001f));
+		edge *= edge;
+
+		float spotAtte = 1.0f - saturate(spotDist / g_SpotLights[s].Range);
+		spotAtte *= spotAtte * edge;
+
+		// 明度ライト寄与。当たった所が滲む
+		totalBrightness += spotAtte;
+
+		outColor += CookTorrance(spotDir, vCam, wN,
+								 albedo, F0, roughness, metallic,
+								 g_SpotLights[s].Color, spotAtte);
+	}
+
 	// ---- 半球環境光（空色 / 地面色で影が黒くなるのを防ぐ）----
 	{
 		float hemi    = dot(wN, float3(0.0f, 1.0f, 0.0f)) * 0.5f + 0.5f;
@@ -637,15 +647,24 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 		outColor += ambient * baseColor.rgb * baseColor.a;
 	}
 
-	// ---- 擬似環境反射（スペキュラ IBL 近似）----
-	//   反射ベクトルの上下成分で「星空（上）／暗い宇宙（下）」を擬似的に映し込む。
+	// ---- 環境の映り込み（スペキュラ IBL 近似）----
+	//   まわりの景色を上・横・下の3色で持ち、反射の向きで混ぜて映し込む。
 	//   ラフネスが低い（つるつる）ほど強く、金属ほど色付きで反射する。
 	{
-		float3 R       = reflect(-vCam, wN);
-		float  upFac   = R.y * 0.5f + 0.5f; // 上向き=1, 下向き=0
-		// 環境色を上下でブレンド（上は星空寄りに明るく、下は暗く）
-		float3 envColor = g_AmbientLight.rgb *
-						  lerp(k_EnvReflectDownMul, k_EnvReflectUpMul, upFac);
+		float3 R = reflect(-vCam, wN);
+
+		// まわりの景色を上・横・下の3色から混ぜる。
+		//
+		// 前は環境光ひとつを上下で明暗させていただけで、
+		// 何も「映って」いなかった。車体が金属に見えないのはこれが原因。
+		// 3色でも向きで変われば、面ごとに違うものが映る
+		float up   = saturate( R.y);
+		float down = saturate(-R.y);
+		float side = saturate(1.0f - up - down);
+
+		float3 envColor = g_EnvUp.rgb * up
+		                + g_EnvSide.rgb * side
+		                + g_EnvDown.rgb * down;
 
 		// フレネル：浅い角度ほど反射が強い
 		float  NdotV    = saturate(dot(wN, vCam));
@@ -657,11 +676,6 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 		// 影の中では反射も弱める（影が反射光で洗い流されるのを防ぐ）
 		float3 envRefl = envColor * fresnel * glossy * lerp(0.4f, 1.0f, shadow);
 
-		// トゥーン化：反射の明るさを数段に量子化（滑らかなグラデ→アニメ調のバンド）
-		float  envLum  = dot(envRefl, float3(0.299f, 0.587f, 0.114f));
-		float  toonLum = floor(saturate(envLum) * k_EnvToonSteps + 0.5f) / k_EnvToonSteps;
-		envRefl *= toonLum / max(envLum, 1e-4f);
-
 		outColor += envRefl;
 	}
 
@@ -669,8 +683,6 @@ float4 main(VSOutput In, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 	{
 		float  NdotV = saturate(dot(wN, vCam));
 		float  rim   = pow(1.0f - NdotV, k_RimPower);
-		// トゥーン化：なだらかなグラデではなく、しきい値でくっきりした1本の帯にする
-		rim = smoothstep(k_RimThreshold - k_RimSoftness, k_RimThreshold + k_RimSoftness, rim);
 		// 平行光の当たっている側ほど縁が強く光る（逆光リムの自然さ）
 		float  backLit = saturate(dot(wN, normalize(-g_DL_Dir))) * 0.5f + 0.5f;
 		// 太陽光由来の縁光なので、影の中では消す（影を洗い流さない）

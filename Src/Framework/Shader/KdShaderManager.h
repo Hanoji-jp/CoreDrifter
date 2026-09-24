@@ -18,6 +18,40 @@ struct PointLight
 };
 
 //==========================
+// スポット光
+//
+// 点光に向きと開き角を付けたもの。
+//
+// 点光は全方向へ届くので、当てたい物を明るくすると、
+// まわりの床も壁も一緒に明るくなる。
+// 当てたい所だけを照らすには、円錐で切る必要がある
+//==========================
+struct SpotLight
+{
+	SpotLight() {}
+	SpotLight(const Math::Vector3& color, float range, const Math::Vector3& pos,
+		  const Math::Vector3& dir, float outerCos, float innerCos)
+		: Color(color), Range(range), Pos(pos), AngleCos(outerCos),
+		  Dir(dir), InnerCos(innerCos) {}
+
+	// 並びは HLSL 側の g_SpotLights と1バイトも違えられない。
+	// float3 + float で16バイトずつに収まるように組んである
+	Math::Vector3 Color;              // 色。強さも色の大きさで持つ
+	float         Range    = 10.0f;   // 届く距離
+
+	Math::Vector3 Pos;                // 光源の位置
+	float         AngleCos = 0.70f;   // 円錐の外側。これより外は届かない
+
+	Math::Vector3 Dir      = { 0.0f, -1.0f, 0.0f };   // 向き(正規化済み)
+	float         InnerCos = 0.90f;   // 円錐の内側。ここまでは減らさない
+};
+
+// 定数バッファへそのまま流し込むので、大きさが合っていないと
+// 2つめ以降が丸ごとずれる。気づくのは「なぜか光が変な所に出る」時
+static_assert(sizeof(PointLight) == 32, "HLSL の g_PointLights と並びが合わない");
+static_assert(sizeof(SpotLight)  == 48, "HLSL の g_SpotLights と並びが合わない");
+
+//==========================
 //
 // 各パイプラインステートの呼び出しID
 //
@@ -100,6 +134,7 @@ public:
 	struct cbLight
 	{
 		static const int	MaxPointLightNum = 100;
+		static const int	MaxSpotLightNum  = 8;
 
 		// 環境光
 		Math::Vector4		AmbientLight = { 0.3f, 0.3f, 0.3f, 1.0f };
@@ -113,6 +148,15 @@ public:
 		Math::Matrix		DirLight_mVP;					// ビュー行列と正射影行列の合成行列
 
 		//-----------------
+		// 環境の映り込み
+		//-----------------
+		// まわりの景色を上・横・下の3色で持つ。
+		// キューブマップの代わりで、向きで混ぜて反射に使う
+		Math::Vector4		EnvUp   = { 0.30f, 0.32f, 0.38f, 1.0f };
+		Math::Vector4		EnvSide = { 0.18f, 0.19f, 0.22f, 1.0f };
+		Math::Vector4		EnvDown = { 0.08f, 0.08f, 0.09f, 1.0f };
+
+		//-----------------
 		// 点光
 		//-----------------
 		// 使用数
@@ -120,6 +164,15 @@ public:
 		float			_blank3[3] = { 0.0f, 0.0f ,0.0f };
 
 		std::array<PointLight, MaxPointLightNum> PointLights;
+
+		//-----------------
+		// スポット光
+		//-----------------
+		// 使用数
+		int			SpotLight_Num = 0;
+		float		_blank4[3] = { 0.0f, 0.0f, 0.0f };
+
+		std::array<SpotLight, MaxSpotLightNum> SpotLights;
 	};
 
 	static KdShaderManager& Instance()
@@ -195,9 +248,20 @@ public:
 	void WriteCBHeightFog(const Math::Vector3& col, float top, float bottom, float beginDistance);
 
 	void WriteCBAmbientLight(const Math::Vector4& col);
+
+	// 環境の映り込み。上・横・下の3色
+	void WriteCBEnvColors(const Math::Vector4& up,
+	                      const Math::Vector4& side,
+	                      const Math::Vector4& down);
 	void WriteCBDirectionalLight(const Math::Vector3& dir, const Math::Vector3& col);
 	void WriteCBShadowArea(const Math::Matrix& proj, float dirLightHeight);
 	void WriteCBPointLight(const std::list<PointLight>& pointLights);
+
+	// スポット光。
+	//
+	// 空でも呼ぶこと。呼ばないと使用数が前のまま残り、
+	// 別の場面へ移っても前の場面の光が当たり続ける
+	void WriteCBSpotLight(const std::list<SpotLight>& spotLights);
 
 	//==========================
 	//

@@ -272,7 +272,11 @@ void SettingsUI::DrawSprite()
 	// 選ぶものではないので、行ではなく文章として出す
 	if (m_tab == kTabOther)
 	{
-		U::FrameTL(kPanelX, kPanelY, kPanelW, kRowH * 6.0f, 2.0f, INK);
+		// 枠の高さは件数から出す。
+		// 決め打ちにすると、借りものを1つ足した瞬間に枠から溢れる
+		const float creditH = 56.0f + CreditsConst::Count * 86.0f;
+
+		U::FrameTL(kPanelX, kPanelY, kPanelW, creditH, 2.0f, INK);
 
 		float y = kPanelY + 22.0f;
 

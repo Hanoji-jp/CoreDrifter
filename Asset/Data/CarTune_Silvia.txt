@@ -1,9 +1,9 @@
-bodyScale 1.68
+bodyScale 1.22
 bodyYaw 3.14159
-wheelScale 1.14
+wheelScale 1.12
 wheelYaw 0
-track 0.97
-base 1.49
+track 0.92
+base 1.52
 wheelH 0.35
 camber 0.0700001
 offX 0
@@ -12,7 +12,7 @@ bodyOffX 0
 bodyOffY 0
 bodyOffZ 0
 frontOffX 0
-frontOffZ -0.07
+frontOffZ 0.01
 rearOffX 0
 rearOffZ 0
 enginePower 41

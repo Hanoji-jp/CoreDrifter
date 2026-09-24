@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <cstring>
 #include <cctype>
+#include <algorithm>
 
 namespace
 {
@@ -15,6 +16,12 @@ namespace
     std::vector<uint8_t> g_buf;
     // 正規化パス -> (offset, size)
     std::unordered_map<std::string, std::pair<size_t, uint32_t>> g_index;
+
+    // 元の大小のままのパス一覧。
+    //
+    // 索引の鍵は小文字に直してあるので、名前を作る用途には使えない。
+    // 拾った名前で保存し、次に読み戻すときは別の名前になってしまう
+    std::vector<std::string> g_paths;
 
     // パス正規化：小文字化＋バックスラッシュ→スラッシュ＋先頭"./"除去
     std::string Normalize(const std::string& in)
@@ -65,6 +72,8 @@ namespace AssetVault
         if (!ReadU32(p, end, version)) { return; }
         if (!ReadU32(p, end, count))   { return; }
 
+        g_paths.reserve(count);
+
         for (uint32_t i = 0; i < count; ++i)
         {
             uint32_t pathLen = 0;
@@ -79,6 +88,7 @@ namespace AssetVault
 
             const size_t offset = static_cast<size_t>(p - g_buf.data());
             g_index[Normalize(rel)] = { offset, dataLen };
+            g_paths.push_back(rel);
             p += dataLen;
         }
     }
@@ -106,6 +116,28 @@ namespace AssetVault
         out = it->second.second;
         return true;
     }
+
+    void List(const std::string& dirPrefix, std::vector<std::string>& out)
+    {
+        out.clear();
+
+        const std::string pre = Normalize(dirPrefix);
+
+        for (const std::string& path : g_paths)
+        {
+            const std::string n = Normalize(path);
+            if (n.size() < pre.size())             { continue; }
+            if (n.compare(0, pre.size(), pre) != 0) { continue; }
+
+            out.push_back(path);
+        }
+
+        // 並びを決めておく。
+        //
+        // pak へ詰めた順で返すと、詰め方を変えた時に順が変わる。
+        // 番号で覚えている所があると、同じ番号が別の物を指す
+        std::sort(out.begin(), out.end());
+    }
 }
 
 #else // !DISTRIBUTE_BUILD
@@ -116,6 +148,7 @@ namespace AssetVault
     bool Exists(const std::string&) { return false; }
     bool Read(const std::string&, std::vector<uint8_t>&) { return false; }
     bool Size(const std::string&, size_t&) { return false; }
+    void List(const std::string&, std::vector<std::string>& out) { out.clear(); }
 }
 
 #endif

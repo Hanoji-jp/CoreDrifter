@@ -34,6 +34,18 @@ namespace CreditsConst
 			"CC-BY-4.0",
 			"sketchfab.com/3d-models/90-honda-nsx-flat-shaded",
 		},
+		{
+			"Shapespark low poly exterior plants kit",
+			"Shapespark (sketchfab.com/shapespark)",
+			"CC-BY-4.0",
+			"sketchfab.com/3d-models/shapespark-low-poly-exterior-plants-kit-de9e79fc07b748d1a6ac055b49ee5c67",
+		},
+		{
+			"Trees and bush Pack LOWPOLY",
+			"EFX (sketchfab.com/evan4129)",
+			"CC-BY-4.0",
+			"sketchfab.com/3d-models/trees-and-bush-pack-lowpoly-f2a25ee70df440c9ab03d57aba2dc3f2",
+		},
 	};
 
 	constexpr int Count = static_cast<int>(sizeof(Items) / sizeof(Items[0]));

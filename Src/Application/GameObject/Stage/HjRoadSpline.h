@@ -84,6 +84,24 @@ public:
 	float FlatAt(int index, int side) const;
 	void  SetFlatAt(int index, int side, float w);
 	float FlatAtS(float s, int side) const;
+
+	//===== 制御点ごとの擁壁の高さ(m) =====
+	// 0 なら壁なし。裾や平場と同じで区間ごとに変えたい。
+	//
+	// 高さで持つ理由は、有無だけだと「ここは低い壁でいい」が言えないため。
+	// 0 と 0 でない値の境目が、そのまま壁の始まりと終わりになる
+	float WallAt(int index, int side) const;
+	void  SetWallAt(int index, int side, float h);
+	float WallAtS(float s, int side) const;
+
+	//===== 制御点ごとのガードレール =====
+	// 0 なら無し、1 なら有り。間は繋ぐので、0.5 を境に切り替わる。
+	//
+	// 有無だけなので bool でよさそうだが、裾や擁壁と同じ float で持つ。
+	// 保存も補間も同じ仕組みに乗るので、片方だけ別扱いにしない
+	float RailAt(int index, int side) const;
+	void  SetRailAt(int index, int side, float on);
+	float RailAtS(float s, int side) const;
 	bool MovePoint(int index, const Math::Vector3& pos);
 
 	// 制御点の高さは「持ち上げ」として使う。
@@ -152,6 +170,12 @@ private:
 
 	// 制御点ごとの平場の幅(m)。同じく左が0、右が1
 	std::vector<float> m_flat[2];
+
+	// 制御点ごとの擁壁の高さ(m)。0=壁なし
+	std::vector<float> m_wall[2];
+
+	// 制御点ごとのガードレール。0=無し 1=有り
+	std::vector<float> m_rail[2];
 
 	// 裾の幅の数を、制御点の数へ合わせる
 	void SyncApron();

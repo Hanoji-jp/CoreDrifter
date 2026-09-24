@@ -8,7 +8,8 @@ class DriftScore;
 #include "../../GameObject/Car/HjCarTrail.h"   // 追走の手本(規約上constヘッダはinclude可)
 #include "../../GameObject/Stage/HjRoadEditor.h"   // 道の制御点を掴む(3D)
 #include "../../GameObject/Stage/HjRoadMap.h"      // 上から見て線を引く
-#include "../../GameObject/Stage/HjTerrainBrush.h" // 地形を筆で彫る
+#include "../../GameObject/Stage/HjTerrainBrush.h"   // 地形を筆で彫る
+#include "../../GameObject/Stage/HjPropEditor.h"  // 飾りを置く
 #include "../../GameObject/Car/HjNoClip.h"        // 車ごと飛ばす
 
 class GameScene : public BaseScene
@@ -46,6 +47,31 @@ private:
 
 	// 道に沿うガードレール。地形の落ち方から自動で置く
 	std::shared_ptr<class HjGuardRail> m_spRail;
+
+	// 山側の擁壁。制御点ごとの高さから組む
+	std::shared_ptr<class HjRetainWall> m_spWall;
+
+	// 路面標示(白線)。道を作り直したら組み直す
+	std::shared_ptr<class HjRoadMark> m_spMark;
+
+	// 視線誘導標。カーブの外側に立てる
+	std::shared_ptr<class HjDelineator> m_spDelin;
+
+	// カーブ注意の標識。入口の手前に立てる
+	std::shared_ptr<class HjRoadSign> m_spSign;
+
+	// カーブミラー。きついカーブの外側に立てる
+	std::shared_ptr<class HjCurveMirror> m_spMirror;
+
+	// 飾りを置く操作。入れている間は制御点を掴む処理を止める
+	// (同じ左ボタンを見ているため)
+	HjPropEditor m_propEditor;
+
+	// 手で置く飾り(木・低木)。モデルを置く
+	std::shared_ptr<class HjProps> m_spProps;
+
+	// 木と草。地形を彫り直したら生やし直す
+	std::shared_ptr<class HjFoliage> m_spFoliage;
 
 	// 道を編集しているか。編集中だけ制御点をギズモで掴める
 	bool m_roadEditing = false;
@@ -102,6 +128,12 @@ private:
 	// 既にあるエディタ基盤へ乗せるので、ギズモもUndoもそのまま使える
 	// 走りながら使う小細工(自由に飛ぶ / 相手を透かす)
 	void UpdateCheats();
+
+	// 編集したものを一度に書き出す。
+	//
+	// 保存先は別々のファイルだが、押す側から見れば
+	// 「いまの状態を残す」の1つで足りる
+	void SaveAllEdits();
 
 	void UpdateRoadEdit();
 

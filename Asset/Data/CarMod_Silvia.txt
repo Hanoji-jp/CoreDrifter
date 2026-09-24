@@ -1,2 +1,2 @@
-body Asset/Mods/Body/scene.gltf
+body -
 wheel -

@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "../../Const/CarConst.h"        // 既定値(規約上constヘッダはinclude可)
+#include "HjCarRigid.h"                 // 6自由度の剛体で走らせる側
 #include "../../Const/AlignmentConst.h"  // アライメント/サスセッティング既定値
 #include "../Effect/DriftSmoke.h"        // ドリフトスモーク(後輪の煙)
 #include "../Effect/DriftNeon.h"         // タイヤ周りのネオン線画(Unbound風)
@@ -62,6 +63,20 @@ public:
 
 	// 追従カメラ等から参照
 	Math::Vector3 GetPos()     const override { return m_pos; }
+
+	// 位置を直に置く。
+	//
+	// ■ なぜ上書きが要るか
+	// 枠組みの SetPos はワールド行列へ書くだけで、車が実際に使う
+	// m_pos には触らない。GetPos は上書きして m_pos を返すので、
+	// 対にしておかないと「読んで足して書く」が噛み合わない。
+	//
+	// すり抜け(ノークリップ)がまさにそれで、読みは m_pos、
+	// 書きはワールド行列という形になっていて動かなかった。
+	//
+	// 剛体で走らせているときは、そちらの位置も合わせる。
+	// 合わせないと、次のフレームに剛体の位置へ引き戻される
+	void SetPos(const Math::Vector3& pos) override;
 	float         GetYaw()     const          { return m_yaw; }
 	Math::Vector3 GetForward() const          { return Math::Vector3(sinf(m_yaw), 0.0f, cosf(m_yaw)); }
 	Math::Vector3 GetVel()     const          { return m_vel; }   // ドリフトカメラ用(進行方向)
@@ -241,7 +256,16 @@ public:
 	// 設定を当てた車から直接読ませる
 	//===== 車庫の見せ札 =====
 	// 止まった姿だけを描く。走行中の演出は乗せない
-	void DrawPortrait(const Math::Matrix& world);
+	// 車庫の絵。outlineMul に 0 を渡すと輪郭を描かない。
+	// col は掛ける色。映り込みを薄く出すのに使う
+	void DrawPortrait(const Math::Matrix& world, float outlineMul = 1.0f,
+	                  const Math::Color& col = kWhiteColor);
+
+	// 車体と車輪をそのまま描くだけ。色も輪郭も付けない。
+	//
+	// 影の元になる深度を書くのに使う。
+	// 深度マップの生成では色も縁取りも要らない
+	void DrawPortraitPlain(const Math::Matrix& world);
 
 	// 絵を出すのに要るモデルだけ読む(Init は呼ばない)
 	void LoadPreviewModels();
@@ -257,9 +281,36 @@ public:
 	float GetMuFrontSpec()     const { return m_muFront; }
 	float GetMuRearSpec()      const { return m_muRear; }
 
+	// 寸法。車庫の諸元表が出す。半分で持っているので倍にして使う
+	float GetTrackSpec() const { return m_track; }
+	float GetBaseSpec()  const { return m_base; }
+
 	const HjGamePad& GetPad() const { return m_pad; }
 
 	void SetHalted(bool halted) { m_halted = halted; }
+
+	// 地形をすり抜ける。見回るときだけ。
+	//
+	// 止めるだけでは足りない。止めている間も接地は続けているので、
+	// 持ち上げた車が毎フレーム地面へ引き戻されて浮かない
+	//===== 剛体で走らせるか =====
+	//
+	// 旧モデルは3自由度の平面モデルで、姿勢は4輪のレイから
+	// 推定していた。片輪が浮く・転倒する、が原理的に出せない。
+	//
+	// 切り替えられるようにしてあるのは、詰め終わるまで
+	// 見比べる必要があるため。落ち着いたら旧側を消す
+	void SetRigid(bool on);
+	bool IsRigid() const { return m_useRigid; }
+
+	// 剛体側へ地面を渡す。場面が持っているものを借りる
+	void SetRigidGround(const HjHeightField* field, const HjRoad* road)
+	{
+		m_rigid.SetGround(field, road);
+	}
+
+	void SetNoClip(bool on) { m_noClip = on; }
+	bool IsNoClip() const { return m_noClip; }
 	bool IsHalted() const { return m_halted; }
 
 	// 記憶したスポーン地点へ戻す(Rキーのリスポーン)
@@ -308,6 +359,33 @@ protected:
 	// 車体アライン：アクセルオフで車体を進行方向へ寄せるアシスト。
 	// 物理の積分結果(m_yaw)を直接書き換えるので、アシスト群として切り離してある。
 	void UpdateBodyAlignAssist(float dt, float vLong0, bool handbrake);
+
+	//===== ドリフトの手ざわりを作る処理 =====
+	// 旧モデルと剛体の両方から呼ぶ。
+	//
+	// 挙動そのものなので、片方だけ書き換えると乗り味がずれる。
+	// 下回り(平面モデルか剛体か)を替えても、ここが同じなら
+	// ドリフトの感触は変わらない
+
+	// 舵角(m_steer)を決める。オートカウンターを含む
+	void UpdateSteerAngle(float dt, float steerInput, float throttle,
+	                      bool handbrake, float vLong0, float vLat0, float speedNow);
+
+	// 振り返しの後押し。切った向きへ足すヨー加速度(rad/s^2)を返す
+	float TransitionYawBoost(float steerInput, float vLong0, float vLat0) const;
+
+	// スピン防止。抑えるべきヨーの割合(1/秒)を返す。0なら効かない
+	float SpinAssistRate(float steerInput, bool handbrake,
+	                     float vLong, float vLat, float yawRate) const;
+
+	// 後退ギア(R)の断続
+	void UpdateReverseGear(float dt, float throttle, bool handbrake, float vLong0);
+
+	// 調整値を剛体へ渡す。
+	//
+	// 毎フレーム渡す。切り替えた時だけだと、調整パネルで値を変えても
+	// 走りが変わらず「触っても何も起きない」つまみになる
+	void ApplyRigidSetup();
 
 	// サスペンションのロール/ピッチ。見た目だけで挙動には影響しない。
 	void UpdateSuspensionVisual(float dt);
@@ -375,6 +453,20 @@ protected:
 	// 物理の結果を見た目へ反映する。タイヤの回転と、走行状態に応じた
 	// エフェクト(煙・ネオン・タイヤ痕)の放出。挙動には影響しない。
 	void UpdateMotionFeedback(float dt, bool handbrake, float throttle);
+
+	//===== 音 =====
+	// ここにまとめてあるのは、旧モデルと剛体で同じものを
+	// 鳴らすため。片方にしか無いと、下回りを入れ替えたとたんに
+	// 無音になる
+
+	// レブの効き具合(0〜1)。トルクを絞る側と音の両方が読む
+	float RevCut() const;
+
+	// エンジン音を進める。throttle は符号付きのまま渡してよい
+	void UpdateEngineAudio(float dt, float throttle);
+
+	// 音源と聴取点の位置を渡す。渡さないと距離も方向も出ない
+	void PlaceAudio();
 
 	void DrawTuningImGui();
 	void DrawModImGui();   // 見た目の差し替え(調整パネルの中の1区画)
@@ -557,7 +649,12 @@ protected:
 	float m_rearOffX = 0.0f,  m_rearOffZ = 0.0f;   // 後輪のみ
 
 	// アウトライン(原神式・背面押し出しトゥーン輪郭)
-	bool          m_outlineEnabled = true;
+	// 車体の背面押し出しによる縁取り。
+	//
+	// セルシェードをやめたので既定は切り。
+	// 陰影で形を見せる絵に、線で形を囲う描き方を混ぜると
+	// どちらの約束で描いているのか分からなくなる
+	bool          m_outlineEnabled = false;
 	float         m_outlineWidth   = 0.04f;
 	Math::Vector3 m_outlineColor    = Math::Vector3(0.0f, 0.0f, 0.0f); // 黒
 
@@ -599,6 +696,17 @@ private:
 	bool          m_handbrakeNow = false;
 	// 走行を止めているか(観戦中など)
 	bool          m_halted = false;
+
+	// 地形をすり抜けているか。接地を取らなくなる
+	bool          m_noClip = false;
+
+	//===== 剛体 =====
+	// 旧モデルと並べて持つ。切り替えて見比べるため
+	bool       m_useRigid = false;
+	HjCarRigid m_rigid;
+
+	// 剛体で1フレーム進める。旧モデルの代わりに呼ぶ
+	void UpdateRigid(float dt);
 	// 通信で受け取った姿勢。設定されていれば角度より優先する
 	Math::Quaternion m_netRotation;
 	bool             m_useNetRotation = false;
